@@ -3,9 +3,10 @@
  * answers. No session is needed: the choice is the device's (the `__Host-orbes_device` cookie, http/device.ts) and, when
  * an account is signed in, the account's too.
  *
- *   GET  /api/v1/consent   `{ ads: { on, choice, textVersion } }` (AdsService.state): off, nothing more is read; on, the
- *                          account's latest choice when signed in, else the device's (null: none, the banner shows).
- *                          Writes nothing and sets no cookie.
+ *   GET  /api/v1/consent   `{ ads: { on, choice, textVersion, since } }` (AdsService.state): off, nothing more is read;
+ *                          on, the account's latest choice when signed in, else the device's (null: none, the banner
+ *                          shows), and the Paris day the switch was turned on (/legal/privacy reads it, lot M4 step
+ *                          M4.14). Writes nothing and sets no cookie.
  *   POST /api/v1/consent   `{ choice, clicks? }` (consentBody): the banner's ACCEPT (GRANTED) or DECLINE (DECLINED), with
  *                          the click ids the address carried (kept only with GRANTED); 409 ADS_OFF while off. The
  *                          device cookie is set when there is none, as /api/v1/seen does. Answers the state after it.

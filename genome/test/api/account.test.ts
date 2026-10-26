@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hashSessionToken } from '../../src/server/services/sessions.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { ADS_TEXT_VERSION } from '../../src/server/services/ads.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('account API', () => {
@@ -561,13 +562,14 @@ describe('ADVERTISING MEASUREMENT (lot M4 plan §3.2, §3.4, K27 A4): GET / PUT 
     expect(await rowsOf(account)).toEqual([]);
 
     await h.ctx.services.ads.setSwitch(true, 'SWITCH ON', admin);
+    const since = parisDay(h.clock.now());
     const read = await c.get('/api/v1/account/ads-consent');
     expect(read.statusCode).toBe(200);
     expect(read.headers['cache-control']).toBe('no-store');
-    expect(safeJson(read)).toEqual({ ads: { on: true, choice: null, textVersion: ADS_TEXT_VERSION } });
+    expect(safeJson(read)).toEqual({ ads: { on: true, choice: null, textVersion: ADS_TEXT_VERSION, since } });
     const on = await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'GRANTED' } });
     expect(on.statusCode).toBe(200);
-    expect(safeJson(on)).toEqual({ ads: { on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION } });
+    expect(safeJson(on)).toEqual({ ads: { on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION, since } });
     expect((await rowsOf(account)).at(-1)).toMatchObject({ choice: 'GRANTED', source: 'ACCOUNT', device_id: null, text_version: ADS_TEXT_VERSION, user_agent: expect.stringMatching(/^Mozilla\/5\.0/) });
     // A click id the account holds goes when it turns OFF; the change needs the CSRF token, and a choice it knows.
     const device = await h.ctx.db.selectFrom('tracking_devices').select('id').orderBy('id').executeTakeFirstOrThrow();
@@ -577,7 +579,7 @@ describe('ADVERTISING MEASUREMENT (lot M4 plan §3.2, §3.4, K27 A4): GET / PUT 
     expect((await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'NO' } })).statusCode).toBe(400);
     h.clock.advance(1_000);
     const off = await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'DECLINED' } });
-    expect(safeJson(off)).toEqual({ ads: { on: true, choice: 'DECLINED', textVersion: ADS_TEXT_VERSION } });
+    expect(safeJson(off)).toEqual({ ads: { on: true, choice: 'DECLINED', textVersion: ADS_TEXT_VERSION, since } });
     expect((await rowsOf(account)).at(-1)).toMatchObject({ choice: 'DECLINED', source: 'ACCOUNT', user_agent: null });
     expect(await h.ctx.db.selectFrom('ad_clicks').select('id').where('account_id', '=', account).execute()).toEqual([]);
     expect(safeJson(await c.get('/api/v1/account/ads-consent'))).toMatchObject({ ads: { choice: 'DECLINED' } });

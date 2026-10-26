@@ -48,6 +48,11 @@
   row-gap: 8px;
 }
 
+/* While conversions are switched on (lot M4, K27 A4): « Advertising measurement: since … », under the version line. */
+.legal__ads-since {
+  margin-top: 8px;
+}
+
 .legal-lang {
   flex: none;
   white-space: nowrap;

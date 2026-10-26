@@ -48,6 +48,7 @@ import {
 import { AuditService } from '../../src/server/services/audit.js';
 import { LinkService } from '../../src/server/services/links.js';
 import { PlaceService } from '../../src/server/services/places.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { TrackingService } from '../../src/server/services/tracking.js';
 import { createManualClock, type Actor } from '../../src/server/types.js';
 import { ADS_TEXT_VERSION as WEB_ADS_TEXT_VERSION } from '../../src/web/legal/content/privacy-ads.js';
@@ -92,6 +93,8 @@ describe('AdsService (K27, plan §3.2)', () => {
   const src: Record<'instagram' | 'tiktok' | 'press', number> = { instagram: 0, tiktok: 0, press: 0 };
 
   const now = () => clock.now();
+  /** The Paris day of the switch on in force (the state's `since`, /legal/privacy's line under its version). */
+  const since = async (): Promise<string> => parisDay((await db.selectFrom('ads_settings').select('switched_at').where('id', '=', 1).executeTakeFirstOrThrow()).switched_at!);
   const ago = (ms: number) => new Date(clock.now().getTime() - ms);
   const make = (keys: AdsConfig) => new AdsService({ db, audit: new AuditService({ db, clock: clock.now }), keys, cookieSecret: SECRET, publicOrigin: ORIGIN, clock: clock.now, testOrigin: fake.origin });
 
@@ -195,7 +198,7 @@ describe('AdsService (K27, plan §3.2)', () => {
     expect(await refusal(ads.choose({ deviceId: null, accountId: a, choice: 'GRANTED', source: 'BANNER', userAgent: UA, clicks: { fbclid: 'IwAR0off' } }))).toEqual({ code: 'ADS_OFF', status: 409 });
     expect(await refusal(ads.requireOn())).toEqual({ code: 'ADS_OFF', status: 409 });
     expect(await db.selectFrom('ad_clicks').select('id').execute()).toEqual([]);
-    expect(await ads.state(null, a)).toEqual({ on: false, choice: null, textVersion: ADS_TEXT_VERSION });
+    expect(await ads.state(null, a)).toEqual({ on: false, choice: null, textVersion: ADS_TEXT_VERSION, since: null });
     expect(await ads.sendDue(now())).toEqual({ sent: 0, retried: 0, failed: 0, skipped: 0, cancelled: 0 });
     expect(fake.requests).toEqual([]);
     expect(await refusal(ads.sendTest('META', actor))).toEqual({ code: 'ADS_OFF', status: 409 });
@@ -211,6 +214,8 @@ describe('AdsService (K27, plan §3.2)', () => {
     const early = await conversion('SIGNUP', before, src.instagram, ago(5 * MIN));
     const view = await ads.setSwitch(true, 'switch on', actor);
     expect(view).toMatchObject({ on: true, eventsFrom: now(), switchedAt: now(), switchedBy: { id: actor.id, email: 'ads-admin@orbes.test' } });
+    // The collector app and /legal/privacy read the Paris day of the switch on (step M4.14).
+    expect(await ads.state(null, before)).toEqual({ on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION, since: parisDay(now()) });
     expect(await pass()).toEqual({ queued: 0, skipped: 0 });
     expect(await eventsOf(early)).toEqual([]);
     // Written after the switch, but acted before it: still never.
@@ -279,7 +284,7 @@ describe('AdsService (K27, plan §3.2)', () => {
     expect(await eventsOf(queued)).toEqual([{ platform: 'META', kind: 'SIGNUP', status: 'QUEUED', skip_reason: null }]);
     await ads.choose({ deviceId: null, accountId: withdrawn, choice: 'DECLINED', source: 'ACCOUNT', userAgent: UA });
     expect(await eventsOf(queued)).toEqual([{ platform: 'META', kind: 'SIGNUP', status: 'CANCELLED', skip_reason: null }]);
-    expect(await ads.state(null, withdrawn)).toEqual({ on: true, choice: 'DECLINED', textVersion: ADS_TEXT_VERSION });
+    expect(await ads.state(null, withdrawn)).toEqual({ on: true, choice: 'DECLINED', textVersion: ADS_TEXT_VERSION, since: await since() });
   });
 
   it('cancels at send time an event whose collector withdrew since it was queued', async () => {
@@ -299,7 +304,7 @@ describe('AdsService (K27, plan §3.2)', () => {
     const dev = await device();
     clock.advance(MIN);
     const state = await ads.choose({ deviceId: dev, accountId: null, choice: 'GRANTED', source: 'BANNER', userAgent: UA, clicks: { fbclid: 'IwAR0carried', ttclid: 'tt carried' } });
-    expect(state).toEqual({ on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION });
+    expect(state).toEqual({ on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION, since: await since() });
     // The malformed ttclid (a space) dropped; the fbclid kept on the device.
     expect(await db.selectFrom('ad_clicks').select(['kind', 'click_id', 'account_id']).where('device_id', '=', dev).execute()).toEqual([{ kind: 'FBCLID', click_id: 'IwAR0carried', account_id: null }]);
     const chosenAt = now();

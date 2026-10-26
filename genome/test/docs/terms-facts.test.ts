@@ -710,6 +710,21 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a piece won free claimed within 30 days, PAID at no cost (D20, N12)': "const paid = await step(tx, o, { to: 'PAID', note: null }, actor, at, notes, this.mail);",
   'a piece won free not claimed cancelled (D20)': "await step(tx, o, { to: 'CANCELLED', note: VAULT_NOT_CLAIMED }, SYSTEM_ACTOR, now, notes, this.mail);",
   'a right to buy within 24 hours at its usual price (round 2)': 'throw vaultOfferEnded(VAULT_BUY_ENDED);',
+  // Lot M4 of the macro plan (K49 P3, P-legal, L2; plan §6, step M4.14): the privacy policy's partner paragraph, §31's four
+  // facts: opt-in, YES only, the headcount otherwise, untick until the event.
+  'a name shared with a partner on the guest\'s choice only, off by default (P3)': "if (opts.shareName === true && !partner) throw shareNotOffered();",
+  'a name shared with a YES only, a NO clears it (P3)': "if (opts.shareName === true && answer !== 'YES') throw validationError('A name is shared with a YES only.');",
+  'the partner gets the headcount, the names of those who chose only (P3)': 'return { experienceId: id, headcount: rows.length, sharedCount: shared.length, shared };',
+  'the choice changed and unticked until the event begins (P3)': 'if (p.event_at && now.getTime() >= p.event_at.getTime()) throw eventBegun();',
+  // K27 (A1 to A5; plan §3.1, §6): the advertising rules as code facts, applying while K27 is switched on: off by default,
+  // consent before any event, §3.1's lists (only the platforms the collector came from, what is sent, what never is).
+  'advertising measurement off by default (A1)': 'return s?.enabled === true;',
+  'no event without the consent at the act\'s time (A4)': "if (c.consent !== 'GRANTED') continue;",
+  'only the platforms the collector came from (A3)': 'return ADS_PLATFORMS.filter((p) => mapped.includes(p)',
+  'what a platform receives, at most (§3.1)': 'export interface AdEvent {',
+  'never a test entrant, the team or an account not ACTIVE (§3.1)': "WHERE a.status = 'ACTIVE' AND ${notTestEntrant('cand.account_id')} AND NOT ${houseAccount('cand.account_id')}",
+  'never a GIFT, an EXCHANGE, a VAULT order at 0 or a Shopify order (§3.1, S2)': 'return order.shopify_order_id === null;',
+  'never an act past the platform\'s age (§3.1)': "if (now.getTime() - actAt.getTime() > AD_MAX_AGE_DAYS[platform] * DAY_MS) return 'TOO_OLD';",
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────

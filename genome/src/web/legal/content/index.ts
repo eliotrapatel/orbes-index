@@ -105,8 +105,17 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * unclaimed; one bought at its usual price within its 24-hour right to buy), and the privacy policy's invitation block
  * adds the vaults kept with the account and the vault a credit to give accepted came from, kept while the account exists
  * and in the copy of its data. The version stays 2026-10-26.
+ * 2026-10-27 is the version of lot M4 of the macro scope (owner's decisions K49 P3, K27 A4 and L2; plan step M4.14): the
+ * privacy policy's circle gains one paragraph, a partner's experience (with a YES, the guest may tick to share their
+ * first and last name with the partner, who otherwise receives only the number of guests; untick until the event
+ * begins; the choice in the copy of the data). The terms are unchanged; the margin and THE VAULT's cost need no text.
+ * The advertising measurement (K27) is not in DOCUMENTS: its section and its two sentences (privacy-ads.ts, its own
+ * ADS_TEXT_VERSION and fingerprint) show only while the console's conversions are switched on. The date of the lot's
+ * final legal commit, never Q3's published 2026-10-26 (that commit falls on 26 October in Paris: the day after it).
+ * Article 11 did not change: CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version in force
+ * move with it.
  */
-export const LEGAL_VERSION = '2026-10-26';
+export const LEGAL_VERSION = '2026-10-27';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

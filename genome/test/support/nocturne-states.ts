@@ -821,6 +821,25 @@ async function openAdsRow(run: StateRun): Promise<void> {
   await group.scrollIntoViewIfNeeded();
 }
 
+/** /legal/privacy drawn again once conversions read on (lot M4, step M4.14): the section and the line under the version. */
+const ADS_PRIVACY_READY = 'main.legal .legal-meta + .legal__ads-since';
+/**
+ * The privacy policy while on, as plan M4 §6 draws it: Advertising measurement right after WORN, « since » right under the
+ * version line, the cookies' sentence in its 'on' words with its link to the section, nothing wider than the window.
+ */
+async function adsPrivacyHolds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const problems: string[] = [];
+    const ids = [...document.querySelectorAll<HTMLElement>('main.legal .legal__heading[id]')].map((el) => el.id);
+    if (ids[ids.indexOf('worn') + 1] !== 'ads') problems.push(`the sections read ${ids.join(', ')}`);
+    if (!document.querySelector('main.legal .legal-meta + .legal__ads-since')) problems.push('no line under the version line');
+    const cookies = document.getElementById('cookies')?.closest('section');
+    if (!cookies?.querySelector('a.legal__link[href="#ads"]')) problems.push("the cookies' sentence does not lead to #ads");
+    if (document.documentElement.scrollWidth > innerWidth) problems.push('the page scrolls sideways');
+    return problems;
+  });
+}
+
 /**
  * Conversions switched on (lot M4, step M4.13; K27 A4; plan M4 §3.4, §7) on the stage `ads`: the consent banner on NOW for
  * an account that holds no choice (shown, in light, ONE MOMENT… while ACCEPT is saved, refused); YOUR PROFILE's ADVERTISING
@@ -906,6 +925,11 @@ const ADS_STATES: readonly UiState[] = [
     ready: `${ACCT} .n-profile__ads-error:not([hidden])`,
     viewport: true,
   },
+  // The privacy policy while conversions are switched on (lot M4, step M4.14; plan M4 §6, A4): its section Advertising
+  // measurement after WORN, its two sentences in their 'on' words, and the line under the version line (EN, FR, light).
+  { id: 'legal-privacy-ads', title: 'The legal pages: PRIVACY, conversions on: Advertising measurement after WORN, its two sentences, since 5 October 2026 under the version', refs: ['M4 A4'], variant: 'ads', path: at('/legal/privacy'), ready: ADS_PRIVACY_READY, check: adsPrivacyHolds },
+  { id: 'legal-privacy-ads-fr', title: 'The legal pages in French: CONFIDENTIALITÉ, conversions on: Mesure publicitaire', refs: ['M4 A4'], variant: 'ads', path: at('/legal/privacy?lang=fr'), ready: ADS_PRIVACY_READY, check: adsPrivacyHolds },
+  { id: 'legal-privacy-ads-light', title: 'PRIVACY, conversions on, in light mode', refs: ['M4 A4'], variant: 'ads', path: at('/legal/privacy'), light: true, ready: ADS_PRIVACY_READY },
 ];
 
 /** The states of the phone (and the boutique board's screen): those of the NOCTURNE baseline at c3d25c2. */
@@ -4040,6 +4064,10 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('ads-banner-light'), 1440, { light: true, name: 'ads-banner' }),
     onDesk(phoneState('ads-account-on-light'), 1440, { light: true, name: 'ads-account-on' }),
     ...desk(1024, 'ads-banner'),
+    // The privacy policy while on (step M4.14): its section beside the list of sections (also in light and at 1024 × 768).
+    ...desk(1440, 'legal-privacy-ads'),
+    onDesk(phoneState('legal-privacy-ads-light'), 1440, { light: true, name: 'legal-privacy-ads' }),
+    ...desk(1024, 'legal-privacy-ads'),
   ],
 });
 

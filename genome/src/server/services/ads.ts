@@ -3,8 +3,10 @@
  * §3.2, §3.7; migration 0065), built and switched off: off (the default, and the state at deployment), nothing is
  * captured, queued, sent or shown. One console setting (ADMIN, Links → Ad platforms) switches it on.
  *
- *   state      `state(deviceId, accountId)` → `{ on, choice, textVersion }`: the account's latest choice when signed in,
- *              else the device's; `textVersion` the advertising text's version in force (ADS_TEXT_VERSION).
+ *   state      `state(deviceId, accountId)` → `{ on, choice, textVersion, since }`: the account's latest choice when signed
+ *              in, else the device's; `textVersion` the advertising text's version in force (ADS_TEXT_VERSION); `since`
+ *              the Paris day the switch was turned on (null while off), which /legal/privacy shows under its version line
+ *              with the Advertising measurement section (lot M4 plan §6, step M4.14).
  *   choose     a collector's choice (A4), the banner's (BANNER) or ACCOUNT's (ACCOUNT): 409 ADS_OFF while off; a new
  *              `ad_consents` row each time (never changed: the proof of consent), with the advertising text's version
  *              and, with GRANTED only, the browser's user agent and the platforms' click ids the address carried
@@ -175,6 +177,8 @@ export interface AdsState {
   choice: AdConsentChoice | null;
   /** The advertising text's version in force. */
   textVersion: string;
+  /** While on, the Paris day (`YYYY-MM-DD`) the switch was turned on (/legal/privacy's « since »); null while off. */
+  since: string | null;
 }
 
 /** The click ids the address carried, by their parameter (`fbclid`, `ttclid`, `gclid`, `gbraid`, `wbraid`). */
@@ -322,6 +326,11 @@ export function recordedUserAgent(userAgent: string | null | undefined): string 
   return one === '' ? null : [...one].slice(0, AD_USER_AGENT_MAX).join('');
 }
 
+/** The Paris day a switch on happened (a row on always has its time: migration 0065's CHECK). */
+function sinceOf(switchedAt: Date | null): string | null {
+  return switchedAt === null ? null : parisDay(new Date(switchedAt));
+}
+
 function adminOf(actor: Actor): string {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID.test(actor.id)) throw forbidden('Only ORBES staff change the ad platforms.');
   return actor.id;
@@ -426,8 +435,9 @@ export class AdsService {
 
   /** `{ on, choice, textVersion }`: the account's latest choice when signed in, else the device's (see the header). */
   async state(deviceId: number | null, accountId: string | null, db: Db = this.db): Promise<AdsState> {
-    if (!(await this.isOn(db))) return { on: false, choice: null, textVersion: ADS_TEXT_VERSION };
-    return { on: true, choice: await this.latestChoice(db, deviceId, accountId), textVersion: ADS_TEXT_VERSION };
+    const s = await db.selectFrom('ads_settings').select(['enabled', 'switched_at']).where('id', '=', 1).executeTakeFirst();
+    if (s?.enabled !== true) return { on: false, choice: null, textVersion: ADS_TEXT_VERSION, since: null };
+    return { on: true, choice: await this.latestChoice(db, deviceId, accountId), textVersion: ADS_TEXT_VERSION, since: sinceOf(s.switched_at) };
   }
 
   private async latestChoice(db: Db, deviceId: number | null, accountId: string | null): Promise<AdConsentChoice | null> {
@@ -451,7 +461,7 @@ export class AdsService {
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
       // FOR SHARE: a switch off waits for the choice, and its cancellation then sees what this choice queued nothing for.
-      const s = await tx.selectFrom('ads_settings').select('enabled').where('id', '=', 1).forShare().executeTakeFirst();
+      const s = await tx.selectFrom('ads_settings').select(['enabled', 'switched_at']).where('id', '=', 1).forShare().executeTakeFirst();
       if (s?.enabled !== true) throw adsOff();
       let deviceId = input.deviceId ?? null;
       if (deviceId === null && input.deviceHash) {
@@ -494,7 +504,7 @@ export class AdsService {
           .execute();
         if (input.accountId !== null) await cancelAccountAdEvents(tx, input.accountId, now, AD_CANCELLED_WORDS.withdrawn);
       }
-      return { on: true, choice: input.choice, textVersion: ADS_TEXT_VERSION };
+      return { on: true, choice: input.choice, textVersion: ADS_TEXT_VERSION, since: sinceOf(s.switched_at) };
     });
   }
 

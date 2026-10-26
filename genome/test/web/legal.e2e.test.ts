@@ -10,7 +10,8 @@
  * figures and text; the contact of ORBES Client Services when
  * the server publishes one, and none otherwise; the floors of §3.8 on every
  * control (the links inside a sentence aside); the print view; since NOCTURNE (step N8) the app's ground, header,
- * rail and footer, every section open, the reading measure.
+ * rail and footer, every section open, the reading measure; since lot M4 (step M4.14) the privacy policy's Advertising
+ * measurement, drawn only while GET /api/v1/consent says conversions are on.
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
@@ -314,6 +315,42 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     expect(await page.locator('.legal__contact').isVisible()).toBe(false);
     expect(await page.locator('.legal__contact a').count()).toBe(0);
     expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
+  it('shows the Advertising measurement only while conversions are switched on, the line since under the version, and lands on #ads (lot M4, K27 A4)', async () => {
+    // Off (the server's default): exactly today's page, no section, no line.
+    const { page, problems } = await open('/legal/privacy?lang=en');
+    await page.waitForTimeout(300);
+    expect(await page.locator('#ads').count()).toBe(0);
+    expect(await page.locator('.legal__ads-since').count()).toBe(0);
+    // On, as the banner's PRIVACY opens it: the page drawn again, the section after WORN, the reader taken to it.
+    const answer = (body: unknown, status = 200) => page.route('**/api/v1/consent', (route) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }));
+    await answer({ ads: { on: true, choice: null, textVersion: '2026-10-26', since: '2026-10-27' } });
+    await page.goto(`${srv.origin}/legal/privacy#ads`);
+    await textOf(page.locator('.legal-meta + .legal__ads-since'), 'Advertising measurement: since 27 October 2026');
+    const ids = await page.locator('main.legal .legal__heading[id]').evaluateAll((els) => els.map((e) => e.id));
+    expect(ids[ids.indexOf('worn') + 1]).toBe('ads');
+    await textOf(page.locator('#ads'), 'ADVERTISING MEASUREMENT');
+    await expect.poll(() => page.locator('#ads').evaluate((e) => Math.round(e.getBoundingClientRect().top)), POLL).toBeLessThan(120);
+    expect(await page.locator('#cookies ~ .legal__text a[href="#ads"]').count()).toBe(1);
+    expect(await page.locator('#recipients ~ .legal__text a[href="#ads"]').count()).toBe(1);
+    // In French, its own words.
+    await page.goto(`${srv.origin}/legal/privacy?lang=fr`);
+    await textOf(page.locator('.legal__ads-since'), /^Mesure publicitaire\s?: depuis le 27 octobre 2026$/);
+    await textOf(page.locator('#ads'), 'MESURE PUBLICITAIRE');
+    // Refused, or off: the page as it is.
+    await page.unrouteAll();
+    await answer({ error: { code: 'UNAVAILABLE' } }, 503);
+    await page.goto(`${srv.origin}/legal/privacy?lang=en`);
+    await page.waitForTimeout(300);
+    expect(await page.locator('#ads').count()).toBe(0);
+    await page.unrouteAll();
+    await answer({ ads: { on: false, choice: null, textVersion: '2026-10-26', since: null } });
+    await page.reload();
+    await page.waitForTimeout(300);
+    expect(await page.locator('#ads, .legal__ads-since').count()).toBe(0);
+    expect(problems.filter((p) => !/status of 503/.test(p))).toEqual([]);
     await page.context().close();
   }, 120_000);
 

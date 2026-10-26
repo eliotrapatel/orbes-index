@@ -13,11 +13,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AdsConfig } from '../../src/server/config.js';
 import { startHousekeeping } from '../../src/server/context.js';
 import { ADS_TEXT_VERSION } from '../../src/server/services/ads.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { startFakeAds, type FakeAds } from '../support/fake-ads.js';
 import { createAdmin, createHarness, errorOf, PASSWORD, safeJson, type Harness } from './support.js';
 
 const KEYS: AdsConfig = { meta: { datasetId: '123456789012345', accessToken: 'META-SECRET-TOKEN-0123456789' }, tiktok: null, google: null };
-const OFF = { ads: { on: false, choice: null, textVersion: ADS_TEXT_VERSION } };
+const OFF = { ads: { on: false, choice: null, textVersion: ADS_TEXT_VERSION, since: null } };
 
 describe('the banner’s advertising choice (GET / POST /api/v1/consent)', () => {
   let h: Harness;
@@ -66,11 +67,13 @@ describe('the banner’s advertising choice (GET / POST /api/v1/consent)', () =>
 
   it('on: the banner’s choice of a device signed out, its click ids and user agent; taken by the account at its sign-up', async () => {
     await h.ctx.services.ads.setSwitch(true, 'SWITCH ON', admin);
+    // The Paris day of the switch on, which /legal/privacy shows under its version line (step M4.14).
+    const since = parisDay(h.clock.now());
     const c = h.client();
-    expect(safeJson(await c.get('/api/v1/consent'))).toEqual({ ads: { on: true, choice: null, textVersion: ADS_TEXT_VERSION } });
+    expect(safeJson(await c.get('/api/v1/consent'))).toEqual({ ads: { on: true, choice: null, textVersion: ADS_TEXT_VERSION, since } });
     const post = await c.post('/api/v1/consent', { choice: 'GRANTED', clicks: { fbclid: 'IwAR0banner', gclid: 'Cj0Kbanner' } });
     expect(post.statusCode).toBe(200);
-    expect(safeJson(post)).toEqual({ ads: { on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION } });
+    expect(safeJson(post)).toEqual({ ads: { on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION, since } });
     expect(post.cookies.map((x) => x.name)).toEqual(['orbes_device']);
     const [row] = await rows();
     expect(row).toMatchObject({ account_id: null, choice: 'GRANTED', source: 'BANNER', text_version: ADS_TEXT_VERSION });
