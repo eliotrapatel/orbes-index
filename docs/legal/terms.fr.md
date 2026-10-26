@@ -250,7 +250,7 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 ## Article 14 — Commandes
 
-Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE RELEASE confirmée avec PAY (une commande par pièce), une place d'une sortie dont ORBES Client Services confirme la vente, ou une demande du salon privé qu'il accepte (article 12). MY PIECES montre chacune de vos commandes avec sa référence, le modèle, la taille, les options et le prix, et ses étapes avec leurs dates. La taille et le prix d'une commande d'une sortie ou du salon privé se lisent TO BE CONFIRMED tant qu'ORBES Client Services ne les a pas saisis.
+Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE RELEASE confirmée avec PAY (une commande par pièce), une place d'une sortie dont ORBES Client Services confirme la vente, une demande du salon privé qu'il accepte (article 12), ou une pièce de THE VAULT (article 13) : une pièce gagnée gratuitement, que vous réclamez dans YOUR ORDERS dans les 30 jours (elle est alors PAID, sans frais, et annulée si elle n'est pas réclamée), ou une pièce achetée à son prix habituel dans les 24 heures de son droit d'achat. MY PIECES montre chacune de vos commandes avec sa référence, le modèle, la taille, les options et le prix, et ses étapes avec leurs dates. La taille et le prix d'une commande d'une sortie ou du salon privé se lisent TO BE CONFIRMED tant qu'ORBES Client Services ne les a pas saisis.
 
 **Ses étapes.** Une commande est RESERVED, puis PAID, SHIPPED et DELIVERED. Elle peut être CANCELLED tant qu'elle est RESERVED ou PAID, et RETURNED une fois SHIPPED ou DELIVERED ; aucune autre étape n'est possible. ORBES Client Services enregistre chaque étape ; rien n'est payé sur le service. Une commande n'est PAID qu'une fois son prix saisi.
 
@@ -268,7 +268,7 @@ Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE R
 
 **Ce qui est enregistré.** Pour chaque commande, le service enregistre le compte, sa provenance, le modèle, la taille, le prix, les options, la surprise de sa sortie, le texte de la gravure, le nom et l'adresse de l'acheteur, l'heure de chaque étape avec la note qu'ORBES Client Services peut y ajouter, le transporteur, le numéro de suivi et la valeur déclarée pour son assurance, le lieu où sa pièce est gardée, et ses factures ; la politique de confidentialité en dit plus (article 17).
 
-*Code : R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146, R152, R153, R154, R180, R181, R182, R183, R184, R186, R187, R188, R189, R190, R191, R192.*
+*Code : R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146, R152, R153, R154, R180, R181, R182, R183, R184, R186, R187, R188, R189, R190, R191, R192, R203.*
 
 ## Article 15 — Le cercle des propriétaires
 

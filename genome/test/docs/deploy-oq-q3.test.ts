@@ -23,8 +23,8 @@
  *    mode, a test LIVE release with its switch on and a size sold out, a piece registered, the checklist's THE VAULT
  *    CARD, the A4 sheet printed, the legal pages, the ENGRAVING's ADMIN-only prices (the 25 Oct amendment);
  *  - his data after (the real table, the sources' limits with the LIVE cap above one only once the terms change, N22,
- *    the switch per LIVE release), the open questions (N4, N7, N9, N36, D70, N8, the tier, the export, the VAULT
- *    EDITION's line, counsel), M4 after Q3 (D61); one command per shell block, French, links that resolve, and the
+ *    the switch per LIVE release), the open questions (N4, N7, N9, N36, D70, N8, the tier, counsel), M4 after Q3
+ *    (D61); one command per shell block, French, links that resolve, and the
  *    runbook linked from DEPLOYMENT and COMPLIANCE.
  *
  * <SHA_Q3> and <TAG_Q3> stay placeholders until the main session hands the commit over.
@@ -363,7 +363,8 @@ describe('the runbook of lot THE VAULT (docs/launch/DEPLOY-OQ-Q3.md)', () => {
     expect(rules).toContain(`une seule nouvelle version, \`${Q3_LEGAL_VERSION}\``);
     expect(rules).toContain(`gardent leur version, \`${CARE_VERSION}\``);
     expect(rules).toContain('ne retient jamais le déploiement (D59)');
-    expect(rules).toContain('les conditions, article 13, un seul paragraphe (*THE VAULT*), et la politique de confidentialité, une seule phrase (le lien d\'invitation, dans *Your ORBES account*)');
+    expect(rules).toContain('les conditions, article 13, un seul paragraphe (*THE VAULT*), et article 14, une phrase dans son premier paragraphe (les commandes de THE VAULT');
+    expect(rules).toContain('et la politique de confidentialité, un seul bloc (le lien d\'invitation, puis les coffres gardés avec le compte et le coffre d\'un crédit à offrir accepté, dans *Your ORBES account*)');
     const fetch = section(runbook, '### 1.3');
     expect(fetch).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${Q3_LEGAL_VERSION}';\`, la nouvelle version.`);
     expect(fetch).toContain(`Sortie attendue : \`export const CARE_CONDITIONS_VERSION = '${CARE_VERSION}';\`, inchangée.`);
@@ -459,8 +460,8 @@ describe('the runbook of lot THE VAULT (docs/launch/DEPLOY-OQ-Q3.md)', () => {
     expect(vaultsPanel).not.toMatch(/revoke|take back/i);
     // 3. What A sees: NOW's line, the quiet number, the FROM ORBES arrival, THE VAULT page, dark in light mode.
     const sees = section(runbook, '#### 3.');
-    expect(VAULT.now.label(1)).toBe(VAULT_ARRIVED_TITLE.one);
-    expect(sees).toContain(`La ligne ${said(VAULT.now.label(1))}, avec ${VAULT.now.open}`);
+    expect(VAULT.now.label).toBe(VAULT_ARRIVED_TITLE.one);
+    expect(sees).toContain(`La ligne ${said(VAULT.now.label)}, avec ${VAULT.now.open}`);
     expect(sees).toContain(`La ligne ${VAULT.row}, après YOUR WISHLIST, avec son petit nombre : \`1\``);
     const arrived = vaultArrivedWords({ source: 'HOUSE', detail: null, count: 1, until: '2026-11-27' });
     expect(sees).toContain(`NEW ; ${said(arrived.title)} ; ${said(arrived.body.replace('27 November 2026', '<jour>'))} ; le lien THE VAULT`);
@@ -555,6 +556,11 @@ describe('the runbook of lot THE VAULT (docs/launch/DEPLOY-OQ-Q3.md)', () => {
     const sentence = "If you create your account with a collector's personal invitation link,";
     expect(JSON.stringify(PRIVACY.en)).toContain(sentence);
     expect(legal).toContain(`(« ${sentence} … »)`);
+    // The review of lot Q3: article 14's VAULT orders and the privacy block's vaults.
+    expect(JSON.stringify(TERMS.en)).toContain('or a piece from THE VAULT (article 13)');
+    expect(legal).toContain('« or a piece from THE VAULT (article 13) »');
+    expect(JSON.stringify(PRIVACY.en)).toContain('ORBES also keeps with your account your vaults');
+    expect(legal).toContain('(« ORBES also keeps with your account your vaults … »)');
     // 11. The ENGRAVING's prices and YOUR ORDERS switch, an ADMIN's (the owner's amendment of 25 Oct).
     const engraving = section(runbook, '#### 11.');
     expect(engraving).toContain(said(ENGRAVING_ADMIN_ONLY.note));
@@ -580,10 +586,13 @@ describe('the runbook of lot THE VAULT (docs/launch/DEPLOY-OQ-Q3.md)', () => {
     expect(data).toContain(`\`${VAULT_ONLY.label}\``);
     // The open points, none blocking.
     const open = section(runbook, '## 2.');
-    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     for (const n of ['(N4)', '(N7)', '(N9)', '(N36)', '(D70)', '(N8)']) expect(open, n).toContain(n);
     expect(open).toContain(said(VAULT_REVEAL.card.other));
-    expect(open).toContain(said(VAULT_REVEAL.vaultEdition.line));
+    // The review of lot Q3 settled two: the account's copy of its data gives its vaults, and a VAULT EDITION's line has no
+    // number (SCOPE ROUND 5 "Numbers: REMOVE").
+    expect(open).not.toContain('La copie des données');
+    expect(open).not.toContain('Numbered');
     expect(open).toContain('(la note au juriste, points 38 et 39)');
     expect(readDoc('docs/legal/counsel-note.fr.md')).toMatch(/^38\. /m);
     expect(readDoc('docs/legal/counsel-note.fr.md')).toMatch(/^39\. /m);

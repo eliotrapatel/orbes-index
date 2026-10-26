@@ -2905,7 +2905,10 @@ const vaultRewardFields = {
  */
 export const vaultRewardBody = body({ kind: z.enum(VAULT_REWARD_KINDS), ...vaultRewardFields });
 
-/** PUT /api/admin/vault/rewards/:id (OPERATOR): the row whole for its kind (which never changes), active or not. */
+/**
+ * PUT /api/admin/vault/rewards/:id (OPERATOR): the row whole for its kind (which never changes), active or not; once it
+ * has given, its model, add-on and mode never change (409 VAULT_REWARD_GIVEN).
+ */
 export const vaultRewardUpdateBody = body({ kind: z.enum(VAULT_REWARD_KINDS).optional(), ...vaultRewardFields, active: z.boolean().optional() });
 
 /** POST /api/admin/vault/rewards/order (OPERATOR): every row of the table once, in its new order. */

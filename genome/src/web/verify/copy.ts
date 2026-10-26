@@ -2337,8 +2337,11 @@ export const VAULT = Object.freeze({
   }),
   /** YOUR ACCOUNT's row (the phone's sheet) and card (a computer's), its line the quiet number (D18). */
   row: 'THE VAULT',
-  /** NOW's line while a vault waits (D18), in the messages line's pattern: the arrival's own title, then OPEN. */
-  now: Object.freeze({ label: (n: number) => (n > 1 ? VAULT_ARRIVED_TITLE.many(n) : VAULT_ARRIVED_TITLE.one), open: 'OPEN' }),
+  /**
+   * NOW's line while a vault waits (D18), in the messages line's pattern: the arrival's own title, then OPEN; the same
+   * line for any count (plan §3.7: A VAULT IS WAITING FOR YOU; the count is the quiet number's, next to THE VAULT).
+   */
+  now: Object.freeze({ label: VAULT_ARRIVED_TITLE.one, open: 'OPEN' }),
   /** YOUR ORDERS (§3.8; D20): a VAULT order, a right to buy, an add-on's right to buy. */
   orders: Object.freeze({
     from: 'FROM THE VAULT',

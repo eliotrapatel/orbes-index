@@ -110,6 +110,7 @@ import { nextBirthday } from './birthday-credits.js';
 import { readProgram } from './club-program.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountHouseMessages, type ExportedHouseMessage } from './house-messages.js';
+import { accountVaultData, type ExportedVault, type ExportedVaultGift } from './vault.js';
 import { accountWornPhotos, type ExportedWornPhoto } from './worn.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
@@ -557,6 +558,18 @@ export interface AccountExport {
    * taken off and given back, and why); never who applied or released them.
    */
   tierGrants: ExportedTierGrant[];
+  /**
+   * THE VAULT (lot Q3), oldest first: each vault with its occasion (the source and its detail), when it was given, until
+   * when it waited, its state, and once opened what it held (kind, prize, line, odds) and its offer's end; never the
+   * house's note nor who gave it.
+   */
+  vaults: ExportedVault[];
+  /** Its personal invitation link (INVITE A FRIEND): its code and when it was made; null before it was made. */
+  invitation: { code: string; createdAt: Date } | null;
+  /** Whether the account was created through a collector's invitation link, and when; never who invited it. */
+  invited: { invitedBy: boolean; invitedAt: Date | null };
+  /** The credits to give it gave (its vault held one) or accepted, oldest first: amount, state, when; never the other account. */
+  vaultGifts: ExportedVaultGift[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans);
@@ -1085,6 +1098,7 @@ export class OwnerService {
         .execute();
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
+      const vault = await accountVaultData(tx, a.id, now);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -1187,6 +1201,10 @@ export class OwnerService {
         wornPhotos: await accountWornPhotos(tx, a.id),
         claimCodes,
         tierGrants,
+        vaults: vault.vaults,
+        invitation: vault.invitation,
+        invited: vault.invited,
+        vaultGifts: vault.vaultGifts,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -1237,6 +1255,8 @@ export class OwnerService {
             wornPhotos: out.wornPhotos.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
+            vaults: out.vaults.length,
+            vaultGifts: out.vaultGifts.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

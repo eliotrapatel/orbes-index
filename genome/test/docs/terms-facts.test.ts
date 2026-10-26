@@ -704,6 +704,11 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a credit to give, once, to a friend without a piece (N10)': 'if ((await tierOf(tx, me, now)).pieces > 0) throw vaultGiftNotForYou(false);',
   'a returned piece takes back its unopened vault (D5)': "revoked_reason: 'RETURNED'",
   'the invitation link kept with the invited account (N22)': 'invited_by: invitedBy,',
+  // The review of lot Q3 (L2): article 14 names THE VAULT's orders, a piece won free claimed within 30 days (PAID at no
+  // cost, cancelled unclaimed) and one bought at its usual price under its 24-hour right to buy.
+  'a piece won free claimed within 30 days, PAID at no cost (D20, N12)': "const paid = await step(tx, o, { to: 'PAID', note: null }, actor, at, notes, this.mail);",
+  'a piece won free not claimed cancelled (D20)': "await step(tx, o, { to: 'CANCELLED', note: VAULT_NOT_CLAIMED }, SYSTEM_ACTOR, now, notes, this.mail);",
+  'a right to buy within 24 hours at its usual price (round 2)': 'throw vaultOfferEnded(VAULT_BUY_ENDED);',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────

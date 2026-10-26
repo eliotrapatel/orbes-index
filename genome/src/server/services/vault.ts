@@ -43,15 +43,17 @@
  *
  *   the opening  (step Q3.4; plan §2.2, §2.4, §2.7) `open`: in one transaction the vault FOR UPDATE (404 VAULT_NOT_FOUND
  *                for another account's; 409 VAULT_EXPIRED, VAULT_REVOKED; an opened vault's outcome read again, so a lost
- *                answer is never a second draw), the active rewards FOR UPDATE (the floor's row first, as the table's
- *                settings lock it, then by id), then the draw on the server
+ *                answer is never a second draw), the active rewards FOR KEY SHARE (the floor's row first, as the table's
+ *                settings lock it, then by id: openings never wait for each other, a settings save waits for them), then
+ *                the draw on the server
  *                (N26): `crypto.randomInt` over 1 000 000 parts, each active row its round(1 000 000 / N) in the table's
  *                order, the floor the rest (N15). A row drawn that cannot give (its quantity reached, its add-on set
  *                aside or no longer a PRODUCT, its model set aside or without a unit to reserve, THE PIECE of a vault
  *                without a LIVE release or a unit in the entry's size) gives I WAS THERE in its place, at the card's
  *                published odds: "a reward that runs out sends its odds to the card (published odds never change)"
  *                (E1, round 2). The outcome is written once (prize, line, odds `1 IN 200`, rare for GUARANTEED, VAULT
- *                EDITION and THE PIECE (N14), value, cost), its row's `given` + 1, delivered where it belongs (E9:
+ *                EDITION and THE PIECE (N14), value, cost), its row's `given` + 1 (a row with a quantity counted in one
+ *                statement before its delivery, the card in its place when its last one has just gone), delivered where it belongs (E9:
  *                credits in YOUR ACCOUNT, products in YOUR ORDERS) with a FROM ORBES receipt (`VAULT_OPENED:<vault>`),
  *                audited `vault.open` (its kind and rarity, never another row's odds).
  *   delivered    CREDIT a VAULT credit (services/tier-grants.ts) of the row's amount, 30 days; ADDON the vault's offer
@@ -919,6 +921,7 @@ export const vaultOddsOver = () => conflict('VAULT_ODDS_OVER', 'The odds of the 
 export const vaultRewardService = () => conflict('VAULT_REWARD_SERVICE', 'A service cannot be a vault’s reward.');
 export const vaultEditionModel = () => conflict('VAULT_EDITION_MODEL', 'A VAULT EDITION is a model marked vault-only. Mark the model first.');
 export const vaultOnlyProduct = () => conflict('VAULT_ONLY_PRODUCT', 'A vault-only model is never sold: give it as a VAULT EDITION.');
+export const vaultRewardGiven = () => conflict('VAULT_REWARD_GIVEN', 'This reward was given: add another row.');
 export const vaultFloorFixed = () => conflict('VAULT_FLOOR_FIXED', 'I WAS THERE is the floor: it is always there, its odds the rest.');
 export const vaultRewardNotFound = () => notFound('Reward', 'VAULT_REWARD_NOT_FOUND');
 
@@ -1026,6 +1029,21 @@ async function partsGiven(db: Db): Promise<number> {
 async function lockTable(tx: Db): Promise<string> {
   const floor = await tx.selectFrom('vault_rewards').select('id').where('kind', '=', 'I_WAS_THERE').forUpdate().executeTakeFirstOrThrow();
   return floor.id;
+}
+
+/**
+ * A row's `given` counted once more while its quantity allows it (one statement: two openings at once never both take
+ * its last one); false when its quantity is reached.
+ */
+async function countGiven(tx: Db, rewardId: string): Promise<boolean> {
+  const r = await tx
+    .updateTable('vault_rewards')
+    .set({ given: sql<number>`given + 1` })
+    .where('id', '=', rewardId)
+    .where((eb) => eb.or([eb('quantity', 'is', null), eb('given', '<', eb.ref('quantity'))]))
+    .returning('id')
+    .executeTakeFirst();
+  return r !== undefined;
 }
 
 async function checkOdds(tx: Db): Promise<void> {
@@ -1289,6 +1307,128 @@ export async function rewardPick(tx: Db, row: DrawRow, v: OpeningVault): Promise
   }
 }
 
+// ── The right of access (OwnerService.exportData) ──────────────────────────
+
+/**
+ * A vault in the account's copy of its data: its occasion (the source, its words and detail: a release's piece or set,
+ * a piece's model, a tier), when it was given, until when it waits, its state, and once opened what it held (its kind,
+ * prize, line, odds) and its offer's end; never the house's note, who gave it, nor a friend's account.
+ */
+export interface ExportedVault {
+  source: VaultSource;
+  occasion: string;
+  detail: string | null;
+  givenAt: Date;
+  waitsUntil: Date;
+  state: VaultState;
+  openedAt: Date | null;
+  revokedAt: Date | null;
+  kind: VaultRewardKind | null;
+  prize: string | null;
+  line: string | null;
+  odds: string | null;
+  offerUntil: Date | null;
+  offerUsedAt: Date | null;
+}
+
+/** A credit to give in the account's copy of its data: one it gave (its vault held it) or one it accepted; never the other account. */
+export interface ExportedVaultGift {
+  role: 'GAVE' | 'ACCEPTED';
+  amountMinor: number;
+  currency: string;
+  state: 'OPEN' | 'ACCEPTED' | 'ENDED';
+  createdAt: Date;
+  expiresAt: Date;
+  acceptedAt: Date | null;
+}
+
+/** THE VAULT's data of an account for its export (lot Q3): its vaults, its invitation, whether it was invited, its credits to give. */
+export interface ExportedVaultData {
+  vaults: ExportedVault[];
+  /** Its personal invitation link's code and when it was made; null before its first INVITE A FRIEND. */
+  invitation: { code: string; createdAt: Date } | null;
+  /** Whether it was created through a collector's invitation, and when; never who invited it. */
+  invited: { invitedBy: boolean; invitedAt: Date | null };
+  vaultGifts: ExportedVaultGift[];
+}
+
+/** Every vault of the account (oldest first), its invitation and its credits to give, for its copy of its data. */
+export async function accountVaultData(db: Db, accountId: string, now: Date): Promise<ExportedVaultData> {
+  const rows = await db
+    .selectFrom('vaults as v')
+    .leftJoin('drops as d', 'd.id', 'v.drop_id')
+    .leftJoin('models as dm', 'dm.id', 'd.model_id')
+    .leftJoin('sets as ds', 'ds.id', 'd.set_id')
+    .leftJoin('products as p', 'p.id', 'v.product_id')
+    .leftJoin('models as pm', 'pm.id', 'p.model_id')
+    .select([
+      'v.id',
+      'v.source',
+      'v.tier',
+      'v.given_at',
+      'v.waits_until',
+      'v.opened_at',
+      'v.revoked_at',
+      'v.reward_kind',
+      'v.prize',
+      'v.prize_line',
+      'v.odds_text',
+      'v.offer_until',
+      'v.offer_used_at',
+      'dm.name as drop_model',
+      'dm.variant_label as drop_variant',
+      'ds.name as drop_set',
+      'pm.name as piece_model',
+      'pm.variant_label as piece_variant',
+    ])
+    .where('v.account_id', '=', accountId)
+    .orderBy('v.given_at')
+    .orderBy('v.id')
+    .execute();
+  const invitation = await db.selectFrom('invitations').select(['code', 'created_at']).where('account_id', '=', accountId).executeTakeFirst();
+  const account = await db.selectFrom('accounts').select(['invited_by', 'invited_at']).where('id', '=', accountId).executeTakeFirst();
+  const gifts = await db
+    .selectFrom('vault_gifts as g')
+    .innerJoin('vaults as v', 'v.id', 'g.vault_id')
+    .select(['v.account_id as giver', 'g.accepted_by', 'g.amount_minor', 'g.currency', 'g.created_at', 'g.expires_at', 'g.accepted_at'])
+    .where((eb) => eb.or([eb('v.account_id', '=', accountId), eb('g.accepted_by', '=', accountId)]))
+    .orderBy('g.created_at')
+    .orderBy('g.id')
+    .execute();
+  return {
+    vaults: rows.map((r) => {
+      const detail = detailOf({ ...r, gift_id: null, gift_accepted_by: null, gift_expires_at: null } as unknown as VaultReadRow);
+      return {
+        source: r.source,
+        occasion: vaultSourceLine(r.source, detail),
+        detail,
+        givenAt: new Date(r.given_at),
+        waitsUntil: new Date(r.waits_until),
+        state: vaultState(r, now),
+        openedAt: r.opened_at ? new Date(r.opened_at) : null,
+        revokedAt: r.revoked_at ? new Date(r.revoked_at) : null,
+        kind: r.reward_kind,
+        prize: r.prize,
+        line: r.prize_line,
+        odds: r.odds_text,
+        offerUntil: r.offer_until ? new Date(r.offer_until) : null,
+        offerUsedAt: r.offer_used_at ? new Date(r.offer_used_at) : null,
+      };
+    }),
+    invitation: invitation ? { code: invitation.code, createdAt: new Date(invitation.created_at) } : null,
+    invited: { invitedBy: account?.invited_by != null, invitedAt: account?.invited_at ? new Date(account.invited_at) : null },
+    vaultGifts: gifts.map((g) => ({
+      role: g.giver === accountId ? ('GAVE' as const) : ('ACCEPTED' as const),
+      amountMinor: g.amount_minor,
+      currency: g.currency,
+      state: g.accepted_at ? ('ACCEPTED' as const) : new Date(g.expires_at).getTime() > now.getTime() ? ('OPEN' as const) : ('ENDED' as const),
+      createdAt: new Date(g.created_at),
+      expiresAt: new Date(g.expires_at),
+      acceptedAt: g.accepted_at ? new Date(g.accepted_at) : null,
+    })),
+  };
+}
+
 // ── The service ────────────────────────────────────────────────────────────
 
 export interface VaultServiceDeps {
@@ -1409,15 +1549,23 @@ export class VaultService {
         const reached = again
           ? new Set((await tx.selectFrom('vaults').select('account_id').where('occasion_key', '=', `HOUSE:${giftId}`).where('account_id', 'in', batch).execute()).map((v) => v.account_id))
           : new Set<string>();
+        // The batch's audit entries written once after its last vault (giveVault locks each account): no row is locked
+        // after the audit chain's lock, and the chain's lock is held only for the batch's commit.
+        const notes: AuditRecordInput[] = [];
+        let batchAccounts = 0;
+        let batchVaults = 0;
         for (const accountId of batch) {
           if (reached.has(accountId)) continue;
           const given = await giveVault(tx, { source: 'HOUSE', accountId, giftId, givenBy: by, segmentId, note }, now);
           if (given.vaults.length > 0) {
-            accounts += 1;
-            vaults += given.vaults.length;
+            batchAccounts += 1;
+            batchVaults += given.vaults.length;
           }
-          for (const n of given.notes) await this.audit.record(n, tx);
+          notes.push(...given.notes);
         }
+        await this.audit.recordAll(notes, tx);
+        accounts += batchAccounts;
+        vaults += batchVaults;
       });
     }
     return { giftId, dryRun, reach: reach.length, accounts, vaults, leftOut };
@@ -1471,15 +1619,16 @@ export class VaultService {
         if (a?.status === 'LOCKED') throw customerAccountLocked();
         if (a?.status !== 'ACTIVE') throw vaultNotFound();
 
-        // The table, locked as its settings lock it (the floor's row first, then every active row by id), so an opening and
-        // a change of CLUB > THE VAULT never wait for each other in a circle; drawn in its own order (N15).
-        await lockTable(tx);
+        // The table, read in the order its settings lock it (the floor's row first, then every active row by id) but shared
+        // (FOR KEY SHARE): openings never wait for each other here, while a change of CLUB > THE VAULT (FOR UPDATE) waits
+        // for them and they for it, never in a circle; drawn in its own order (N15).
+        await tx.selectFrom('vault_rewards').select('id').where('kind', '=', 'I_WAS_THERE').forKeyShare().executeTakeFirstOrThrow();
         const rows = (await tx
           .selectFrom('vault_rewards')
           .select(['id', 'kind', 'odds_in', 'quantity', 'given', 'amount_minor', 'currency', 'model_id', 'addon_id', 'mode', 'line', 'position', 'created_at'])
           .where('active', '=', true)
           .orderBy('id')
-          .forUpdate()
+          .forKeyShare()
           .execute()) as DrawRow[];
         const ordered = [...rows].sort((x, y) => x.position - y.position || new Date(x.created_at).getTime() - new Date(y.created_at).getTime() || x.id.localeCompare(y.id));
         const floor = ordered.find((r) => r.kind === 'I_WAS_THERE')!;
@@ -1489,11 +1638,18 @@ export class VaultService {
 
         let row = drawn ?? floor;
         let pick = await rewardPick(tx, row, v);
+        // A row with a quantity is counted before its delivery, at once: the last one goes to one opening only.
+        let counted = false;
+        if (pick.ok && row !== floor && row.quantity !== null) {
+          counted = await countGiven(tx, row.id);
+          if (!counted) pick = { ok: false, why: 'QUANTITY' };
+        }
         let fellBack: string | null = null;
         if (!pick.ok) {
           // "A reward that runs out sends its odds to the card (published odds never change)": the card, at its own odds.
           fellBack = pick.why;
           row = floor;
+          counted = false;
           pick = await rewardPick(tx, floor, v);
         }
         if (!pick.ok) throw new Error('the I WAS THERE floor always gives');
@@ -1526,7 +1682,8 @@ export class VaultService {
           .where('id', '=', v.id)
           .where('opened_at', 'is', null)
           .execute();
-        await tx.updateTable('vault_rewards').set({ given: sql<number>`given + 1` }).where('id', '=', row.id).execute();
+        // A row without a quantity (the card among them) counted last, its row's lock held only to the commit.
+        if (!counted) await tx.updateTable('vault_rewards').set({ given: sql<number>`given + 1` }).where('id', '=', row.id).execute();
 
         // E9 "plus a FROM ORBES message": what it held and where it is.
         const where = vaultWhereOf(row.kind);
@@ -2218,6 +2375,9 @@ export class VaultService {
       if (input?.kind !== undefined && input.kind !== before.kind) throw validationError('A reward keeps its kind: add another row.');
       const clean = await cleanReward(tx, before.kind, input ?? {});
       if (clean.quantity < before.given) throw validationError(`The quantity is at least what was given: ${before.given}.`);
+      // What a row gave is delivered by reading the row (a right to buy, a free piece, a free add-on: its model, add-on
+      // and mode): once given, those stay as they were won.
+      if (before.given > 0 && (clean.model_id !== before.model_id || clean.addon_id !== before.addon_id || clean.mode !== before.mode)) throw vaultRewardGiven();
       const active = input.active === undefined ? before.active : input.active;
       if (typeof active !== 'boolean') throw validationError('Say whether the reward is active.');
       await tx
@@ -2503,7 +2663,9 @@ export class VaultService {
    * A model's VAULT ONLY (PUT /api/admin/models/:id/vault-only, OPERATOR; §4.5, D19 "rare VAULT EDITION (catalogue
    * product marked vault-only, never sold)"): on, every sales path refuses it (MODEL_VAULT_ONLY); off, it is sold again.
    * Refused while THE VAULT's table holds it the other way: on while an active PRODUCT row names it, off while an active
-   * VAULT EDITION does (409, worded). 404 MODEL_NOT_FOUND. Audited `model.vault_only`.
+   * VAULT EDITION does (409, worded); on while it is on sale (a published release or draw of it or of a set holding it
+   * not ended, an open salon request naming it: 409 VAULT_ONLY_PRODUCT, worded). 404 MODEL_NOT_FOUND. Audited
+   * `model.vault_only`.
    */
   async setVaultOnly(modelId: string, on: unknown, actor: Actor): Promise<{ modelId: string; vaultOnly: boolean }> {
     assertStaff(actor, 'change a model');
@@ -2518,11 +2680,32 @@ export class VaultService {
       const row = await tx.selectFrom('vault_rewards').select('kind').where('model_id', '=', id).where('active', '=', true).where('kind', '=', on ? 'PRODUCT' : 'VAULT_EDITION').executeTakeFirst();
       if (row && on) throw conflict('VAULT_ONLY_PRODUCT', 'This model is a product of THE VAULT’s table: deactivate that row before marking it vault-only.');
       if (row) throw conflict('VAULT_EDITION_MODEL', 'This model is a VAULT EDITION of THE VAULT’s table: deactivate that row before selling it.');
+      // On sale now (a published release or draw of the model, or of a set holding it, not ended; an open request of the
+      // private salon naming it): marked vault-only, its sale could not go on, nor its settings be saved.
+      if (on && (await onSale(tx, id))) throw conflict('VAULT_ONLY_PRODUCT', 'This model is on sale in a release, a draw or the private salon: wait for its end before marking it vault-only.');
       await tx.updateTable('models').set({ vault_only: on }).where('id', '=', id).execute();
       await this.audit.record({ actor, action: 'model.vault_only', targetType: 'model', targetId: id, details: { before: m.vault_only, after: on } }, tx);
       return { modelId: id, vaultOnly: on };
     });
   }
+}
+
+/**
+ * Whether a model is on sale now: a published release or draw of it, or of a set holding it, neither cancelled nor
+ * ended (a LIVE RELEASE until its end, a draw until it is drawn), or an open request of the private salon naming it.
+ */
+async function onSale(db: Db, modelId: string): Promise<boolean> {
+  const release = await db
+    .selectFrom('drops as d')
+    .select('d.id')
+    .where((eb) => eb.or([eb('d.model_id', '=', modelId), eb('d.set_id', 'in', eb.selectFrom('set_models').select('set_id').where('model_id', '=', modelId))]))
+    .where('d.published_at', 'is not', null)
+    .where('d.cancelled_at', 'is', null)
+    .where('d.ended_at', 'is', null)
+    .where((eb) => eb.or([eb('d.mode', '=', 'LIVE'), eb('d.drawn_at', 'is', null)]))
+    .executeTakeFirst();
+  if (release) return true;
+  return (await db.selectFrom('shop_requests').select('id').where('model_id', '=', modelId).where('status', '=', 'OPEN').executeTakeFirst()) !== undefined;
 }
 
 /** The house currencies' order (EUR, GBP, USD, CHF), any other after them. */

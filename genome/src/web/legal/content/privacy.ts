@@ -124,7 +124,11 @@
  *    registered (the FRIEND source); a code it does not know is ignored;
  *    audited `account.register` with the inviter's id; neither account is
  *    named to the other (the vault reads "A FRIEND"); the account section's
- *    one sentence says so, the policy's only change for THE VAULT;
+ *    sentence says so; the review of lot Q3 adds to it, in the same block,
+ *    the vaults kept with the account (their occasion, opening and what each
+ *    held: `vaults`) and the vault a credit to give accepted came from
+ *    (`vault_gifts.accepted_by`), neither collector named to the other, kept
+ *    while the account exists and in the copy of its data (API §16.13);
  *  - the sound signature (P-D07, shared/prefs.ts): the one preference the
  *    verify app keeps on the device, in local storage, under SOUND_PREF_KEY
  *    `orbes.sound`: "off", written only by SOUND OFF and removed by SOUND
@@ -229,7 +233,7 @@ const EN: LegalDocument = {
         'Each sign-in opens a session of 30 days at most. It is kept with a pseudonym of your IP address and the identification string of your browser (its user agent), for the security of your account.',
         "The service's audit log, which records every change, names your account by its identifier and a pseudonym of the IP address, never by your email address or your name.",
         "The sizes you save in YOUR SIZES are kept with your account until you clear them. They preselect a size you then confirm, and are counted, without naming anyone, with the country of your account (that of your default address, else your profile's), to plan how many pieces of each size ORBES orders, and where to keep them.",
-        "If you create your account with a collector's personal invitation link, ORBES keeps with your account which account invited you, to give that collector a vault (article 13 of the [terms of use](/legal/terms)) when your first piece is registered to you; the service shows neither of you the other's name.",
+        "If you create your account with a collector's personal invitation link, ORBES keeps with your account which account invited you, to give that collector a vault (article 13 of the [terms of use](/legal/terms)) when your first piece is registered to you; the service shows neither of you the other's name. ORBES also keeps with your account your vaults (the occasion of each, when it was opened and what it held) and, for a credit to give you accepted, the vault it came from, without showing you the name of the collector who gave it; all of this is kept while your account exists and is in the copy of your data.",
         'When you claim under the warranty or the legal guarantee, ORBES keeps the claim with your account: its steps, its outcome and any credit, which the copy of your data includes. The prepaid label, which carries your address, is erased 30 days after the claim ends.',
       ],
     },
@@ -486,7 +490,7 @@ const FR: LegalDocument = {
         "Chaque connexion ouvre une session de 30 jours au plus. Elle est gardée avec un pseudonyme de votre adresse IP et la chaîne d'identification de votre navigateur (son user agent), pour la sécurité de votre compte.",
         "Le journal d'audit du service, qui enregistre chaque modification, désigne votre compte par son identifiant et un pseudonyme de l'adresse IP, jamais par votre adresse e-mail ni par votre nom.",
         "Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez. Elles présélectionnent une taille que vous confirmez ensuite, et sont comptées, sans nommer personne, avec le pays de votre compte (celui de votre adresse par défaut, sinon celui de votre profil), pour prévoir combien de pièces de chaque taille ORBES commande, et où les garder.",
-        "Si vous créez votre compte avec le lien d'invitation personnel d'un collectionneur, ORBES garde avec votre compte le compte qui vous a invité, pour donner à ce collectionneur un coffre (article 13 des [conditions générales d'utilisation](/legal/terms)) quand votre première pièce vous est enregistrée ; le service ne montre à aucun de vous deux le nom de l'autre.",
+        "Si vous créez votre compte avec le lien d'invitation personnel d'un collectionneur, ORBES garde avec votre compte le compte qui vous a invité, pour donner à ce collectionneur un coffre (article 13 des [conditions générales d'utilisation](/legal/terms)) quand votre première pièce vous est enregistrée ; le service ne montre à aucun de vous deux le nom de l'autre. ORBES garde aussi avec votre compte vos coffres (l'occasion de chacun, quand il a été ouvert et ce qu'il contenait) et, pour un crédit à offrir que vous avez accepté, le coffre dont il vient, sans vous montrer le nom du collectionneur qui l'a offert ; tout cela est conservé tant que votre compte existe et figure dans la copie de vos données.",
         "Quand vous faites jouer la garantie ou la garantie légale, ORBES conserve la demande avec votre compte : ses étapes, son issue et l'éventuel crédit, que la copie de vos données comprend. L'étiquette prépayée, qui porte votre adresse, est effacée 30 jours après la fin de la demande.",
       ],
     },

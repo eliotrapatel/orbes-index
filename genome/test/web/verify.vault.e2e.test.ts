@@ -9,7 +9,8 @@
  * the room still dark. THE VAULT page (lot Q3, step Q3.11; plan §3.5, §3b; MK V): its second door opened in place, no OPEN
  * ANOTHER, the page never dimmed, PRESS AND HOLD gone from that door alone; then its first, the open lid's box at least
  * 8 px under YOUR VAULTS · N WAITING (D69), on a phone and a computer; the page never wider than the window, closed or
- * open (each door's floor clipped sideways). A credit to give opened signed out on a phone: MY PIECES' CREATE ACCOUNT,
+ * open (each door's floor clipped sideways), THE VAULT page, SOLD OUT for your size and the end page alike (a phone, 1024 ×
+ * 768 and 1440 × 900), the end page's box on a phone as wide as SOLD OUT's. A credit to give opened signed out on a phone: MY PIECES' CREATE ACCOUNT,
  * then its page again with ACCEPT (plan §3.5, §3.10). Skipped (not failed) when the Chromium binary is absent.
  */
 import type { Page } from 'playwright-core';
@@ -21,6 +22,7 @@ import { HAS_CHROMIUM, openIn, stages, type Look } from './desktop.harness.js';
 
 const PHONE: Look = { name: 'phone', size: { width: 390, height: 844 }, light: false };
 const DESK: Look = { name: '1440 × 900, dark', size: { width: 1440, height: 900 }, light: false };
+const SMALL_DESK: Look = { name: '1024 × 768, dark', size: { width: 1024, height: 768 }, light: false };
 const TIMEOUT = 240_000;
 
 /** Hold the door with the space bar until the hold is full on the page's clock, then wait for the opening's end. */
@@ -190,6 +192,9 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT page (Chromium)', () => {
 describe.skipIf(!HAS_CHROMIUM)('THE VAULT on SOLD OUT for your size and the end page (Chromium)', () => {
   const { withStage } = stages();
 
+  /** The door's box width on the page (its `.vlt`). */
+  const boxWidth = (page: Page) => page.evaluate(() => document.querySelector('.live__vault-slot .vlt')!.getBoundingClientRect().width);
+
   /** `base` opened in `look` for `as`, `then` run on its page; the page's errors none. */
   async function onPage(st: NocturneStage, base: UiState, look: Look, extra: Partial<UiState>, then: (page: Page) => Promise<void>): Promise<void> {
     const opened = await openIn(st, { ...base, ...extra }, look);
@@ -206,14 +211,19 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT on SOLD OUT for your size and the end 
     async () => {
       await withStage('vault', async (st) => {
         const sold = stateById('live-sold-out-size-vault');
+        let soldBox = 0;
         for (const [look, as] of [
           [PHONE, 'vaultSE2e'],
           [DESK, 'vaultSOpen'],
         ] as const) {
           await onPage(st, sold, look, { as }, async (page) => {
+            // The door's floor never makes the page wider than the window (closed, then open).
+            expect(await sideways(page), `${look.name}: SOLD OUT wider than the window, closed`).toBe(0);
+            if (look === PHONE) soldBox = await boxWidth(page);
             await openTheDoor(page);
             // The opening's end (6.55 s), the page's dim (from 1.8 s over 1.25 s) long done.
             await page.waitForFunction(() => !document.querySelector('.live__vault-slot .vlt')?.classList.contains('is-playing'), null, { timeout: 15_000 });
+            expect(await sideways(page), `${look.name}: SOLD OUT wider than the window, open`).toBe(0);
             // The open box floats (30 %): the lid's clearance read over a second, its least kept.
             let least = Infinity;
             for (let i = 0; i < 5; i++) {
@@ -234,14 +244,43 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT on SOLD OUT for your size and the end 
           const buyer = run.demo.accounts.vaultEndE2eBuyer!;
           await run.stage.ctx.services.live.confirm(buyer.id, run.demo.releases.vaultEndE2e!, buyer.actor);
         } }, async (page) => {
+          expect(await sideways(page), 'the end page wider than the window, closed').toBe(0);
           await openTheDoor(page);
           await page.waitForFunction(() => !document.querySelector('.live__vault-slot .vlt')?.classList.contains('is-playing'), null, { timeout: 15_000 });
+          expect(await sideways(page), 'the end page wider than the window, open').toBe(0);
           const m = await measure(page, '.n-live__back', null);
           expect([m.againShown, m.again]).toEqual([true, 1]);
           expect(m.dim).toBeCloseTo(0.16, 2);
           // THE RELEASES clears OPEN ANOTHER (never MK's known 20 px overlap).
           expect(m.gap).toBeGreaterThanOrEqual(0);
         });
+        // SOLD OUT on a small computer (1024 × 768), and the end page there and on a phone: never wider than the window,
+        // closed or open (each door's floor clipped sideways); on the phone, the end page's box as wide as SOLD OUT's
+        // (MK draws it at the same share of the width on both). Opened under reduced motion: the same open box, at once.
+        await onPage(st, sold, SMALL_DESK, { as: 'vaultSOpenDesk' }, async (page) => {
+          expect(await sideways(page), 'SOLD OUT at 1024, closed').toBe(0);
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+          await openTheDoor(page);
+          await settle(page, 100);
+          expect(await sideways(page), 'SOLD OUT at 1024, open').toBe(0);
+        });
+        for (const [look, key] of [
+          [PHONE, 'vaultEndOpen'],
+          [SMALL_DESK, 'vaultEndOpenDesk'],
+        ] as const) {
+          await onPage(st, end, look, { as: key, path: (d) => `/verify/releases/${d.releases[key]}`, act: async (run) => {
+            await run.page.locator('.view--live .live__queue').first().waitFor();
+            const buyer = run.demo.accounts[`${key}Buyer`]!;
+            await run.stage.ctx.services.live.confirm(buyer.id, run.demo.releases[key]!, buyer.actor);
+          } }, async (page) => {
+            expect(await sideways(page), `${look.name}: the end page, closed`).toBe(0);
+            if (look === PHONE) expect(await boxWidth(page), 'the end page\'s box as wide as SOLD OUT\'s').toBeCloseTo(soldBox, 0);
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+            await openTheDoor(page);
+            await settle(page, 100);
+            expect(await sideways(page), `${look.name}: the end page, open`).toBe(0);
+          });
+        }
         // Reduced motion, light mode kept on the device: the reward at once, the dim at once, the room dark.
         await onPage(st, sold, { ...PHONE, light: true }, { as: 'vaultSRare' }, async (page) => {
           await page.emulateMedia({ reducedMotion: 'reduce' });

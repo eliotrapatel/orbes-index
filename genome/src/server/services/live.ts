@@ -126,7 +126,7 @@ import { sql, type Expression, type RawBuilder, type SqlBool } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
-import { inTransaction, type Db } from '../db/connection.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import { LIVE_HOLD_MINUTES, LIVE_PACE_BATCH, LIVE_PACE_MINUTES, type AccessCombine, type DropRow, type LiveEndReason, type LiveEntryStatus, type LiveResolution } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
@@ -1907,7 +1907,11 @@ export class LiveService {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     let leftOut: LeftOutAddon[] = [];
-    await this.changing(id, (mark, changes) => inTransaction(this.db, async (tx) => {
+    // Run again on a deadlock (lot Q3): a sell-out's vaults lock the line's accounts, which an account's lock elsewhere
+    // may hold (OwnerService.lock); each try takes its frame marks afresh and reads its add-ons left out anew.
+    await this.changing(id, (mark, changes) => inRetriedTransaction(this.db, async (tx) => {
+      changes.anew();
+      leftOut = [];
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);

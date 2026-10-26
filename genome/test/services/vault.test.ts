@@ -24,7 +24,8 @@
  * unit to reserve, THE PIECE only for a LIVE vault).
  *
  * Under concurrency (PGlite always; PostgreSQL in genome-ci, ORBES_TEST_POSTGRES_URL): four processes giving one
- * occasion give one vault and one message; two opens of one vault at once draw once.
+ * occasion give one vault and one message; two opens of one vault at once draw once; six openings at once, a row of
+ * quantity 1 drawn by all given exactly once (the table read shared, the row counted before its delivery).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -509,6 +510,15 @@ describe('THE VAULT’s rules (VaultService, giveVault)', () => {
     await expect(vault().createReward({ kind: 'PRODUCT', oddsIn: 1000, quantity: 5, modelId: edition, mode: 'RIGHT_TO_BUY' }, staff)).rejects.toMatchObject({ code: 'VAULT_ONLY_PRODUCT' });
     const product = await vault().createReward({ kind: 'PRODUCT', oddsIn: 1000, quantity: 5, modelId: f.modelId, mode: 'RIGHT_TO_BUY' }, staff);
     expect(product.rewards.find((r) => r.kind === 'PRODUCT')).toMatchObject({ modelName: 'MONOLITHE', mode: 'RIGHT_TO_BUY', addonId: null });
+    // Once a row has given, what it gave is read from it: its model, add-on and mode stay (its odds and quantity move).
+    const productRow = product.rewards.find((r) => r.kind === 'PRODUCT')!;
+    const addonRow = addon.rewards.find((r) => r.addonId === cloth.id)!;
+    await t.db.updateTable('vault_rewards').set({ given: 1 }).where('id', 'in', [productRow.id, addonRow.id]).execute();
+    const other = await createModel(t.db, 'HALO');
+    await expect(vault().updateReward(productRow.id, { oddsIn: 1000, quantity: 5, modelId: other, mode: 'RIGHT_TO_BUY' }, staff)).rejects.toMatchObject({ code: 'VAULT_REWARD_GIVEN', httpStatus: 409, message: 'This reward was given: add another row.' });
+    await expect(vault().updateReward(productRow.id, { oddsIn: 1000, quantity: 5, modelId: f.modelId, mode: 'FREE' }, staff)).rejects.toMatchObject({ code: 'VAULT_REWARD_GIVEN' });
+    await expect(vault().updateReward(addonRow.id, { kind: 'ADDON', oddsIn: 100, quantity: 10, addonId: (await ctx.services.addons.create({ name: `Pouch ${randomUUID().slice(0, 4)}`, skuCode: `ADD-POUCH-${randomUUID().slice(0, 6)}`, prices: { EUR: 900 } }, staff)).id }, staff)).rejects.toMatchObject({ code: 'VAULT_REWARD_GIVEN' });
+    await vault().updateReward(productRow.id, { oddsIn: 2000, quantity: 3, modelId: f.modelId, mode: 'RIGHT_TO_BUY' }, staff);
     // Each kind's own fields.
     const bad = (input: Record<string, unknown>) => expect(vault().createReward({ oddsIn: 100, quantity: 1, ...input }, staff)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     await bad({ kind: 'CREDIT', amountMinor: 2500, currency: 'JPY' });
@@ -773,8 +783,8 @@ describe('THE VAULT’s opening: the draw (VaultService.open)', () => {
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'FREE' })).toEqual({ ok: true, prize: 'ECLIPSE', line: 'Yours, free. In YOUR ORDERS.', unit });
     await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', model).execute();
     expect(await pick({ kind: 'PRODUCT', model_id: model, mode: 'RIGHT_TO_BUY' })).toEqual({ ok: false, why: 'MODEL' });
-    // The reveal says the kind, as the reference's REWARDS ("VAULT EDITION · Numbered, made only for the vault. Free.").
-    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: true, prize: 'VAULT EDITION', line: 'Numbered, made only for the vault. Free.', unit });
+    // The reveal says the kind, as the reference's REWARDS, without its number (SCOPE ROUND 5 "Numbers: REMOVE").
+    expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: true, prize: 'VAULT EDITION', line: 'Made only for the vault. Free.', unit });
     expect(await pick({ kind: 'VAULT_EDITION', model_id: model, line: 'Made only for the vault, never sold.' })).toMatchObject({ ok: true, prize: 'VAULT EDITION', line: 'Made only for the vault, never sold.' });
     await t.db.updateTable('models').set({ active: false }).where('id', '=', model).execute();
     expect(await pick({ kind: 'VAULT_EDITION', model_id: model })).toEqual({ ok: false, why: 'MODEL' });
@@ -885,6 +895,30 @@ for (const backend of BACKENDS) {
       expect((await db.selectFrom('vault_rewards').select('given').where('kind', '=', 'I_WAS_THERE').executeTakeFirstOrThrow()).given).toBe(floor.given + 1);
       expect(await db.selectFrom('house_deliveries').select('id').where('dedupe_key', '=', `VAULT_OPENED:${v!.id}`).execute()).toHaveLength(1);
       expect(await db.selectFrom('audit_logs').select('id').where('action', '=', 'vault.open').where('target_id', '=', v!.id).execute()).toHaveLength(1);
+    });
+
+    it('six openings at once never wait for each other on the table: a row of quantity 1 drawn by all is given exactly once, the others the card', async () => {
+      const clock = createManualClock('2026-11-03T09:00:00.000Z');
+      // Every draw lands on the table's first part: the CREDIT row below.
+      const services = [0, 1, 2, 3, 4, 5].map(() => {
+        const audit = new AuditService({ db, clock: clock.now });
+        return new VaultService({ db, audit, profiles: new ProfileService({ db, audit, tastes: new TasteService({ db, clock: clock.now }), clock: clock.now }), clock: clock.now, random: () => 0 });
+      });
+      const email = `vault-staff-${randomUUID()}@orbes.test`;
+      const staffId = (await db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id;
+      const table = await services[0]!.createReward({ kind: 'CREDIT', oddsIn: 2, quantity: 1, amountMinor: 2500, currency: 'EUR' }, { type: 'admin', id: staffId });
+      const row = table.rewards.find((r) => r.kind === 'CREDIT')!;
+      const vaults: { account: string; vault: string }[] = [];
+      for (let i = 0; i < 6; i++) {
+        const a = await createAccount(db);
+        vaults.push({ account: a.id, vault: (await services[0]!.give({ source: 'PROFILE', accountId: a.id })).vaults[0]!.id });
+      }
+      const reveals = await Promise.all(vaults.map((x, i) => services[i]!.open(x.account, x.vault)));
+      expect(reveals.filter((r) => r.kind === 'CREDIT')).toHaveLength(1);
+      expect(reveals.filter((r) => r.kind === 'I_WAS_THERE')).toHaveLength(5);
+      expect((await db.selectFrom('vault_rewards').select('given').where('id', '=', row.id).executeTakeFirstOrThrow()).given).toBe(1);
+      expect(await db.selectFrom('vaults').select('id').where('reward_id', '=', row.id).execute()).toHaveLength(1);
+      await services[0]!.deactivateReward(row.id, { type: 'admin', id: staffId });
     });
   });
 }

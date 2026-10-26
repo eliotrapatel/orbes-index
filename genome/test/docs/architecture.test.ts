@@ -448,6 +448,7 @@ describe('the other documents of THE VAULT (plan §7)', () => {
       ['VAULT_REWARD_SERVICE', 409, 'server/services/vault.ts', 'A service cannot be a vault’s reward.'],
       ['VAULT_EDITION_MODEL', 409, 'server/services/vault.ts', 'A VAULT EDITION is a model marked vault-only. Mark the model first.'],
       ['VAULT_ONLY_PRODUCT', 409, 'server/services/vault.ts', 'A vault-only model is never sold: give it as a VAULT EDITION.'],
+      ['VAULT_REWARD_GIVEN', 409, 'server/services/vault.ts', 'This reward was given: add another row.'],
       ['VAULT_FLOOR_FIXED', 409, 'server/services/vault.ts', 'I WAS THERE is the floor: it is always there, its odds the rest.'],
       ['VAULT_SOURCE_OFF', 409, 'server/services/vault.ts', 'THE HOUSE is switched off in CLUB > THE VAULT. Switch it on first.'],
       ['VAULT_SIZE_NONE_LEFT', 409, 'server/services/vault-orders.ts', 'None is left in that size. Your piece stays in its size.'],

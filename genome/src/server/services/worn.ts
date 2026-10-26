@@ -55,7 +55,7 @@ import { conflict, DomainError, forbidden, notFound } from '../errors.js';
 import { sanitizeImage } from '../media/image.js';
 import { makePage, pageOffset, SYSTEM_ACTOR, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import { countryName } from '../../shared/countries.js';
-import type { AuditService } from './audit.js';
+import type { AuditRecordInput, AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { findProduct } from './lifecycle.js';
 import type { ImageUpload } from './media.js';
@@ -656,16 +656,18 @@ export class WornService {
         })
         .where('id', '=', id)
         .execute();
-      await this.audit.record(
-        { actor, action, targetType: 'worn_photo', targetId: id, details: { id, productId: await serialOf(tx, w.product_id), ...(refusal ? { refusal } : {}) } },
-        tx,
-      );
       // THE VAULT (A WORN PHOTOGRAPH PUBLISHED; OP-29 "one per published WORN photograph, at most one per piece"): its
-      // sender's vault while their ownership is open; a photograph taken down later keeps it.
+      // sender's vault while their ownership is open; a photograph taken down later keeps it. Given before the audit
+      // entries (giveVault locks the account): no row is locked after the audit chain's lock.
+      let given: AuditRecordInput[] = [];
       if (to === 'PUBLISHED') {
         const open = await tx.selectFrom('ownership').select('id').where('id', '=', w.ownership_id).where('account_id', '=', w.account_id).where('ended_at', 'is', null).executeTakeFirst();
-        if (open) for (const n of (await giveVault(tx, { source: 'WORN', accountId: w.account_id, productId: w.product_id, wornPhotoId: id }, at)).notes) await this.audit.record(n, tx);
+        if (open) given = (await giveVault(tx, { source: 'WORN', accountId: w.account_id, productId: w.product_id, wornPhotoId: id }, at)).notes;
       }
+      await this.audit.recordAll(
+        [{ actor, action, targetType: 'worn_photo', targetId: id, details: { id, productId: await serialOf(tx, w.product_id), ...(refusal ? { refusal } : {}) } }, ...given],
+        tx,
+      );
     });
   }
 

@@ -23,7 +23,7 @@ Le point de départ : la production tourne ADD-ONS ONE SYSTEM, son commit `5e051
 9. **Aucun autre commit que le commit final**, que te donne le rapport de Claude : la branche `orbes-one-queue` (sa propre branche distante, jamais `main`, jamais une pull request), sa CI verte, fusionnée dans `claude/orbes-genome-code-system-o8bmnk` en avance rapide jusqu'à ce commit exact. Tu pousses toi-même la branche de déploiement, sur ton accord.
 10. **Les secrets ne se collent jamais dans une conversation.** Ce déploiement n'en crée ni n'en affiche.
 11. **Le lancement est gardé** : `pgrep -a pg_dump || scripts/deploy.sh` ne démarre `deploy.sh` que si aucune sauvegarde (`pg_dump`, de n'importe quel projet de l'hôte) ne tourne.
-12. **Les pages légales changent** : les conditions, article 13, un seul paragraphe (*THE VAULT*), et la politique de confidentialité, une seule phrase (le lien d'invitation, dans *Your ORBES account*), en anglais et en français, dans une seule nouvelle version, `2026-10-26`. Les conditions ORBES CARE (l'article 11 et son PDF) gardent leur version, `2026-10-15`. La relecture par un avocat ne retient jamais le déploiement (D59).
+12. **Les pages légales changent** : les conditions, article 13, un seul paragraphe (*THE VAULT*), et article 14, une phrase dans son premier paragraphe (les commandes de THE VAULT : une pièce gagnée, à réclamer dans les 30 jours, ou achetée sous son droit d'achat de 24 heures), et la politique de confidentialité, un seul bloc (le lien d'invitation, puis les coffres gardés avec le compte et le coffre d'un crédit à offrir accepté, dans *Your ORBES account*), en anglais et en français, dans une seule nouvelle version, `2026-10-26`. Les conditions ORBES CARE (l'article 11 et son PDF) gardent leur version, `2026-10-15`. La relecture par un avocat ne retient jamais le déploiement (D59).
 
 ---
 
@@ -668,7 +668,7 @@ Sur le prochain vrai colis d'une commande LIVE, DRAW ou SALON, dans `Logistics` 
 
 #### 10. Les pages légales
 
-Sur ton téléphone, TERMS et PRIVACY au pied de page : « Version of 26 October 2026 » sous le titre ; dans les conditions, article 13, le paragraphe « THE VAULT. » ; dans la politique de confidentialité, partie « Your ORBES account », la phrase du lien d'invitation (« If you create your account with a collector's personal invitation link, … »).
+Sur ton téléphone, TERMS et PRIVACY au pied de page : « Version of 26 October 2026 » sous le titre ; dans les conditions, article 13, le paragraphe « THE VAULT. », et article 14, au premier paragraphe, « or a piece from THE VAULT (article 13) » ; dans la politique de confidentialité, partie « Your ORBES account », la phrase du lien d'invitation (« If you create your account with a collector's personal invitation link, … ») suivie de celle des coffres (« ORBES also keeps with your account your vaults … »).
 
 #### 11. La gravure, un ADMIN seul pour ses prix
 
@@ -694,9 +694,7 @@ Dans cet ordre, quand tu veux :
 2. **Ce qui a eu lieu avant le déploiement** (N7). Aucun coffre pour les profils déjà complets, les paliers déjà tenus ni les pièces déjà enregistrées. Les donner une fois ?
 3. **THE VAULT CARD** (N9). La carte ne va pas dans le colis d'une pièce offerte par un coffre (commande `Vault` à 0), d'un échange, ni tant que l'occasion de la pièce achetée est éteinte, puisqu'elle dit « we have added a vault » sans qu'aucun coffre ne soit ajouté. On garde ?
 4. **Reprendre un coffre** (N36). Seule une pièce retournée reprend son coffre non ouvert. Un bouton pour reprendre un coffre donné par erreur (GIVE A VAULT au mauvais client) ou par abus, avec sa phrase dans les conditions : on le fait ?
-5. **La phrase de la politique de confidentialité** (D70). Le lien d'invitation garde quel compte en a invité un autre ; une phrase le dit. Ta ligne du 24 octobre (« pas de changement de la politique ») visait Q1 : on garde celle-ci ?
+5. **Les phrases de la politique de confidentialité** (D70). Le lien d'invitation garde quel compte en a invité un autre, et chaque compte garde ses coffres (leur occasion, leur ouverture, ce qu'ils contenaient) et le coffre d'un crédit à offrir qu'il a accepté, sans nommer l'autre collectionneur ; deux phrases le disent, et la copie des données d'un compte les donne. Ta ligne du 24 octobre (« pas de changement de la politique ») visait Q1 : on garde celles-ci ?
 6. **Un échange** (N8). La pièce de remplacement d'un échange n'ouvre pas de coffre, même quand la première n'avait jamais été enregistrée : cet acheteur n'en a alors aucun. On garde ?
 7. **Un palier atteint de nouveau.** Un palier donne un coffre une seule fois, pour toujours : un plafond au-dessus de 1 pour `New tier` ne change rien. On garde ?
-8. **La copie des données d'un compte.** Elle donne ses crédits et ses messages FROM ORBES, mais pas encore ses coffres ni qui l'a invité. On les ajoute ?
-9. **La ligne par défaut d'une VAULT EDITION.** Elle lit « Numbered, made only for the vault. Free. », les mots de la démonstration, alors qu'aucun numéro n'est fait (tu peux écrire la tienne sur sa ligne, `Its line`). On retire « Numbered » ?
-10. **L'avocat** : le paragraphe THE VAULT des conditions et la phrase du lien d'invitation partent avec la version `2026-10-26` (la note au juriste, points 38 et 39). Sa réponse ne retient pas le déploiement.
+8. **L'avocat** : le paragraphe THE VAULT et la phrase de l'article 14 des conditions, et les phrases du lien d'invitation et des coffres, partent avec la version `2026-10-26` (la note au juriste, points 38 et 39). Sa réponse ne retient pas le déploiement.

@@ -100,6 +100,11 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * sentence, the invitation link kept with the account (N22, read with D70). HOW RELEASES WORK unchanged. The date of the
  * lot's final legal commit, never Q2's published 2026-10-25 (the day after it). Article 11 did not change:
  * CARE_CONDITIONS_VERSION stays 2026-10-15; the consents recorded with the version in force move with it.
+ * The review of lot Q3 (L2), the same day and still unpublished, its final legal commit: article 14's first paragraph
+ * names THE VAULT's orders (a piece won free, claimed in YOUR ORDERS within 30 days, then PAID at no cost, cancelled if
+ * unclaimed; one bought at its usual price within its 24-hour right to buy), and the privacy policy's invitation block
+ * adds the vaults kept with the account and the vault a credit to give accepted came from, kept while the account exists
+ * and in the copy of its data. The version stays 2026-10-26.
  */
 export const LEGAL_VERSION = '2026-10-26';
 

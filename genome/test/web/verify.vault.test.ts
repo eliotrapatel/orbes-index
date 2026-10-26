@@ -123,7 +123,8 @@ describe('THE VAULT page (lot Q3, step Q3.11; MK V)', () => {
     expect(parisTime('2026-10-21T19:14:00Z')).toBe('21:14');
     expect([vaultQuietNumber(2), vaultQuietNumber(0), vaultQuietNumber(null)]).toEqual(['2', null, null]);
     expect(nowVaultLine(1)).toEqual({ label: 'A VAULT IS WAITING FOR YOU', action: 'OPEN' });
-    expect(nowVaultLine(3)?.label).toBe('3 VAULTS ARE WAITING FOR YOU');
+    // One line for any count (plan §3.7): the count is the quiet number's, next to THE VAULT (D18).
+    expect(nowVaultLine(3)?.label).toBe('A VAULT IS WAITING FOR YOU');
     expect(nowVaultLine(0)).toBeNull();
   });
 

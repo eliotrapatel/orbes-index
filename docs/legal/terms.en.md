@@ -250,7 +250,7 @@ A LIVE RELEASE is a release that takes place live, without a draw: ORBES announc
 
 ## Article 14 — Orders
 
-Each piece reserved for an account is an order: a piece of a LIVE RELEASE confirmed with PAY (one order per piece), a place of a release whose sale ORBES Client Services confirms, or a request of the private salon it accepts (article 12). MY PIECES shows each of your orders with its reference, the model, the size, the options and the price, and its steps with their dates. The size and the price of an order from a release or the private salon read TO BE CONFIRMED until ORBES Client Services enters them.
+Each piece reserved for an account is an order: a piece of a LIVE RELEASE confirmed with PAY (one order per piece), a place of a release whose sale ORBES Client Services confirms, a request of the private salon it accepts (article 12), or a piece from THE VAULT (article 13): one won free, which you claim in YOUR ORDERS within 30 days (it is then PAID, at no cost, and cancelled if it is not claimed), or one bought at its usual price within the 24 hours of its right to buy. MY PIECES shows each of your orders with its reference, the model, the size, the options and the price, and its steps with their dates. The size and the price of an order from a release or the private salon read TO BE CONFIRMED until ORBES Client Services enters them.
 
 **Its steps.** An order is RESERVED, then PAID, SHIPPED and DELIVERED. It may be CANCELLED while it is RESERVED or PAID, and RETURNED once it is SHIPPED or DELIVERED; no other step is possible. ORBES Client Services records each step; nothing is paid on the service. An order is PAID only once its price is entered.
 
@@ -268,7 +268,7 @@ Each piece reserved for an account is an order: a piece of a LIVE RELEASE confir
 
 **What is recorded.** For each order, the service records the account, where it comes from, the model, the size, the price, the options, the surprise of its release, the engraving text, the buyer's name and address, the time of each step with the note ORBES Client Services may add, the carrier, the tracking number and the value declared for its insurance, where its piece is kept, and its invoices; the privacy policy says more (article 17).
 
-*Code: R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146, R152, R153, R154, R180, R181, R182, R183, R184, R186, R187, R188, R189, R190, R191, R192.*
+*Code: R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146, R152, R153, R154, R180, R181, R182, R183, R184, R186, R187, R188, R189, R190, R191, R192, R203.*
 
 ## Article 15 — The owners' circle
 

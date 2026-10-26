@@ -286,4 +286,18 @@ describe('THE VAULT in the console (lot Q3, step Q3.9)', () => {
     await operator.post('/api/admin/vault/rewards', { kind: 'PRODUCT', oddsIn: 500, quantity: 3, modelId: id, mode: 'FREE' });
     expect(errorOf(await put(operator, `/api/admin/models/${id}/vault-only`, { vaultOnly: true })).code).toBe('VAULT_ONLY_PRODUCT');
   });
+
+  it('a model’s VAULT ONLY is refused while the model is on sale: a published release not ended, an open request of the private salon; allowed once they end', async () => {
+    const id = await createModel(h.t.db, 'ON SALE');
+    const r = await createLiveRelease(f, { modelId: id, opensAt: new Date(h.clock.now().getTime() + HOUR) });
+    const refused = await put(operator, `/api/admin/models/${id}/vault-only`, { vaultOnly: true });
+    expect(errorOf(refused)).toMatchObject({ code: 'VAULT_ONLY_PRODUCT', message: 'This model is on sale in a release, a draw or the private salon: wait for its end before marking it vault-only.' });
+    await h.t.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', r.id).execute();
+    const account = await createAccount(h.t.db);
+    const request = await h.t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: id, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    expect(errorOf(await put(operator, `/api/admin/models/${id}/vault-only`, { vaultOnly: true })).code).toBe('VAULT_ONLY_PRODUCT');
+    await h.ctx.services.salon.close(request.id, { note: 'Not this season.', outcome: 'DECLINED' }, staff);
+    expect((safeJson(await put(operator, `/api/admin/models/${id}/vault-only`, { vaultOnly: true })) as Json).vaultOnly).toBe(true);
+    expect((await audits('model.vault_only')).filter((x) => x.target_id === id)).toHaveLength(1);
+  });
 });

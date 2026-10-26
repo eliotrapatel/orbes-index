@@ -1608,6 +1608,14 @@ body[data-screen="live"] .corners {
   margin-top: 34px;
 }
 
+/* A LIVE page holding THE VAULT's door (SOLD OUT for your size, the end page; phone and computer): each door's floor
+   (vault.css .vo-floor) reaches wider than the window once projected, so the app is clipped sideways, never up or down
+   (the open lid, the float), and the page never scrolls sideways. `clip` makes no scroll container: the sticky menu
+   stays. THE VAULT page clips the same way (vault-page.css). */
+.app:has(.live__vault-slot.has-vault) {
+  overflow-x: clip;
+}
+
 /* THE VAULT in its place (lot Q3, step Q3.10; MK S, 11): the slot gives the box the column's width; the block's own
    margin is the slot's (34 px under the sentence, only once it holds a vault: an empty slot takes no room), the room
    above the box for its open lid its own padding (vault.css, D69: 36 px on a phone, 78 px on a computer). */
@@ -1711,6 +1719,8 @@ body[data-screen="live"] .corners {
 
 .view--live.live--end-vault:not(.d-room) .n-live__end > .live__vault-slot.has-vault {
   margin-top: 34px;
+  /* The box at the same share of the width as on SOLD OUT (MK 11 as MK S): never the page's text gutter. */
+  padding-inline: 0;
 }
 
 .live__place {

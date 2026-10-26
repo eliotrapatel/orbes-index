@@ -381,6 +381,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // No grant of a tier either: one piece is TITANE (the test below exports them).
       expect(x.tierGrants).toEqual([]);
       expect(x.claimCodes).toEqual([]);
+      // Nothing of THE VAULT yet (the test below exports it).
+      expect([x.vaults, x.invitation, x.invited, x.vaultGifts]).toEqual([[], null, { invitedBy: false, invitedAt: null }, []]);
       // No email chosen nor written (the emails are off here; test/services/owners.test.ts exports them).
       expect(x.emailPreferences).toEqual({ releaseNotices: false, changedAt: null });
       expect(x.emails).toEqual([]);
@@ -414,7 +416,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, warrantyClaims: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, origin: 2, foundingList: 0, emails: 0, houseMessages: 0, wornPhotos: 0, claimCodes: 0, tierGrants: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, warrantyClaims: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, origin: 2, foundingList: 0, emails: 0, houseMessages: 0, wornPhotos: 0, claimCodes: 0, tierGrants: 0, vaults: 0, vaultGifts: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
@@ -727,6 +729,49 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(JSON.stringify(x.tierGrants)).not.toContain(operator.email);
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit[0]!.details).toMatchObject({ tierGrants: 2 });
+    });
+
+    it('holds THE VAULT (lot Q3): its vaults with their occasion, state and what each held, its invitation, whether it was invited (never by whom), the credits to give it gave or accepted (never the other account); never the house\'s note nor who gave a vault', async () => {
+      const giver = await accountClient(h);
+      const gid = await accountIdOf(giver.email);
+      const friend = await accountClient(h);
+      const fid = await accountIdOf(friend.email);
+      const operator = await createAdmin(h.ctx, 'OPERATOR');
+      const staff = { type: 'admin' as const, id: operator.id };
+      const vault = h.ctx.services.vault;
+      // A credit to give at one in one: the giver's opening holds it.
+      const table = await vault.createReward({ kind: 'CREDIT_TO_GIVE', oddsIn: 1, quantity: 10, amountMinor: 3_000, currency: 'EUR' }, staff);
+      const row = table.rewards.find((r) => r.kind === 'CREDIT_TO_GIVE')!;
+      const house = (await vault.settings()).sources.find((x) => x.source === 'HOUSE')!;
+      await vault.setSource('HOUSE', { enabled: true, perOccasion: house.perOccasion, cap: house.cap }, staff);
+      const given = await vault.give({ source: 'HOUSE', accountId: gid, giftId: randomUUID(), givenBy: operator.id, note: 'For the evening of the opening.' });
+      const reveal = await vault.open(gid, given.vaults[0]!.id);
+      await vault.deactivateReward(row.id, staff);
+      h.clock.advance(60_000);
+      expect((await vault.give({ source: 'HOUSE', accountId: gid, giftId: randomUUID(), givenBy: operator.id })).vaults).toHaveLength(1);
+      const { code } = await vault.invitation(gid);
+      h.clock.advance(60_000);
+      await vault.acceptGift(fid, reveal.giftCode);
+      await h.t.db.updateTable('accounts').set({ invited_by: gid, invited_at: h.clock.now() }).where('id', '=', fid).execute();
+      const admin = await adminClient(h, 'ADMIN');
+      const g = safeJson(await admin.get(`/api/admin/owners/${gid}/export`)) as Record<string, any>;
+      expect(g.vaults).toEqual([
+        expect.objectContaining({ source: 'HOUSE', occasion: 'FROM THE HOUSE', detail: null, state: 'OPENED', kind: 'CREDIT_TO_GIVE', prize: '€30 TO GIVE', line: 'For a friend’s first piece.', odds: '1 IN 1', revokedAt: null }),
+        expect.objectContaining({ source: 'HOUSE', state: 'WAITING', openedAt: null, kind: null, prize: null, odds: null }),
+      ]);
+      expect(g.invitation).toEqual({ code, createdAt: expect.any(String) });
+      expect(g.invited).toEqual({ invitedBy: false, invitedAt: null });
+      expect(g.vaultGifts).toEqual([{ role: 'GAVE', amountMinor: 3_000, currency: 'EUR', state: 'ACCEPTED', createdAt: expect.any(String), expiresAt: expect.any(String), acceptedAt: expect.any(String) }]);
+      const raw = JSON.stringify(g);
+      for (const hidden of ['For the evening of the opening.', operator.id, operator.email, fid, friend.email]) expect(raw).not.toContain(hidden);
+      const f = safeJson(await admin.get(`/api/admin/owners/${fid}/export`)) as Record<string, any>;
+      expect(f.vaults).toEqual([]);
+      expect(f.invitation).toBeNull();
+      expect(f.invited).toEqual({ invitedBy: true, invitedAt: expect.any(String) });
+      expect(f.vaultGifts).toEqual([expect.objectContaining({ role: 'ACCEPTED', amountMinor: 3_000, currency: 'EUR', state: 'ACCEPTED' })]);
+      for (const hidden of [gid, giver.email, code]) expect(JSON.stringify(f)).not.toContain(hidden);
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: gid })).items;
+      expect(audit[0]!.details).toMatchObject({ vaults: 2, vaultGifts: 1 });
     });
 
     it('holds the account\'s messages with ORBES Client Services, signed ORBES Client Services, never who answered; the sheet links the conversation (CS-01)', async () => {

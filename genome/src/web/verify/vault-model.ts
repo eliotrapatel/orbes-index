@@ -89,7 +89,7 @@ export function vaultQuietNumber(waiting: number | null | undefined): string | n
 
 /** NOW's line (D18): its words while a vault waits; null otherwise. */
 export function nowVaultLine(waiting: number | null | undefined): { label: string; action: string } | null {
-  return typeof waiting === 'number' && Number.isInteger(waiting) && waiting > 0 ? { label: VAULT.now.label(waiting), action: VAULT.now.open } : null;
+  return typeof waiting === 'number' && Number.isInteger(waiting) && waiting > 0 ? { label: VAULT.now.label, action: VAULT.now.open } : null;
 }
 
 /** A door of YOUR VAULTS. */
