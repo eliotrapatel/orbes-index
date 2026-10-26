@@ -893,6 +893,34 @@ export const MARGIN_UNIT_COST_KEYS = [
 ] as const;
 export type MarginUnitCostKey = (typeof MARGIN_UNIT_COST_KEYS)[number];
 
+/**
+ * Partner-paid experiences (migration 0064, macro scope K49 P1 to P4; lot M4 plan §2.2): a partner's brand (one line, unique
+ * whatever the case), its contact's and billing name, email, phone, billing address (line breaks kept), company number and
+ * note, at most; an experience's title and note, at most; its amount and an invoice's total, 1 to PARTNER_AMOUNT_MINOR_MAX
+ * minor units, in a house currency.
+ */
+export const PARTNER_BRAND_MAX = 80;
+export const PARTNER_NAME_MAX = 120;
+export const PARTNER_EMAIL_MAX = 254;
+export const PARTNER_PHONE_MAX = 40;
+export const PARTNER_BILLING_ADDRESS_MAX = 1_000;
+export const PARTNER_COMPANY_NUMBER_MAX = 60;
+export const PARTNER_NOTE_MAX = 2_000;
+export const PARTNER_EXPERIENCE_TITLE_MAX = 120;
+export const PARTNER_AMOUNT_MINOR_MAX = 100_000_000;
+/**
+ * A partner experience's states (partner_experiences.status, migration 0064, P1): DRAFT, INVOICED (its invoice issued),
+ * PAID (the date the money arrived, entered by ORBES), CANCELLED (from any of them; an invoiced one gets its credit note).
+ */
+export const PARTNER_EXPERIENCE_STATUSES = ['DRAFT', 'INVOICED', 'PAID', 'CANCELLED'] as const;
+export type PartnerExperienceStatus = (typeof PARTNER_EXPERIENCE_STATUSES)[number];
+/**
+ * A partner invoice, or the credit note that follows one (partner_invoices.kind, migration 0064, P4), each in its own
+ * series per UTC year of issue, apart from the collectors' INV- and CN-: P-2026-0001 and PC-2026-0001.
+ */
+export const PARTNER_INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type PartnerInvoiceKind = (typeof PARTNER_INVOICE_KINDS)[number];
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -1582,6 +1610,11 @@ export interface CirclePostsTable {
   segment_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0026 (BP-19 T7): what an INVITATION is (the members' evening, a launch preview, a partner experience); null otherwise. */
   experience: ColumnType<CircleExperience | null, CircleExperience | null | undefined, CircleExperience | null>;
+  /**
+   * Migration 0064 (macro scope K49 P2): the partner experience this invitation is for (partner_experiences.id), on an
+   * invitation whose experience is PARTNER_EXPERIENCE only (`circle_posts_partner_experience`); null otherwise.
+   */
+  partner_experience_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** The photographs of a circle post (migration 0016, P-X01): at most 4, positions 1–4; post_id, sha256, created_by and created_at never change. */
@@ -1601,6 +1634,13 @@ export interface CircleRsvpsTable {
   answer: CircleRsvpAnswer;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
+  /**
+   * Migration 0064 (macro scope K49 P3): the guest chose to share their name with the invitation's partner; on a YES only
+   * (`circle_rsvps_share_name_yes`), false by default, cleared by a NO. `share_name_at`: when, set exactly while it is on
+   * (`circle_rsvps_share_name`).
+   */
+  share_name: WithDefault<boolean>;
+  share_name_at: TimestampNullable;
 }
 
 /** An account's vote in a poll of the circle (migration 0016, P-X01): one per account and post, final. */
@@ -2752,6 +2792,82 @@ export interface CategoryAllowancesTable {
 }
 
 /**
+ * A partner (migration 0064, macro scope K49 P1; lot M4 plan §2.2): a brand that pays ORBES for an experience offered to
+ * the circle. Its brand (1..PARTNER_BRAND_MAX, one line, unique whatever the case) as the invitation shows it; its contact;
+ * its billing details as its invoices print them (the name, the address and the country required to invoice; the company
+ * number printed when given); a note; `active` (false: SET ASIDE, offered for no new experience). Never deleted. id,
+ * created_at and created_by never change; updated_at is stamped on every update.
+ */
+export interface PartnersTable {
+  id: Generated<string>;
+  brand: string;
+  contact_name: NullableText;          // ≤ PARTNER_NAME_MAX, one line
+  contact_email: NullableText;         // 3..PARTNER_EMAIL_MAX
+  contact_phone: NullableText;         // ≤ PARTNER_PHONE_MAX, one line
+  billing_name: NullableText;          // ≤ PARTNER_NAME_MAX, one line
+  billing_address: NullableText;       // ≤ PARTNER_BILLING_ADDRESS_MAX, line breaks kept
+  /** ISO 3166-1 alpha-2 (^[A-Z]{2}$). */
+  billing_country: NullableText;
+  company_number: NullableText;        // ≤ PARTNER_COMPANY_NUMBER_MAX, one line
+  note: NullableText;                  // ≤ PARTNER_NOTE_MAX, line breaks kept
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A partner's experience (migration 0064, K49 P1): the deal, its title, the event's date (Paris), the amount the partner
+ * pays and its house currency. DRAFT → INVOICED (`invoiced_at`) → PAID (`paid_on`, recorded at `paid_recorded_at` by
+ * `paid_recorded_by`), or CANCELLED (`cancelled_at`, `cancelled_by`) from any of them, keeping the times it had; each state
+ * with its own times only (the `partner_experiences_*` CHECKs). Never deleted. id, partner_id, created_at and created_by
+ * never change; updated_at is stamped on every update.
+ */
+export interface PartnerExperiencesTable {
+  id: Generated<string>;
+  partner_id: ColumnType<string, string, never>;
+  title: string;                       // 1..PARTNER_EXPERIENCE_TITLE_MAX, one line
+  /** 'YYYY-MM-DD', the event's date in Paris. */
+  event_on: string;
+  amount_minor: number;                // bigint 1..PARTNER_AMOUNT_MINOR_MAX
+  currency: HouseCurrency;
+  note: NullableText;                  // ≤ PARTNER_NOTE_MAX, line breaks kept
+  status: WithDefault<PartnerExperienceStatus>;
+  invoiced_at: TimestampNullable;
+  /** 'YYYY-MM-DD', the date the partner's money arrived. */
+  paid_on: DateNullable;
+  paid_recorded_at: TimestampNullable;
+  paid_recorded_by: NullableAdmin;
+  cancelled_at: TimestampNullable;
+  cancelled_by: NullableAdmin;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * An invoice ORBES issues to a partner, or the credit note that follows it (migration 0064, K49 P1 and P4): numbered per
+ * kind and UTC year in its own series (P-2026-0001, PC-2026-0001, under ADVISORY_LOCK.PARTNER_INVOICE_NUMBER), one INVOICE
+ * per experience, a credit note naming the invoice it cancels; its issuer, buyer and lines as issued, its currency and
+ * total, without VAT. Never changed nor deleted.
+ */
+export interface PartnerInvoicesTable {
+  id: Generated<string>;
+  kind: PartnerInvoiceKind;
+  year: number;                        // smallint 2000..2099, the UTC year of issue
+  sequence: number;                    // 1..999 999
+  experience_id: string;
+  credits_invoice_id: ColumnType<string | null, string | null | undefined, string | null>;
+  issuer: Jsonb<JsonObject>;
+  buyer: Jsonb<JsonObject>;
+  lines: Jsonb<JsonValue[]>;
+  currency: HouseCurrency;
+  total_minor: number;                 // bigint 1..PARTNER_AMOUNT_MINOR_MAX
+  issued_at: TimestampDefault;
+  issued_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id; null for a script
+}
+
+/**
  * An add-on (migration 0056, macro scope K48 D1; lot M3 plan §4.1): a catalogue item with real stock, sold with a piece,
  * its name (1..40, unique whatever the case, as the collector reads it) and line (1..120), its supplier and weight
  * (1..30 000 g), the order it is offered in, `active` (set aside when false, never deleted) and its Shopify product (S5).
@@ -3885,6 +4001,9 @@ export interface Database {
   shipping_cost_rates: ShippingCostRatesTable;
   margin_unit_costs: MarginUnitCostsTable;
   category_allowances: CategoryAllowancesTable;
+  partners: PartnersTable;
+  partner_experiences: PartnerExperiencesTable;
+  partner_invoices: PartnerInvoicesTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;

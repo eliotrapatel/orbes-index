@@ -514,6 +514,14 @@ describe('admin enums mirror the server', () => {
     // margin's currency and the unit costs' keys (THE VAULT CARD among them, D61), as the server holds them.
     for (const name of ['CURRENCY_RATE_MAX', 'CURRENCY_RATE_DECIMALS', 'SHIPMENT_WEIGHT_G_MAX', 'MARGIN_COST_MINOR_MAX', 'ALLOWANCE_BP_MAX', 'MARGIN_CURRENCY'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect([...web.MARGIN_UNIT_COST_KEYS]).toEqual([...serverSchema.MARGIN_UNIT_COST_KEYS]);
+    // Partner-paid experiences (macro scope K49, migration 0064): the partner's and the experience's bounds, the states and
+    // the invoice kinds, as the server holds them.
+    for (const name of [
+      'PARTNER_BRAND_MAX', 'PARTNER_NAME_MAX', 'PARTNER_EMAIL_MAX', 'PARTNER_PHONE_MAX', 'PARTNER_BILLING_ADDRESS_MAX', 'PARTNER_COMPANY_NUMBER_MAX',
+      'PARTNER_NOTE_MAX', 'PARTNER_EXPERIENCE_TITLE_MAX', 'PARTNER_AMOUNT_MINOR_MAX',
+    ] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect([...web.PARTNER_EXPERIENCE_STATUSES]).toEqual([...serverSchema.PARTNER_EXPERIENCE_STATUSES]);
+    expect([...web.PARTNER_INVOICE_KINDS]).toEqual([...serverSchema.PARTNER_INVOICE_KINDS]);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

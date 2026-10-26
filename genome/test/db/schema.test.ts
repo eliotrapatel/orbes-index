@@ -163,6 +163,10 @@ describe('schema', () => {
       ['orders', 'address_by', S.ADDRESS_SOURCES],
       ['orders', 'engraving_by', S.ADDRESS_SOURCES],
       ['invoices', 'credit_scope', S.CREDIT_SCOPES],
+      ['partner_experiences', 'status', S.PARTNER_EXPERIENCE_STATUSES],
+      ['partner_experiences', 'currency', S.HOUSE_CURRENCIES],
+      ['partner_invoices', 'kind', S.PARTNER_INVOICE_KINDS],
+      ['partner_invoices', 'currency', S.HOUSE_CURRENCIES],
       ['account_profiles', 'birth_date_by', S.PROFILE_SOURCES],
       ['account_profiles', 'updated_by', S.PROFILE_SOURCES],
       ['account_tastes', 'kind', S.TASTE_KINDS],
@@ -1822,6 +1826,98 @@ describe('schema', () => {
     await t.db.deleteFrom('shipping_cost_rates').execute();
     await t.db.deleteFrom('margin_unit_costs').execute();
     await t.db.deleteFrom('category_allowances').execute();
+    await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
+  });
+
+  it('partners (0064): every bound is schema.ts\'s; the mirror at work: a partner, an experience paid then cancelled, its invoice and credit note as issued (bigint amounts read as numbers, the date as its text), an invitation linked to it and a name shared on a YES', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    for (const [table, constraint, max] of [
+      ['partners', 'partners_brand_check', S.PARTNER_BRAND_MAX],
+      ['partners', 'partners_contact_name_check', S.PARTNER_NAME_MAX],
+      ['partners', 'partners_contact_email_check', S.PARTNER_EMAIL_MAX],
+      ['partners', 'partners_contact_phone_check', S.PARTNER_PHONE_MAX],
+      ['partners', 'partners_billing_name_check', S.PARTNER_NAME_MAX],
+      ['partners', 'partners_billing_address_check', S.PARTNER_BILLING_ADDRESS_MAX],
+      ['partners', 'partners_company_number_check', S.PARTNER_COMPANY_NUMBER_MAX],
+      ['partners', 'partners_note_check', S.PARTNER_NOTE_MAX],
+      ['partner_experiences', 'partner_experiences_title_check', S.PARTNER_EXPERIENCE_TITLE_MAX],
+      ['partner_experiences', 'partner_experiences_note_check', S.PARTNER_NOTE_MAX],
+      ['partner_experiences', 'partner_experiences_amount_minor_check', S.PARTNER_AMOUNT_MINOR_MAX],
+      ['partner_invoices', 'partner_invoices_total_minor_check', S.PARTNER_AMOUNT_MINOR_MAX],
+    ] as const) {
+      expect(await def(table, constraint), constraint).toContain(`<= ${max}`);
+    }
+    expect(S.PARTNER_INVOICE_KINDS).toEqual(S.INVOICE_KINDS);
+
+    const admin = await t.db.insertInto('admin_users').values({ email: 'partners-s0064@orbes.test', email_normalized: 'partners-s0064@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const partner = await t.db
+      .insertInto('partners')
+      .values({ brand: 'MAISON S', billing_name: 'MAISON S SAS', billing_address: '1 place Vendôme\n75001 Paris', billing_country: 'FR', created_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(partner).toMatchObject({ brand: 'MAISON S', contact_email: null, billing_country: 'FR', company_number: null, active: true, created_by: admin.id });
+    await expect(t.db.insertInto('partners').values({ brand: 'maison s' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'partners_brand_key'));
+    const experience = await t.db
+      .insertInto('partner_experiences')
+      .values({ partner_id: partner.id, title: 'DINNER', event_on: '2026-11-12', amount_minor: 100_000_000, currency: 'GBP', created_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(experience).toMatchObject({ status: 'DRAFT', event_on: '2026-11-12', amount_minor: 100_000_000, currency: 'GBP', invoiced_at: null, paid_on: null, cancelled_at: null });
+    const issuedAt = new Date();
+    await t.db.updateTable('partner_experiences').set({ status: 'INVOICED', invoiced_at: issuedAt }).where('id', '=', experience.id).execute();
+    const invoice = await t.db
+      .insertInto('partner_invoices')
+      .values({
+        kind: 'INVOICE', year: 2026, sequence: 1, experience_id: experience.id, issuer: JSON.stringify({ name: 'CONGLOMERAT LLC', address: [] }),
+        buyer: JSON.stringify({ name: 'MAISON S SAS', address: ['1 place Vendôme', '75001 Paris'], country: 'FR' }),
+        lines: JSON.stringify([{ label: 'Partner experience · DINNER · 12 NOV', amountMinor: 100_000_000 }]), currency: 'GBP', total_minor: 100_000_000, issued_by: admin.id,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(invoice).toMatchObject({ kind: 'INVOICE', year: 2026, sequence: 1, credits_invoice_id: null, total_minor: 100_000_000, buyer: { name: 'MAISON S SAS', country: 'FR' } });
+    await t.db.updateTable('partner_experiences').set({ status: 'PAID', paid_on: '2026-11-20', paid_recorded_at: new Date(), paid_recorded_by: admin.id }).where('id', '=', experience.id).execute();
+    await t.db.updateTable('partner_experiences').set({ status: 'CANCELLED', cancelled_at: new Date(), cancelled_by: admin.id }).where('id', '=', experience.id).execute();
+    const credit = await t.db
+      .insertInto('partner_invoices')
+      .values({
+        kind: 'CREDIT_NOTE', year: 2026, sequence: 1, experience_id: experience.id, credits_invoice_id: invoice.id, issuer: JSON.stringify(invoice.issuer), buyer: JSON.stringify(invoice.buyer),
+        lines: JSON.stringify(invoice.lines), currency: 'GBP', total_minor: 100_000_000,
+      })
+      .returning(['kind', 'sequence', 'credits_invoice_id', 'issued_by'])
+      .executeTakeFirstOrThrow();
+    expect(credit).toEqual({ kind: 'CREDIT_NOTE', sequence: 1, credits_invoice_id: invoice.id, issued_by: null });
+    expect(await t.db.selectFrom('partner_experiences').select(['status', 'paid_on']).where('id', '=', experience.id).executeTakeFirstOrThrow()).toEqual({ status: 'CANCELLED', paid_on: '2026-11-20' });
+    await expect(t.db.updateTable('partner_invoices').set({ total_minor: 1 }).where('id', '=', invoice.id).execute()).rejects.toSatisfy(isGuardViolation);
+
+    // An invitation for it, an answer sharing its name.
+    const live = await t.db.insertInto('partner_experiences').values({ partner_id: partner.id, title: 'GALA', event_on: '2026-12-01', amount_minor: 1, currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    const post = await t.db
+      .insertInto('circle_posts')
+      .values({ kind: 'INVITATION', title: 'Gala', event_at: new Date('2026-12-01T19:00:00Z'), experience: 'PARTNER_EXPERIENCE', partner_experience_id: live.id })
+      .returning(['id', 'partner_experience_id'])
+      .executeTakeFirstOrThrow();
+    expect(post.partner_experience_id).toBe(live.id);
+    const account = await t.db.insertInto('accounts').values({ email: 'partners-s0064@example.com', email_normalized: 'partners-s0064@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    expect(await t.db.insertInto('circle_rsvps').values({ post_id: post.id, account_id: account.id, answer: 'YES' }).returning(['share_name', 'share_name_at']).executeTakeFirstOrThrow()).toEqual({ share_name: false, share_name_at: null });
+    await t.db.updateTable('circle_rsvps').set({ share_name: true, share_name_at: new Date() }).where('post_id', '=', post.id).execute();
+    await expect(t.db.updateTable('circle_rsvps').set({ answer: 'NO' }).where('post_id', '=', post.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_rsvps_share_name_yes'));
+    await t.db.updateTable('circle_rsvps').set({ answer: 'NO', share_name: false, share_name_at: null }).where('post_id', '=', post.id).execute();
+
+    // Taken away by hand (partners, experiences and invoices are never deleted).
+    await t.db.deleteFrom('circle_rsvps').where('post_id', '=', post.id).execute();
+    await t.db.deleteFrom('circle_posts').where('id', '=', post.id).execute();
+    await t.db.deleteFrom('accounts').where('id', '=', account.id).execute();
+    await sql`ALTER TABLE partner_invoices DISABLE TRIGGER partner_invoices_immutable`.execute(t.db);
+    await t.db.deleteFrom('partner_invoices').where('kind', '=', 'CREDIT_NOTE').execute();
+    await t.db.deleteFrom('partner_invoices').execute();
+    await sql`ALTER TABLE partner_invoices ENABLE TRIGGER partner_invoices_immutable`.execute(t.db);
+    await sql`ALTER TABLE partner_experiences DISABLE TRIGGER partner_experiences_no_delete`.execute(t.db);
+    await t.db.deleteFrom('partner_experiences').execute();
+    await sql`ALTER TABLE partner_experiences ENABLE TRIGGER partner_experiences_no_delete`.execute(t.db);
+    await sql`ALTER TABLE partners DISABLE TRIGGER partners_no_delete`.execute(t.db);
+    await t.db.deleteFrom('partners').execute();
+    await sql`ALTER TABLE partners ENABLE TRIGGER partners_no_delete`.execute(t.db);
     await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
   });
 

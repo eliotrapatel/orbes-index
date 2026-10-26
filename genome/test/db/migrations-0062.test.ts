@@ -30,8 +30,9 @@ import { createAccount, createLiveRelease, liveFixture } from '../support/live.j
 
 const BEFORE = '0061_the_vault';
 const NAME = '0062_vault_rewards';
-/** The migration after it (lot M4, step M4.1: the margin's settings), taken down first and applied again with it. */
+/** The migrations after it (lot M4, steps M4.1 and M4.5: the margin's settings, the partners), taken down first and applied again with it. */
 const LATER = '0063_margin';
+const LATEST = '0064_partners';
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -55,7 +56,7 @@ async function guardOf(db: Kysely<any>): Promise<string> {
   return (await sql<{ src: string }>`SELECT prosrc AS src FROM pg_proc WHERE proname = 'orbes_vaults_guard'`.execute(db)).rows[0]!.src;
 }
 
-/** Down to 0061 (0063, then 0062, reverted). */
+/** Down to 0061 (0064, 0063, then 0062, reverted). */
 async function downTo0061(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -107,7 +108,7 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
     const latest = await snapshotOf(db());
     const latestGuard = await guardOf(db());
     expect(latestGuard).toContain('offer_until');
-    // 0063 down first: the schema 0062 left, which this case reads.
+    // 0064 and 0063 down first: the schema 0062 left, which this case reads.
     const rs = await createMigrator(db()).migrateTo(NAME);
     if (rs.error) throw rs.error;
     const at0062 = await snapshotOf(db());
@@ -165,7 +166,7 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
       'vaults vaults_offer',
       'vaults vaults_outcome',
     ]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, LATEST]);
     expect(await snapshotOf(db())).toEqual(latest);
     expect(await guardOf(db())).toEqual(latestGuard);
   });
@@ -373,7 +374,7 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
     await expect(downTo0061(db())).rejects.toThrow(
       `migration 0062_vault_rewards cannot be rolled back: ${counts[0]} vault credits, ${counts[1]} vault orders, ${counts[2]} LIVE guarantees, ${counts[3]} vault add-on units, ${counts[4]} credits to give and ${counts[5]} vault offers exist`,
     );
-    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(LATER);
+    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(LATEST);
   });
 }
 

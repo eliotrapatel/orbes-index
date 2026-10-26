@@ -461,8 +461,8 @@ const CARD_COLUMNS = [
   'p.experience',
 ] as const;
 
-/** A post's card: everything but its body. */
-type CardRow = Omit<CirclePostRow, 'body'>;
+/** A post's card: everything but its body (and, until the partner experiences are read, migration 0064's experience link). */
+type CardRow = Omit<CirclePostRow, 'body' | 'partner_experience_id'>;
 
 // ── Service ────────────────────────────────────────────────────────────────
 

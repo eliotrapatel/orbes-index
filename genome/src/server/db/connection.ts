@@ -192,6 +192,11 @@ export const ADVISORY_LOCK = Object.freeze({
   LIVE_ENGINE: 0x4f52_0301,
   /** The numbers of the invoices and credit notes (services/invoices.ts), with the kind and the year as its second part. */
   INVOICE_NUMBER: 0x4f52_0401,
+  /**
+   * The numbers of the partner invoices and their credit notes (services/partners.ts, migration 0064), their own series
+   * apart from the collectors' (P-2026-0001, PC-2026-0001), with the kind and the year as its second part.
+   */
+  PARTNER_INVOICE_NUMBER: 0x4f52_0402,
   /** The ids pasted back from Shopify (services/shopify.ts), with the product id's hash as its second part. */
   SHOPIFY_PRODUCT: 0x4f52_0501,
   /** A reception line's identities issued (services/receptions.ts issuePending), with the line id's first 32 bits as its second part. */

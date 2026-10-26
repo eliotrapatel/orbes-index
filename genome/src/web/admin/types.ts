@@ -435,6 +435,26 @@ export const MARGIN_CURRENCY = 'EUR';
 export const MARGIN_UNIT_COST_KEYS = ['POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE', ...WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}` as const)] as const;
 export type MarginUnitCostKey = (typeof MARGIN_UNIT_COST_KEYS)[number];
 
+/**
+ * Partner-paid experiences (partners, partner_experiences, partner_invoices, migration 0064, macro scope K49 P1 to P4): a
+ * brand's, a contact's or billing name's, an email's, a phone's, a billing address's, a company number's, a note's and an
+ * experience title's length, at most; an amount's, at most (from 1, in minor units); an experience's states; a partner
+ * invoice's kinds, each its own series (P-, PC-).
+ */
+export const PARTNER_BRAND_MAX = 80;
+export const PARTNER_NAME_MAX = 120;
+export const PARTNER_EMAIL_MAX = 254;
+export const PARTNER_PHONE_MAX = 40;
+export const PARTNER_BILLING_ADDRESS_MAX = 1_000;
+export const PARTNER_COMPANY_NUMBER_MAX = 60;
+export const PARTNER_NOTE_MAX = 2_000;
+export const PARTNER_EXPERIENCE_TITLE_MAX = 120;
+export const PARTNER_AMOUNT_MINOR_MAX = 100_000_000;
+export const PARTNER_EXPERIENCE_STATUSES = ['DRAFT', 'INVOICED', 'PAID', 'CANCELLED'] as const;
+export type PartnerExperienceStatus = (typeof PARTNER_EXPERIENCE_STATUSES)[number];
+export const PARTNER_INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type PartnerInvoiceKind = (typeof PARTNER_INVOICE_KINDS)[number];
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

@@ -36,9 +36,13 @@ import { createAccount, createLiveRelease, holdPieces, liveFixture } from '../su
 
 const BEFORE = '0060_release_addons_converted';
 const NAME = '0061_the_vault';
-/** The migrations after it (lot Q3, step Q3.2: the vault's rewards; lot M4, step M4.1: the margin's settings), taken down first and applied again with it. */
+/**
+ * The migrations after it (lot Q3, step Q3.2: the vault's rewards; lot M4, steps M4.1 and M4.5: the margin's settings, the
+ * partners), taken down first and applied again with it.
+ */
 const LATER = '0062_vault_rewards';
-const LATEST = '0063_margin';
+const MARGIN = '0063_margin';
+const LATEST = '0064_partners';
 const NOW = new Date('2026-10-01T09:00:00.000Z');
 const DAY = 86_400_000;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -57,7 +61,7 @@ async function snapshotOf(db: Kysely<any>): Promise<string[]> {
   ).rows.map((r) => r.object);
 }
 
-/** Down to 0060 (0063, 0062, then 0061, reverted). */
+/** Down to 0060 (0064, 0063, 0062, then 0061, reverted). */
 async function downTo0060(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -102,8 +106,8 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     // 0061 rolled back and applied again on the demo: `up` writes the tiers held then. The demo's example rewards (step
     // Q3.12, OP-27), never given, are taken out first: `down` refuses while a reward other than the floor exists.
     await db().deleteFrom('vault_rewards').where('kind', '<>', 'I_WAS_THERE').where('given', '=', 0).execute();
-    expect(await downTo0060(db())).toEqual([LATEST, LATER, NAME]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, LATEST]);
+    expect(await downTo0060(db())).toEqual([LATEST, MARGIN, LATER, NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, MARGIN, LATEST]);
     const keys = async (account: string) =>
       (await db().selectFrom('vault_occasions_before').select('occasion_key').where('account_id', '=', account).orderBy('occasion_key').execute()).map((r) => r.occasion_key);
     expect(await keys(lucas.id)).toEqual(['TIER:1', 'TIER:2']);
@@ -119,7 +123,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
 
   it('rolls back to the schema of 0060 exactly without rows, and applies again to the latest', async () => {
     const latest = await snapshotOf(db());
-    // 0063 and 0062 down first: the schema 0061 left, which this case reads.
+    // 0064, 0063 and 0062 down first: the schema 0061 left, which this case reads.
     const rs = await createMigrator(db()).migrateTo(NAME);
     if (rs.error) throw rs.error;
     const at0061 = await snapshotOf(db());
@@ -139,7 +143,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     ]);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger accounts accounts_invited_once']);
     expect(added.filter((o) => o.startsWith('constraint house_deliveries ')).map((o) => o.split(' ')[2]).sort()).toEqual(['house_deliveries_source', 'house_deliveries_source_check']);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, LATEST]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, MARGIN, LATEST]);
     expect(await snapshotOf(db())).toEqual(latest);
   });
 

@@ -635,6 +635,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ pace_hold_minutes: 30 });
     // Down refused while a hold exists (0061, 0060 and 0059, which hold nothing of this suite yet, go down first); without
     // one it restores 0057.
+    expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
@@ -652,7 +653,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ cancelled_at: new Date() }, open.id);
     await sql`UPDATE drops SET cancelled_at = now() WHERE mode = 'LIVE' AND parent_drop_id IS NULL AND pace_batch IS NULL AND ended_at IS NULL AND cancelled_at IS NULL`.execute(db);
     expect((await unpaced.execute(db)).rows[0].n).toBe(0);
-    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
     expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 0 });
     // 0060, applied again, gave this suite's open releases its catalogue add-ons as their pick: the next case starts with none.
     await db.deleteFrom('drop_addons').execute();
@@ -711,6 +712,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect((await db.selectFrom('stock_holds').select('id').where('id', 'in', [product.id, service.id]).execute()).map((h) => h.id)).toEqual([product.id]);
     // Down refused while any of them exists, naming the counts (0061, which gave no vault here, and 0060, which converted
     // nothing here, go down first); without them it restores 0058, the product's unit kept.
+    expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
@@ -724,10 +726,11 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.deleteFrom('addon_items').where('id', 'in', [wrapping.id, engraving.id]).execute();
     expect((await migrateDown(db)).reverted).toEqual(['0059_addons_one_system']);
     expect((await db.selectFrom('stock_holds').select('id').where('id', '=', product.id).execute()).map((h) => h.id)).toEqual([product.id]);
-    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
   });
 
   it('converts the release add-ons and the settings\' engraving into catalogue add-ons (0060: addon_conversions_source_check, addon_conversions_source_fields, addon_conversions_price, addon_conversions_source_key, addon_conversions_immutable): refused while a release add-on is chosen on a piece held, naming the count; each label once, the add-on of that name whatever its case kept, a new SERVICE the engraving, the settings\' price winning; the open release\'s pick; the three tables dropped; the same JS types as PGlite; down refused while a conversion is recorded, naming the count', async () => {
+    expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
@@ -772,7 +775,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(migrateToLatest(db)).rejects.toThrow(/0060_release_addons_converted cannot be applied: 1 release add-ons are chosen on entries in TURN or SECURED/);
     // The hold lapses (its choices deleted), then it applies.
     await sql`DELETE FROM live_entry_addons WHERE entry_id = ${entry}`.execute(db);
-    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
     const engraving = await db
       .selectFrom('addon_items as a')
       .innerJoin('skus as k', 'k.addon_id', 'a.id')
@@ -804,6 +807,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE addon_conversions SET price_minor = 1 WHERE source_id = ${boxSource}`.execute(db)).rejects.toSatisfy(isGuardViolation);
     await expect(db.deleteFrom('drops').where('id', '=', release.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
     // Down refused while a conversion is recorded, naming the count (0061, which gave no vault here, goes down first).
+    expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
     expect((await migrateDown(db)).reverted).toEqual(['0061_the_vault']);
@@ -811,8 +815,8 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
   });
 
   it('holds currency rates, shipping cost bands, unit costs and category allowances by their CHECKs (0063)', async () => {
-    // The case above leaves this database at 0060 (its conversions refuse the down): 0061 to 0063 apply again.
-    expect((await migrateToLatest(db)).applied).toEqual(['0061_the_vault', '0062_vault_rewards', '0063_margin']);
+    // The case above leaves this database at 0060 (its conversions refuse the down): 0061 to 0064 apply again.
+    expect((await migrateToLatest(db)).applied).toEqual(['0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
     // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N, Q, O, Y and V (the tests above);
     // the demo seed's are J, L, W, F and A.
     await db.insertInto('categories').values({ id: 31, code: 'M', name: 'Margin parity' }).execute();
@@ -843,7 +847,68 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect(await db.insertInto('category_allowances').values({ category_id: 31, allowance_bp: 10000 }).returning(['category_id', 'allowance_bp']).executeTakeFirstOrThrow()).toEqual({ category_id: 31, allowance_bp: 10000 });
     await expect(sql`UPDATE category_allowances SET allowance_bp = 10001 WHERE category_id = 31`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'category_allowances_allowance_bp_check'));
     await expect(db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
-    // Down refused while any of them exists, naming the counts.
+    // Down refused while any of them exists, naming the counts (0064, which holds nothing here, goes down first).
+    expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     await expect(migrateDown(db)).rejects.toThrow(/0063_margin cannot be rolled back: 2 currency rates, 2 shipping cost bands, 2 unit costs and 1 category allowances exist/);
+  });
+
+  it('holds partners, experiences, partner invoices, linked posts and shared names by their CHECKs (0064)', async () => {
+    // The case above leaves this database at 0063 (its settings refuse the down): 0064 applies again.
+    expect((await migrateToLatest(db)).applied).toEqual(['0064_partners']);
+    const admin = await db.insertInto('admin_users').values({ email: 'partners-pg0064@orbes.test', email_normalized: 'partners-pg0064@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    // A brand once whatever the case, one line; billing_country char(2) unpadded; never deleted.
+    const partner = await db.insertInto('partners').values({ brand: 'MAISON PG', billing_country: 'FR', created_by: admin.id }).returning(['id', 'billing_country', 'active']).executeTakeFirstOrThrow();
+    expect(partner).toEqual({ id: expect.any(String), billing_country: 'FR', active: true });
+    await expect(db.insertInto('partners').values({ brand: 'maison pg' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'partners_brand_key'));
+    await expect(sql`INSERT INTO partners (brand) VALUES (E'MAISON\nPG2')`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'partners_brand_check'));
+    await expect(db.deleteFrom('partners').where('id', '=', partner.id).execute()).rejects.toSatisfy(isGuardViolation);
+    // An experience's states with their times; bigint and date as PGlite reads them.
+    const experience = await db
+      .insertInto('partner_experiences')
+      .values({ partner_id: partner.id, title: 'DINNER', event_on: '2026-11-12', amount_minor: 100_000_000, currency: 'USD' })
+      .returning(['id', 'status', 'event_on', 'amount_minor'])
+      .executeTakeFirstOrThrow();
+    expect(experience).toEqual({ id: expect.any(String), status: 'DRAFT', event_on: '2026-11-12', amount_minor: 100_000_000 });
+    await expect(sql`UPDATE partner_experiences SET status = 'INVOICED' WHERE id = ${experience.id}`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'partner_experiences_status_times'));
+    await sql`UPDATE partner_experiences SET status = 'INVOICED', invoiced_at = now() WHERE id = ${experience.id}`.execute(db);
+    await expect(sql`UPDATE partner_experiences SET status = 'PAID', paid_on = '2026-11-20' WHERE id = ${experience.id}`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'partner_experiences_paid'));
+    await expect(db.insertInto('partner_experiences').values({ partner_id: partner.id, title: 'X', event_on: '2026-11-12', amount_minor: 1, currency: 'JPY' as 'EUR' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'partner_experiences_currency_check'));
+    // Its invoice: its own series, one per experience, a credit note once, never changed.
+    const doc = (kind: 'INVOICE' | 'CREDIT_NOTE', sequence: number, credits: string | null) =>
+      db
+        .insertInto('partner_invoices')
+        .values({ kind, year: 2026, sequence, experience_id: experience.id, credits_invoice_id: credits, issuer: '{}', buyer: '{"name":"MAISON PG"}', lines: '[{"label":"Partner experience"}]', currency: 'USD', total_minor: 100_000_000 })
+        .returning(['id', 'total_minor'])
+        .executeTakeFirstOrThrow();
+    const invoice = await doc('INVOICE', 1, null);
+    expect(invoice.total_minor).toBe(100_000_000);
+    await expect(doc('INVOICE', 2, null)).rejects.toSatisfy((e) => isUniqueViolation(e, 'partner_invoices_one_per_experience'));
+    await expect(doc('CREDIT_NOTE', 1, null)).rejects.toSatisfy((e) => isCheckViolation(e, 'partner_invoices_credit'));
+    await doc('CREDIT_NOTE', 1, invoice.id);
+    await expect(doc('CREDIT_NOTE', 2, invoice.id)).rejects.toSatisfy((e) => isUniqueViolation(e, 'partner_invoices_credits_key'));
+    await expect(sql`UPDATE partner_invoices SET total_minor = 1 WHERE id = ${invoice.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`DELETE FROM partner_invoices WHERE id = ${invoice.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // An invitation linked: a PARTNER_EXPERIENCE only, a NULL experience refused too; a name shared on a YES only.
+    const invite = (experienceKind: 'PARTNER_EXPERIENCE' | 'MEMBERS_EVENING' | null) =>
+      db
+        .insertInto('circle_posts')
+        .values({ kind: 'INVITATION', title: 'Dinner', event_at: new Date('2026-11-12T19:00:00Z'), experience: experienceKind, partner_experience_id: experience.id })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    await expect(invite('MEMBERS_EVENING')).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_partner_experience'));
+    await expect(invite(null)).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_posts_partner_experience'));
+    const post = await invite('PARTNER_EXPERIENCE');
+    const account = await db.insertInto('accounts').values({ email: 'partners-pg0064@example.com', email_normalized: 'partners-pg0064@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    await expect(sql`INSERT INTO circle_rsvps (post_id, account_id, answer, share_name, share_name_at) VALUES (${post.id}, ${account.id}, 'NO', true, now())`.execute(db)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'circle_rsvps_share_name_yes'),
+    );
+    await expect(sql`INSERT INTO circle_rsvps (post_id, account_id, answer, share_name) VALUES (${post.id}, ${account.id}, 'YES', true)`.execute(db)).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'circle_rsvps_share_name'),
+    );
+    expect(
+      await db.insertInto('circle_rsvps').values({ post_id: post.id, account_id: account.id, answer: 'YES', share_name: true, share_name_at: new Date() }).returning('share_name').executeTakeFirstOrThrow(),
+    ).toEqual({ share_name: true });
+    // Down refused while any of them exists, naming the counts.
+    await expect(migrateDown(db)).rejects.toThrow(/0064_partners cannot be rolled back: 1 partners, 1 partner experiences, 2 partner invoices, 1 invitations linked to an experience and 1 names shared exist/);
   });
 });
