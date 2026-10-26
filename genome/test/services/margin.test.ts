@@ -29,14 +29,18 @@
  *    GROWTH's own fixture);
  *  - the report's cost of the rewards won equal to VaultService.report's for the same period (the rewards opened
  *    mid-month, so the Paris days and the UTC window hold the same openings), its `costUnknown` (a product won without a
- *    supplier price) and its amount in a currency without a rate left out and named.
+ *    supplier price) and its amount in a currency without a rate left out and named.;
+ *  - the first plan's edges (seedMarginEdges): a parcel of three paid orders sharing its box and its band by largest
+ *    remainder, the first order first (84 / 83 / 83 and 334 / 333 / 333 cents); inbound over a supplier order's units
+ *    less those credited and those cancelled (the credited unit given back, the share changes); a parcel heavier than
+ *    every band: OUTBOUND 0 and a rate missing; the catalogue's engraving, a SERVICE unit: revenue only, cost 0.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { EuroConverter, MARGIN_CHANNELS, MARGIN_CSV_COLUMNS, MARGIN_TIERS, MARGIN_VAULT_WORDS, marginCsv, marginCsvField, rateFor, shareEqually, type MarginGroup, type MarginReport } from '../../src/server/services/margin.js';
 import { createAdmin, createHarness, type Harness } from '../api/support.js';
 import { GROWTH_NOW, seedGrowth } from '../support/growth.js';
-import { MARGIN_NOW, seedMargin, seedMarginVault, type MarginFixture, type MarginVaultFixture } from '../support/margin.js';
+import { MARGIN_NOW, seedMargin, seedMarginEdges, seedMarginVault, type MarginEdgesFixture, type MarginFixture, type MarginVaultFixture } from '../support/margin.js';
 
 describe('the margin: the pure parts', () => {
   it('shareEqually: the floor each, one more for the first until the remainder is spent; the shares add up', () => {
@@ -499,5 +503,132 @@ describe('MarginService on ONE QUEUE\'s house (test/support/margin.ts seedMargin
     const rows = (await margin().csv()).body.trimEnd().split('\r\n');
     expect(rows).toContain('"By channel","VAULT","2","2","915.00","200.00","1.00","7.50","6.90","22.88","0.00","0.00","0.00","0.00","0.00","0.00","215.40","0.50","0.00","460.82","50.36","1"');
     expect(rows).toContain('"Total","Every order","5","5","3825.00","805.00","5.00","30.00","27.60","95.64","20.00","0.00","0.00","25.00","30.00","6.00","215.40","1.50","0.00","2563.86","67.03","2"');
+  });
+});
+
+describe('MarginService on the first plan\'s edges (test/support/margin.ts seedMarginEdges)', () => {
+  let h: Harness;
+  let f: MarginEdgesFixture;
+  let r: MarginReport;
+  const margin = () => h.ctx.services.margin;
+  const channel = (rep: MarginReport, key: string) => rep.byChannel.find((g) => g.key === key)!;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(MARGIN_NOW.toISOString());
+    f = await seedMarginEdges(h.t.db, (await createAdmin(h.ctx, 'ADMIN')).id);
+    r = await margin().report();
+  }, 60_000);
+  afterAll(() => h?.close());
+
+  it('the totals: two boxes and one band shared to the cent, € 1.00 inbound a unit; the parcel no band holds named', () => {
+    expect(r.totals).toEqual({
+      key: 'ALL',
+      label: null,
+      orders: 4,
+      pieces: 4,
+      revenueMinor: 454_000,
+      costs: costs({ piece: 90_000, inbound: 400, packaging: 4 * 500 + 2 * 250, outbound: 1_000, allowance: 11_350 }),
+      marginMinor: 348_750,
+      marginBp: 7_682,
+      estimated: 1,
+    });
+    expect(r.missing).toEqual({ piecePrices: 0, parcelWeights: 0, shippingRates: 1, boxCosts: 0, allowances: [], unitCosts: [], currencies: [] });
+  });
+
+  it('a parcel of three paid orders: its box (€ 2.50) 84 / 83 / 83 cents and its band (€ 10.00) 334 / 333 / 333, the first order first', () => {
+    // O1 (SALON) with O4 (SALON, TITANE); O2 (LIVE) and O3 (DRAW, its piece at A's average: an estimate) alone.
+    expect(channel(r, 'LIVE')).toEqual({
+      key: 'LIVE',
+      label: null,
+      orders: 1,
+      pieces: 1,
+      revenueMinor: 100_000,
+      costs: costs({ piece: 20_000, inbound: 100, packaging: 500 + 83, outbound: 333, allowance: 2_500 }),
+      marginMinor: 76_484,
+      marginBp: 7_648,
+      estimated: 0,
+    });
+    expect(channel(r, 'DRAW')).toEqual({
+      key: 'DRAW',
+      label: null,
+      orders: 1,
+      pieces: 1,
+      revenueMinor: 100_000,
+      costs: costs({ piece: 20_000, inbound: 100, packaging: 500 + 83, outbound: 333, allowance: 2_500 }),
+      marginMinor: 76_484,
+      marginBp: 7_648,
+      estimated: 1,
+    });
+    // O1: € 1 000 + its ENGRAVING € 40, BX's extra cent and the band's. O4: € 1 500, its whole box, no band.
+    const salon = channel(r, 'SALON');
+    expect(salon).toEqual({
+      key: 'SALON',
+      label: null,
+      orders: 2,
+      pieces: 2,
+      revenueMinor: 104_000 + 150_000,
+      costs: costs({ piece: 20_000 + 30_000, inbound: 200, packaging: 500 + 84 + 500 + 250, outbound: 334, allowance: 2_600 + 3_750 }),
+      marginMinor: 80_382 + 115_400,
+      marginBp: 7_708,
+      estimated: 0,
+    });
+    // The parcel's shares add up to its box and its band.
+    const halo = r.byModel.find((g) => g.label === 'HALO')!;
+    expect(halo).toMatchObject({ orders: 3, revenueMinor: 304_000 });
+    expect(halo.costs.packaging - 3 * 500).toBe(250);
+    expect(halo.costs.outbound).toBe(1_000);
+  });
+
+  it('a parcel heavier than every band, its country\'s and ALL OTHER COUNTRIES\': OUTBOUND 0, missing.shippingRates 1', () => {
+    expect(r.byTier.find((g) => g.key === 'TITANE')).toEqual({
+      key: 'TITANE',
+      label: null,
+      orders: 1,
+      pieces: 1,
+      revenueMinor: 150_000,
+      costs: costs({ piece: 30_000, inbound: 100, packaging: 750, allowance: 3_750 }),
+      marginMinor: 115_400,
+      marginBp: 7_693,
+      estimated: 0,
+    });
+    expect(r.byModel.map((g) => [g.label, g.orders, g.costs.outbound])).toEqual([
+      ['HALO', 3, 1_000],
+      ['NOVA', 1, 0],
+    ]);
+  });
+
+  it('the engraving, a SERVICE unit: revenue only, cost 0, never missing', () => {
+    const halo = r.byModel.find((g) => g.label === 'HALO')!;
+    // Three HALO pieces at € 200 and € 1.00: nothing more for the ENGRAVING's € 40.
+    expect(halo.costs.piece).toBe(60_000);
+    expect(halo.costs.inbound).toBe(300);
+    expect(r.missing.piecePrices).toBe(0);
+  });
+
+  it('inbound over the supplier order\'s units less those credited and cancelled: the credited unit given back, the share changes', async () => {
+    // € 12.00 over 12 units: € 1.00 each, traced (O1, O2, O4) and at A's average (O3).
+    expect(r.totals.costs.inbound).toBe(4 * 100);
+    await h.t.db.updateTable('supplier_order_lines').set({ credited_quantity: 0 }).where('id', '=', f.creditedLine).execute();
+    try {
+      // Over 13 units: € 0.923 each, rounded per sale.
+      const m = await margin().report();
+      expect(m.totals.costs.inbound).toBe(4 * 92);
+      expect(channel(m, 'DRAW').costs.inbound).toBe(92);
+      expect(channel(m, 'LIVE').costs.inbound).toBe(92);
+    } finally {
+      await h.t.db.updateTable('supplier_order_lines').set({ credited_quantity: 1 }).where('id', '=', f.creditedLine).execute();
+    }
+    expect((await margin().report()).totals).toEqual(r.totals);
+  });
+
+  it('REVENUE = GROWTH\'s net revenue; the CSV\'s totals; no release, no account named', async () => {
+    const eur = await h.ctx.services.growth.report({ currency: 'EUR' });
+    expect(r.totals.revenueMinor).toBe(eur.revenue.total.netMinor);
+    const rows = (await margin().csv()).body.trimEnd().split('\r\n');
+    expect(rows[1]).toBe('"Total","Every order","4","4","4540.00","900.00","4.00","25.00","10.00","113.50","0.00","0.00","0.00","0.00","0.00","0.00","0.00","0.00","0.00","3487.50","76.82","1"');
+    expect(rows).toContain('"By channel","LIVE","1","1","1000.00","200.00","1.00","5.83","3.33","25.00","0.00","0.00","0.00","0.00","0.00","0.00","0.00","0.00","0.00","764.84","76.48","0"');
+    const text = JSON.stringify(r);
+    for (const id of [...Object.values(f.releases), ...Object.values(f.accounts), ...Object.values(f.orders)]) expect(text).not.toContain(id);
   });
 });

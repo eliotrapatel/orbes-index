@@ -58,6 +58,21 @@
  *   vChf A's house credit of CHF 10, opened 10 May 2026, never used (CHF has no rate).
  *   T    a test entrant: vTp's HALO won free (OT, claimed 15 Jun, not packed), vTc's € 25 credit and vTa's free CLOTH on
  *        its SALON order OTs (€ 1 000, paid 20 Jun, not packed), vTg's guarantee used 1 Jun.
+ *
+ * ── seedMarginEdges: the first plan's cases a figure divisible by two would hide ─────────────────────────────────────
+ *
+ * Settings: bands FR up to 1 000 g € 10.00, ALL OTHER COUNTRIES up to 1 000 g € 15.00; POUCH € 3.00, CARD € 2.00; J at
+ * 2.5 %. Box BX € 2.50, 100 g. THE VAULT's PIECE source off (no card in these boxes).
+ * Supplier prices: SO1 (EUR, € 12.00 shipping) HALO 52 (A) 10 at € 200, 9 accepted and 1 rejected that the supplier
+ * credited; NOVA 52 (N) 4 at € 300, 3 accepted and 1 cancelled: 12 units it brings, € 1.00 inbound a unit (over 13 or
+ * 14 it would not be whole). A's average: € 200 and € 1.00.
+ *
+ *   O1   E, SALON HALO A traced, FR, paid 1 Apr 2026: € 1 000 + the catalogue's ENGRAVING (a SERVICE unit, the converted
+ *        engraving) € 40. O2 (E, LIVE HALO A traced, paid 2 Apr) and O3 (E, DRAW HALO A not bound, paid 3 Apr), € 1 000
+ *        each, travel with it: one parcel of three paid orders in BX at 600 g, FR: BX 84 / 83 / 83 cents, the band
+ *        334 / 333 / 333, first order first.
+ *   O4   H (TITANE: one piece since January), SALON NOVA N traced, FR, paid 1 May 2026: € 1 500, packed in BX at 1 200 g,
+ *        heavier than every band of FR and of ALL OTHER COUNTRIES: no OUTBOUND, a rate missing.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Db } from '../../src/server/db/connection.js';
@@ -130,9 +145,9 @@ export class MarginWorld {
     return (await this.db.insertInto('skus').values({ model_id: modelId, size_label: label, code: `M-${randomUUID().slice(0, 12)}` }).returning('id').executeTakeFirstOrThrow()).id;
   }
 
-  /** A catalogue add-on and its SKU: a PRODUCT, or (lot Q2) a SERVICE (no supplier, no stock). */
-  async addon(name: string, o: { kind?: 'PRODUCT' | 'SERVICE'; weightG?: number } = {}): Promise<{ id: string; skuId: string }> {
-    const id = (await this.db.insertInto('addon_items').values({ name, kind: o.kind ?? 'PRODUCT', weight_g: o.weightG ?? null }).returning('id').executeTakeFirstOrThrow()).id;
+  /** A catalogue add-on and its SKU: a PRODUCT, or (lot Q2) a SERVICE (no supplier, no stock), the engraving among them. */
+  async addon(name: string, o: { kind?: 'PRODUCT' | 'SERVICE'; weightG?: number; engraving?: boolean } = {}): Promise<{ id: string; skuId: string }> {
+    const id = (await this.db.insertInto('addon_items').values({ name, kind: o.kind ?? 'PRODUCT', weight_g: o.weightG ?? null, engraving: o.engraving ?? false }).returning('id').executeTakeFirstOrThrow()).id;
     const skuId = (await this.db.insertInto('skus').values({ addon_id: id, size_label: null, code: `A-${randomUUID().slice(0, 12)}` }).returning('id').executeTakeFirstOrThrow()).id;
     return { id, skuId };
   }
@@ -149,9 +164,10 @@ export class MarginWorld {
 
   /**
    * A supplier order sent (and its reception confirmed when some pieces were accepted): its lines, each with its
-   * quantity, price, pieces accepted and those cancelled; returns each SKU's reception line (to trace pieces to).
+   * quantity, price, pieces accepted, those rejected and credited by the supplier instead of replaced, and those
+   * cancelled; returns each SKU's reception line (to trace pieces to).
    */
-  async supplierOrder(o: { currency: string; shippingMinor: number | null; sent: string; lines: { skuId: string; quantity: number; priceMinor: number; accepted: number; restCancelled?: number }[] }): Promise<Map<string, string>> {
+  async supplierOrder(o: { currency: string; shippingMinor: number | null; sent: string; lines: { skuId: string; quantity: number; priceMinor: number; accepted: number; restCancelled?: number; credited?: number }[] }): Promise<Map<string, string>> {
     const sent = at(o.sent);
     const so = (
       await this.db
@@ -168,12 +184,23 @@ export class MarginWorld {
       const line = (
         await this.db
           .insertInto('supplier_order_lines')
-          .values({ supplier_order_id: so, sku_id: l.skuId, quantity: l.quantity, unit_price_minor: l.priceMinor, accepted_quantity: l.accepted, rest_cancelled_quantity: l.restCancelled ?? 0 })
+          .values({
+            supplier_order_id: so,
+            sku_id: l.skuId,
+            quantity: l.quantity,
+            unit_price_minor: l.priceMinor,
+            accepted_quantity: l.accepted,
+            rejected_quantity: l.credited ?? 0,
+            credited_quantity: l.credited ?? 0,
+            rest_cancelled_quantity: l.restCancelled ?? 0,
+          })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
       if (l.accepted > 0) {
-        const rl = (await this.db.insertInto('reception_lines').values({ reception_id: reception, sku_id: l.skuId, supplier_order_line_id: line, accepted: l.accepted }).returning('id').executeTakeFirstOrThrow()).id;
+        const rl = (
+          await this.db.insertInto('reception_lines').values({ reception_id: reception, sku_id: l.skuId, supplier_order_line_id: line, accepted: l.accepted, rejected: l.credited ?? 0 }).returning('id').executeTakeFirstOrThrow()
+        ).id;
         out.set(l.skuId, rl);
       }
     }
@@ -930,4 +957,111 @@ export async function seedMarginVault(db: Db, adminId: string): Promise<MarginVa
     releases: { live: live.id },
     box,
   };
+}
+
+export interface MarginEdgesFixture {
+  world: MarginWorld;
+  accounts: Record<'E' | 'H', string>;
+  models: { halo: string; nova: string };
+  orders: Record<'O1' | 'O2' | 'O3' | 'O4', string>;
+  /** SO1's HALO line, one unit of it credited by the supplier. */
+  creditedLine: string;
+  releases: { live: string; draw: string };
+}
+
+/** The first plan's edge cases described in the file header (seedMarginEdges), its settings entered as rows. */
+export async function seedMarginEdges(db: Db, adminId: string): Promise<MarginEdgesFixture> {
+  const w = await new MarginWorld(db, adminId).prepare();
+  await db.updateTable('vault_sources').set({ enabled: false }).where('source', '=', 'PIECE').execute();
+
+  // Settings.
+  await db
+    .insertInto('shipping_cost_rates')
+    .values([
+      { country: 'FR', max_weight_g: 1000, cost_minor: 1000, currency: 'EUR' },
+      { country: null, max_weight_g: 1000, cost_minor: 1500, currency: 'EUR' },
+    ])
+    .execute();
+  await db
+    .insertInto('margin_unit_costs')
+    .values([
+      { key: 'POUCH', cost_minor: 300, currency: 'EUR' },
+      { key: 'CARD', cost_minor: 200, currency: 'EUR' },
+    ])
+    .execute();
+  await db.insertInto('category_allowances').values({ category_id: 1, allowance_bp: 250 }).execute();
+
+  // Catalogue and supplier prices: one unit credited, one cancelled.
+  const box = await w.box('BX', 250);
+  const halo = await w.model('HALO', { boxId: box, packedWeightG: 150 });
+  const nova = await w.model('NOVA', { boxId: box, packedWeightG: 150 });
+  const A = await w.sku(halo, '52');
+  const N = await w.sku(nova, '52');
+  const engraving = await w.addon('ENGRAVING', { kind: 'SERVICE', engraving: true });
+  const so1 = await w.supplierOrder({
+    currency: 'EUR',
+    shippingMinor: 1_200,
+    sent: '2026-01-05',
+    lines: [
+      { skuId: A, quantity: 10, priceMinor: 20_000, accepted: 9, credited: 1 },
+      { skuId: N, quantity: 4, priceMinor: 30_000, accepted: 3, restCancelled: 1 },
+    ],
+  });
+  const creditedLine = (await db.selectFrom('supplier_order_lines').select('id').where('sku_id', '=', A).executeTakeFirstOrThrow()).id;
+  const piece = (amount: number, detail = 'THE PRIVATE SALON', label = 'HALO · SIZE 52'): Line => ({ kind: 'PIECE', label, detail, amountMinor: amount });
+
+  const E = await w.g.account('2025-12-01', 'FR');
+  const H = await w.g.account('2025-12-01', 'FR');
+  await w.g.own(H, await w.g.piece(nova), 'FIRST_REGISTRATION', '2026-01-10');
+
+  // O1, O2 and O3: a parcel of three paid orders, the first with its engraving (a SERVICE unit).
+  const p1 = await w.piece(halo, A, so1.get(A)!);
+  const O1 = await w.order({
+    accountId: E,
+    modelId: halo,
+    channel: 'SALON',
+    paid: '2026-04-01',
+    currency: 'EUR',
+    skuId: A,
+    productId: p1,
+    country: 'FR',
+    lines: [piece(100_000), { kind: 'ADD_ON_ITEM', label: 'ENGRAVING', detail: 'E.M.', amountMinor: 4_000 }],
+  });
+  await w.unit(O1, engraving, { priceMinor: 4_000, added: '2026-04-01T10:00:00.000Z', service: true });
+  const live = await w.g.drop({ mode: 'LIVE', modelId: halo, title: 'HALO — LIVE', opens: '2026-04-02', quantity: 5 });
+  const p2 = await w.piece(halo, A, so1.get(A)!);
+  const O2 = await w.order({
+    accountId: E,
+    modelId: halo,
+    channel: 'LIVE',
+    paid: '2026-04-02',
+    currency: 'EUR',
+    dropId: live.id,
+    liveEntryId: await w.g.liveEntry(live, E, '2026-04-02'),
+    withOrderId: O1,
+    skuId: A,
+    productId: p2,
+    lines: [piece(100_000, 'LIVE RELEASE')],
+  });
+  const draw = await w.g.drop({ mode: 'DRAW', modelId: halo, title: 'HALO — DRAW', opens: '2026-04-03', quantity: 5 });
+  const O3 = await w.order({
+    accountId: E,
+    modelId: halo,
+    channel: 'DRAW',
+    paid: '2026-04-03',
+    currency: 'EUR',
+    dropId: draw.id,
+    dropEntryId: await w.g.drawEntry(draw.id, E, 'CONFIRMED', '2026-04-02'),
+    withOrderId: O1,
+    skuId: A,
+    lines: [piece(100_000, 'DRAW')],
+  });
+  await w.shipment(O1, { packed: '2026-04-05', boxId: box, weightG: 600, items: [{ orderId: O1, productId: p1 }, { orderId: O2, productId: p2 }, { orderId: O3, productId: null }] });
+
+  // O4: a parcel heavier than every band.
+  const p4 = await w.piece(nova, N, so1.get(N)!);
+  const O4 = await w.order({ accountId: H, modelId: nova, channel: 'SALON', paid: '2026-05-01', currency: 'EUR', skuId: N, productId: p4, country: 'FR', lines: [piece(150_000, 'THE PRIVATE SALON', 'NOVA · SIZE 52')] });
+  await w.shipment(O4, { packed: '2026-05-03', boxId: box, weightG: 1_200, items: [{ orderId: O4, productId: p4 }] });
+
+  return { world: w, accounts: { E, H }, models: { halo, nova }, orders: { O1, O2, O3, O4 }, creditedLine, releases: { live: live.id, draw: draw.id } };
 }
