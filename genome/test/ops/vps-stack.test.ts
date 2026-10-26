@@ -13,7 +13,9 @@
  *  - every app setting of genome/.env.example reaches the app (the ORBES
  *    Client Services contact included, empty until the brand supplies it,
  *    the ORBES Care subscription page, empty until it opens, and the
- *    emails' channel, empty and so off until a provider is chosen),
+ *    emails' channel, empty and so off until a provider is chosen; the
+ *    ad platforms' ten ADS_* keys excepted, which the app is not given
+ *    while K27's conversions are switched off at deployment),
  *    and every variable compose interpolates is documented in
  *    deploy/vps/.env.example;
  *  - the Caddyfile forwards exactly one X-Forwarded-For entry ({client_ip}),
@@ -43,7 +45,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../../src/server/config.js';
+import { ADS_ENV, loadConfig } from '../../src/server/config.js';
 import { CARE_LABEL_BODY_LIMIT_BYTES, CARE_LABEL_UPLOAD_ROUTE } from '../../src/server/routes/admin/care.js';
 import { MEDIA_BODY_LIMIT_BYTES, MEDIA_UPLOAD_ROUTES } from '../../src/server/routes/admin/media.js';
 import { LIVE_STREAM_ROUTES } from '../../src/server/http/live-stream.js';
@@ -221,7 +223,15 @@ describe('deploy/vps/compose.yaml', () => {
       'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'APP_BIND', 'APP_PORT', 'ORBES_IMAGE_TAG', 'ORBES_ENV_FILE',
       'DEMO_ACCOUNT_PASSWORD', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET', 'ORBES_DEMO', 'GEO_COUNTRY_HEADER', 'GEO_LAT_HEADER', 'GEO_LON_HEADER',
     ]);
-    const missing = [...genomeVars].filter((n) => !notForTheApp.has(n) && !appEnv.has(n)).sort();
+    // The ad platforms' keys (K27 A5) are documented in genome/.env.example but are NOT passed to the app today: the
+    // ad conversions are switched off at deployment, and the activation-day deployment (runbook §2, M4.16) adds them
+    // to compose.yaml. Exactly these ten names are exempt, and the app service must pass none of them until then.
+    const adsKeys: string[] = [...ADS_ENV.meta, ...ADS_ENV.tiktok, ...ADS_ENV.google];
+    expect(adsKeys).toHaveLength(10);
+    expect(adsKeys.filter((n) => genomeVars.has(n)).sort()).toEqual([...adsKeys].sort());
+    expect(adsKeys.filter((n) => appEnv.has(n))).toEqual([]);
+    const offAtDeployment = new Set(adsKeys);
+    const missing = [...genomeVars].filter((n) => !notForTheApp.has(n) && !offAtDeployment.has(n) && !appEnv.has(n)).sort();
     expect(missing).toEqual([]);
   });
 

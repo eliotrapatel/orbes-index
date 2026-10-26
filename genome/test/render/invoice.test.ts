@@ -230,4 +230,52 @@ describe('invoice and credit note (M7)', () => {
     expect(credit.filename).toBe('ORBES-credit-note-CN-2026-000001.pdf');
     expect(latin1(credit.body)).toContain('(ORBES CREDIT NOTE CN-2026-000001)');
   });
+
+  // Lot M4 (K49 P1, P4): a partner's invoice and credit note, the same page in their own series.
+  const partnerDoc = (extra: Partial<InvoiceDocument> = {}): InvoiceDocument =>
+    doc({
+      number: 'P-2026-0001',
+      order: null,
+      buyer: { name: 'Maison X SAS', address: '8 place Vendôme\n75001 Paris', email: null, country: 'France', companyNumber: 'RCS Paris 123 456 789' },
+      lines: [{ label: 'Partner experience · Private dinner · 12 November 2026', detail: null, amountMinor: 1_200_000 }],
+      totalMinor: 1_200_000,
+      ...extra,
+    });
+
+  it('a partner\'s invoice (lot M4, K49 P1, P4): its own series, no ORDER row, the partner billed with its company number, issued by CONGLOMERAT LLC, no VAT', async () => {
+    const partner = layoutInvoice(partnerDoc());
+    // The same page with an ORDER row and no company number: the partner's has the company number's line instead of
+    // the ORDER row's label and reference.
+    const withOrder = layoutInvoice(doc({ buyer: { name: 'Maison X SAS', address: '8 place Vendôme\n75001 Paris', email: null, country: 'France' }, lines: partnerDoc().lines, totalMinor: 1_200_000 }));
+    expect(partner.marks!.length).toBe(withOrder.marks!.length - 2 + 1);
+    expect(toDocumentText(INVOICE_COPY.companyNumber('RCS Paris 123 456 789'))).toBe('COMPANY NUMBER RCS PARIS 123 456 789');
+    // Its credit note names the partner invoice it cancels.
+    const credit = layoutInvoice(partnerDoc({ kind: 'CREDIT_NOTE', number: 'PC-2026-0001', credits: 'P-2026-0001' }));
+    expect(credit.marks!.map((m) => bounds(m.d)).filter((b) => Math.abs(b.y1 - INVOICE_LAYOUT.statement.baseline) < 0.5)).toHaveLength(1);
+    // Refused: a partner number with an order, a collector's number without one, the series crossed, a supplement.
+    for (const bad of [
+      partnerDoc({ order: 'OR-1A2B3C4D' }),
+      partnerDoc({ number: 'INV-2026-000001' }),
+      partnerDoc({ number: 'PC-2026-0001' }),
+      partnerDoc({ number: 'P-26-1' }),
+      partnerDoc({ kind: 'CREDIT_NOTE', number: 'PC-2026-0001', credits: 'INV-2026-000001' }),
+      partnerDoc({ kind: 'CREDIT_NOTE', number: 'PC-2026-0001', credits: 'PC-2026-0001' }),
+      partnerDoc({ supplements: 'P-2026-0001' }),
+      doc({ number: 'P-2026-0001' }),
+    ]) {
+      expect(() => layoutInvoice(bad), JSON.stringify([bad.number, bad.order, bad.credits])).toThrow(CertificateInputError);
+    }
+    // Its PDF: the file, the title and the subject say a partner experience; no font, no VAT.
+    const pdf = await renderInvoicePdf(partnerDoc());
+    expect(pdf.filename).toBe('ORBES-invoice-P-2026-0001.pdf');
+    const text = latin1(pdf.body);
+    expect(text).toContain('(ORBES INVOICE P-2026-0001)');
+    expect(text).toContain('(The invoice P-2026-0001 of a partner experience, issued by CONGLOMERAT LLC.)');
+    expect(text.replace(/stream[\s\S]*?endstream/g, '')).not.toMatch(/\/Font|\/Subtype\s*\/Image/);
+    expect(JSON.stringify(INVOICE_COPY)).not.toMatch(/VAT|TAX/);
+    const note = await renderInvoicePdf(partnerDoc({ kind: 'CREDIT_NOTE', number: 'PC-2026-0001', credits: 'P-2026-0001' }));
+    expect(note.filename).toBe('ORBES-credit-note-PC-2026-0001.pdf');
+    expect(Buffer.from((await renderInvoicePdf(partnerDoc())).body).equals(Buffer.from(pdf.body))).toBe(true);
+  });
 });
+

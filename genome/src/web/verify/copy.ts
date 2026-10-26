@@ -1711,6 +1711,23 @@ export const CIRCLE = Object.freeze({
   openLink: 'OPEN THE LINK',
   /** The accessible name of a link to another site: where it leads. */
   externalLabel: (host: string) => `Open the link on ${host}, in a new tab`,
+  /**
+   * An invitation for a partner's experience (lot M4, K49 P2 and P3): WITH <BRAND> under its kind, on the post, NOW's card
+   * and the feed's; on the post, once the reader answered YES, the box that shares their first and last name with the
+   * partner (off by default, changed until the event begins), and its line. No line names a tap or a click: the phone and
+   * the computer read the same words.
+   */
+  partner: Object.freeze({
+    with: (brand: string) => `WITH ${brand}`,
+    /** The box's words: the reader's own name, as the partner would receive it. */
+    share: (name: string, brand: string) => `SHARE MY NAME, ${name}, WITH ${brand}`,
+    shareOn: (brand: string) => `Your name is shared with ${brand}.`,
+    shareOff: (brand: string) => `Unticked, ${brand} receives only the number of guests.`,
+    /** An account without both its first and last name: no box. */
+    headcountOnly: (brand: string) => `Only the number of guests is shared with ${brand}.`,
+    /** The choice could not be sent (no answer of the server to show). */
+    failed: 'Your choice could not be saved just now. Please try again.',
+  }),
 });
 
 /**
@@ -2736,6 +2753,30 @@ export const RELEASE_NOTICES = Object.freeze({
   label: 'EMAIL ME WHEN A RELEASE IS ANNOUNCED',
   hint: 'To the email of your account, saved as soon as it is switched. Each of these emails can stop them too.',
   failed: 'Your choice could not be saved just now.',
+});
+
+/**
+ * The advertising choice (lot M4 plan §3.4; macro scope K27 A4), shown only while conversions are switched on: the consent
+ * banner (views/consent-banner.ts), a band at the foot of the screen with ACCEPT and DECLINE of equal weight and the
+ * privacy policy's Advertising measurement, and YOUR PROFILE's ADVERTISING MEASUREMENT under its EMAILS (views/account.ts,
+ * the same on a computer's page). No line names a tap: the phone and the computer read the same words.
+ */
+export const CONSENT = Object.freeze({
+  /** The banner's region, for a screen reader. */
+  region: 'Advertising measurement',
+  text: 'ORBES can tell Meta, TikTok and Google when you join, enter a release or pay an order after one of their ads, to measure those ads. Only if you agree. No advertising cookie.',
+  accept: 'ACCEPT',
+  decline: 'DECLINE',
+  /** The privacy policy's Advertising measurement (web/legal: its `#ads` section). */
+  privacy: 'PRIVACY',
+  privacyHref: '/legal/privacy#ads',
+  saving: 'ONE MOMENT…',
+  failed: 'Your choice could not be saved. Try again.',
+  /** YOUR PROFILE's group, its switch and its line (as EMAIL ME WHEN A RELEASE IS ANNOUNCED). */
+  group: 'ADVERTISING',
+  label: 'ADVERTISING MEASUREMENT',
+  hint: 'ORBES tells the ad platform that brought you when you join, enter or pay. Turn it off at any time.',
+  rowFailed: 'Your choice could not be saved just now.',
 });
 
 /**

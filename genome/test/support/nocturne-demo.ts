@@ -120,6 +120,16 @@
  *                     drawn on 4 October (2 sets: you's place held, t.nguyen on the waiting list); you's sets of the draws
  *                     of September: one RESERVED, one DELIVERED on 28 September whose HALO was exchanged for 54; two LIVE
  *                     RELEASES of the set, one at its photograph's stage (it leads NOW), one not revealed yet
+ *   partner           the full story, then two invitations for partners' experiences (lot M4, step M4.8, K49 P2 and P3;
+ *                     seedPartner): A DINNER IN PARIS WITH MAISON ORVALE (10 Oct, 24 places, a photograph) and, the day
+ *                     before, AN EVENING OF SCENT AND TABLE with a partner of the longest brand (no photograph), each
+ *                     PALLADIUM's as THE PROGRAM says; four PALLADIUM collectors: Camille Durand, YES, her name shared;
+ *                     Inès Laurent, YES to both, her name not shared; Léo, YES, no last name (the number of guests only);
+ *                     Hugo Marchand, not answered. No other stage holds a partner
+ *   ads               the full story, then conversions switched on (lot M4, step M4.13, K27 A4; seedAds): the switch row
+ *                     on since NOW (no platform's keys: nothing is ever sent), so the consent banner shows to whoever holds
+ *                     no choice (you, a visitor); two PALLADIUM collectors who chose in YOUR PROFILE: Margaux Lefèvre,
+ *                     ADVERTISING MEASUREMENT on, and Théo Bernard, off. Every other stage keeps conversions off
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
  */
@@ -178,7 +188,9 @@ export type DemoVariant =
   | 'addons'
   | 'set'
   | 'set-live'
-  | 'vault';
+  | 'vault'
+  | 'partner'
+  | 'ads';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -215,6 +227,8 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'set',
   'set-live',
   'vault',
+  'partner',
+  'ads',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -320,7 +334,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live', 'partner', 'ads'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
   // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons); THE VAULT's (lot
   // Q3, step Q3.10) the live story too, then its own after the deployment (seedVault).
@@ -358,6 +372,8 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
       if (variant === 'addons') await seedAddons(w);
       if (variant === 'set') await seedSet(w);
       if (variant === 'set-live') await seedSetLive(w);
+      if (variant === 'partner') await seedPartner(w);
+      if (variant === 'ads') await seedAds(w);
     }
   });
   // THE VAULT's stage (lot Q3, step Q3.10): its vaults given after the deployment, as in production.
@@ -2943,4 +2959,104 @@ async function seedEmpty(w: World): Promise<void> {
   w.models.steel = hidden.id;
   await account(w, 'you', 'you@example.com');
   await account(w, 'owner', 'm.okafor@example.com', 1, hidden.id);
+}
+
+/** The partners of the stage `partner` (lot M4, step M4.8): MAISON ORVALE's brand, and the longest brand a state reads. */
+export const NOCTURNE_PARTNERS = Object.freeze({
+  brand: 'Maison Orvale',
+  longBrand: 'Maison Orvale, Parfumeurs et Arts de la Table, Paris · Genève · Milan',
+});
+
+/**
+ * The stage `partner` (lot M4, step M4.8; K49 P2 and P3): after the full story, two partners and an experience of each
+ * (DRAFT, as recorded before any invoice), each linked to an invitation of the circle with the experience PARTNER
+ * EXPERIENCE, open as THE PROGRAM says (PALLADIUM by default): partnerMain, A DINNER IN PARIS with MAISON ORVALE (Saturday
+ * 10 October, 24 places, a photograph); partnerLong, the evening before with the partner of the longest brand (12 places,
+ * no photograph), so NOW's next invitation is its card. Four PALLADIUM collectors (ten pieces each): partnerOn (Camille
+ * Durand) answered YES to the dinner, her name shared; partnerOff (Inès Laurent) YES to both, her name not shared;
+ * partnerNoName (Léo, no last name) YES, the box never offered; partnerNew (Hugo Marchand) has not answered.
+ */
+async function seedPartner(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const partners = ctx.services.partners;
+  const circle = ctx.services.circle;
+  clock.set(at('2026-10-04T08:00:00Z'));
+  const orvale = await partners.create({ brand: NOCTURNE_PARTNERS.brand, contactName: 'Claire Morand', billingName: 'Maison Orvale SAS', billingAddress: '8 rue de Test\n75008 Paris', billingCountry: 'FR' }, admin);
+  const long = await partners.create({ brand: NOCTURNE_PARTNERS.longBrand, contactName: 'Paul Verne' }, admin);
+  const dinner = await partners.createExperience(orvale.id, { title: 'A dinner in Paris', eventOn: '2026-10-10', amountMinor: 1_200_000, currency: 'EUR' }, admin);
+  const evening = await partners.createExperience(long.id, { title: 'An evening of scent and table', eventOn: '2026-10-09', amountMinor: 800_000, currency: 'EUR' }, admin);
+  clock.set(at('2026-10-04T09:00:00Z'));
+  const main = await circle.create(
+    {
+      kind: 'INVITATION',
+      title: 'A DINNER IN PARIS',
+      body: 'An evening offered with Maison Orvale: a dinner for the owners of the circle, and the pieces of the next release beside the table.',
+      eventAt: at('2026-10-10T18:30:00Z'),
+      eventPlace: 'PARIS',
+      capacity: 24,
+      experience: 'PARTNER_EXPERIENCE',
+      partnerExperienceId: dinner.id,
+    },
+    admin,
+  );
+  await ctx.services.media.addCirclePostPhoto(main.id, { mime: 'image/webp', bytes: nocturnePhoto('gold') }, admin);
+  await circle.publish(main.id, admin);
+  demo.posts.partnerMain = main.id;
+  clock.set(at('2026-10-04T09:30:00Z'));
+  const second = await circle.create(
+    {
+      kind: 'INVITATION',
+      title: 'AN EVENING OF SCENT AND TABLE',
+      body: 'One evening with our partner: its scents, its table, and the owners of the circle.',
+      eventAt: at('2026-10-09T18:00:00Z'),
+      eventPlace: 'PARIS',
+      capacity: 12,
+      experience: 'PARTNER_EXPERIENCE',
+      partnerExperienceId: evening.id,
+    },
+    admin,
+  );
+  await circle.publish(second.id, admin);
+  demo.posts.partnerLong = second.id;
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const guests: readonly { key: string; email: string; first: string; last: string | null }[] = [
+    { key: 'partnerOn', email: 'c.durand@example.com', first: 'Camille', last: 'Durand' },
+    { key: 'partnerOff', email: 'i.laurent@example.com', first: 'Inès', last: 'Laurent' },
+    { key: 'partnerNoName', email: 'leo.r@example.com', first: 'Léo', last: null },
+    { key: 'partnerNew', email: 'h.marchand@example.com', first: 'Hugo', last: 'Marchand' },
+  ];
+  for (const g of guests) {
+    const a = await account(w, g.key, g.email, 10);
+    await ctx.db.insertInto('account_profiles').values({ account_id: a.id, first_name: g.first, last_name: g.last }).execute();
+  }
+  const a = demo.accounts;
+  clock.set(at('2026-10-04T18:00:00Z'));
+  await circle.rsvp(a.partnerOn!.id, main.id, 'YES', a.partnerOn!.actor, { shareName: true });
+  await circle.rsvp(a.partnerOff!.id, main.id, 'YES', a.partnerOff!.actor);
+  await circle.rsvp(a.partnerOff!.id, second.id, 'YES', a.partnerOff!.actor);
+  await circle.rsvp(a.partnerNoName!.id, main.id, 'YES', a.partnerNoName!.actor);
+}
+
+/**
+ * The stage `ads` (lot M4, step M4.13; K27 A4): after the full story, conversions switched on as the console's SWITCH ON
+ * writes it (the switch row, events from the switch's time), with no platform's keys: the server sends nothing, its
+ * sender never started. The banner shows to whoever holds no choice (you, a visitor). Two PALLADIUM collectors (ten
+ * pieces each) chose in YOUR PROFILE: adsOn (Margaux Lefèvre) turned ADVERTISING MEASUREMENT on, adsOff (Théo Bernard)
+ * off. No other stage switches conversions on.
+ */
+async function seedAds(w: World): Promise<void> {
+  const { ctx, admin, clock } = w;
+  clock.set(at('2026-10-05T08:00:00Z'));
+  const now = clock.now();
+  await ctx.db.insertInto('ads_settings').values({ id: 1, enabled: true, events_from: now, switched_at: now, switched_by: admin.id, enqueued_until: now, updated_by: admin.id }).execute();
+  const chosen: readonly { key: string; email: string; first: string; last: string; choice: 'GRANTED' | 'DECLINED' }[] = [
+    { key: 'adsOn', email: 'm.lefevre@example.com', first: 'Margaux', last: 'Lefèvre', choice: 'GRANTED' },
+    { key: 'adsOff', email: 't.bernard@example.com', first: 'Théo', last: 'Bernard', choice: 'DECLINED' },
+  ];
+  clock.set(at('2026-10-05T09:00:00Z'));
+  for (const c of chosen) {
+    const a = await account(w, c.key, c.email, 10);
+    await ctx.db.insertInto('account_profiles').values({ account_id: a.id, first_name: c.first, last_name: c.last }).execute();
+    await ctx.services.ads.choose({ deviceId: null, accountId: a.id, choice: c.choice, source: 'ACCOUNT', userAgent: c.choice === 'GRANTED' ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' : null });
+  }
 }

@@ -134,6 +134,32 @@ THE VAULT (lot Q3) donne aux collectionneurs des coffres (vaults) à certaines o
 
 **GIVE A VAULT, le geste de la maison.** `Club` → `THE VAULT` → `Give a vault` (ou depuis la fiche du client, bloc `THE VAULT`) : un OPERATOR donne à un client, par son e-mail ; un ADMIN peut donner à un segment, un coffre par membre. Une note si besoin (`Note for Client Services`, jamais montrée au client), puis `Show the reach` : qui il atteint et qui est laissé de côté (les comptes de test, les comptes inactifs). Puis `Give`. THE HOUSE doit être allumé dans `Sources`. **Un coffre donné ne se reprend pas** : vérifiez le client avant de donner. Le client lit un message FROM ORBES, jamais la note.
 
+### Les expériences partenaires
+
+Une marque partenaire paie ORBES pour une expérience offerte aux collectionneurs (lot M4) : un dîner, une soirée, une visite. ORBES l'enregistre, l'envoie comme une invitation du cercle, facture le partenaire et lui donne la liste de ses invités. Le partenaire paie par virement, hors de la plateforme : rien n'est vendu au client.
+
+- **Qui est invité.** L'invitation est une invitation du cercle dont l'expérience est `Partner experience`, ouverte comme THE PROGRAM le dit : PALLADIUM par défaut, un palier et un segment par invitation si besoin, ses places et ses réponses jusqu'au début de l'événement. Le client la lit dans THE CIRCLE, sur NOW et sur sa page, avec la marque sous son type : WITH MAISON ORVALE.
+- **Ce que reçoit le partenaire : le nombre d'invités, et le nom seulement de ceux qui ont coché.** Après son YES, le client peut cocher SHARE MY NAME, avec son prénom et son nom, WITH la marque ; décochée par défaut, la case se change jusqu'au début de l'événement, et un NO l'enlève. Sans elle, le partenaire ne reçoit que le nombre d'invités. Un compte sans prénom ou sans nom n'a pas de case. La plateforme n'envoie rien au partenaire : c'est ORBES qui télécharge la liste et la lui envoie.
+- **Dans la console.** `Club` → `Circle` → `Partners` : `New partner` (la marque, le contact, les coordonnées de facturation), puis sur sa page `New experience` (le titre, le jour à Paris, le montant et sa devise). Dans l'éditeur de l'invitation, `PARTNER EXPERIENCE` nomme l'expérience. La page de l'expérience montre ses invitations, `Guests for the partner` (*18 guests · 11 names shared*) et `Download the list` : la ligne du nombre d'invités, puis les noms. Les réponses de l'invitation ont la colonne `Shares name`. Un OPERATOR enregistre et lit les noms ; un AUDITOR ne lit que les nombres.
+- **La facture** (un ADMIN) : `Issue the invoice` émet la facture P-2026-0001 au partenaire, au nom de CONGLOMERAT LLC, sans TVA ; une facture émise ne change jamais. `Record payment` inscrit le jour, à Paris, où l'argent est arrivé. `Cancel the experience` sur une expérience facturée émet son avoir PC-2026-0001. Les factures des partenaires se lisent dans `Invoices`, sous `Partners`, à part de celles des collectionneurs.
+
+**« Mon nom sera-t-il donné à la marque ? »** Seulement s'il a coché la case avec son YES. Un nom déjà envoyé au partenaire reste chez lui.
+
+> Votre nom n'est donné à la marque que si vous cochez SHARE MY NAME avec votre réponse. Sinon, elle reçoit seulement le nombre d'invités. Vous pouvez changer d'avis jusqu'au début de l'événement.
+
+### Meta, TikTok et Google (à partir du jour où les conversions sont allumées)
+
+Ce paragraphe s'applique **à partir du jour où les conversions sont allumées** (lot M4) : le propriétaire les allume dans `Links` → `Ad platforms` quand il lance de la publicité. Jusque-là, rien ne part, l'application ne montre ni bandeau ni réglage, et la réponse est simplement non.
+
+- **Ce que le client voit.** Une fois les conversions allumées, un bandeau au pied de l'écran demande son accord, avec ACCEPT et DECLINE de même poids et le lien PRIVACY ; dans YOUR PROFILE, sous ADVERTISING, le réglage ADVERTISING MEASUREMENT.
+- **Seulement avec son accord.** Sans ACCEPT, ou après DECLINE, rien n'est envoyé pour lui.
+- **Ce qui est envoyé.** Seulement à la plateforme d'où il est venu (une publicité Meta, TikTok ou Google), et seulement quand il crée son compte, s'inscrit à un tirage, entre dans une LIVE RELEASE ou paie une commande : son adresse e-mail et un identifiant de compte, tous deux brouillés de façon irréversible, son pays, l'identifiant de clic de la publicité, son navigateur et, pour une commande, son montant. Jamais son nom, son téléphone, son adresse, ses pièces ni ses tailles ; aucun cookie publicitaire, aucun script d'une autre société.
+- **Comment l'arrêter.** Dans YOUR PROFILE, il éteint ADVERTISING MEASUREMENT : ce qui attendait d'être envoyé est annulé, et plus rien ne part ensuite. Ce qui a déjà été envoyé reste chez la plateforme.
+
+**« ORBES partage-t-il mes données avec Meta, TikTok ou Google ? »** Avant le jour où les conversions sont allumées : non, rien ne part. Ensuite : seulement avec son accord, et seulement ce qui est dit plus haut.
+
+> Seulement si vous l'acceptez. Dans ce cas, ORBES dit à la plateforme dont la publicité vous a amené quand vous créez votre compte, entrez dans une sortie ou payez une commande, avec votre adresse e-mail brouillée, jamais votre nom ni votre adresse. Vous pouvez l'arrêter à tout moment dans YOUR PROFILE, avec ADVERTISING MEASUREMENT.
+
 ---
 
 ## 1. Vente en boutique

@@ -20,6 +20,10 @@
  *     link yet » per channel, MAKE THE LINKS in one click, each channel's link with its address; the countdown image,
  *     TEASER by default then FULL once the name and photograph are public, each downloaded as a 1080 × 1920 PNG; the
  *     readout « Figures appear once entries open. »; a LIVE RELEASE's tab with its readout FINAL; the phone.
+ *  7. Links → Ad platforms (lot M4 plan §3.5, step M4.12, K27 A1 to A5): from the Links page, read while off (the off
+ *     sentence, the three platforms KEYS MISSING, and the empty states of CHANNELS, CONSENT and EVENTS said plainly); a
+ *     channel mapped to Meta; SWITCH ON refused with every key missing (its message read); an AUDITOR reads without a
+ *     button; the phone.
  * Screens with ORBES_SCREENSHOTS=1 (genome/out/admin-links-*.png). No CSP violation, no page error.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,6 +40,7 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
+import { AD_PLATFORMS_TEXT as AP } from '../../src/web/admin/model/ad-platforms.js';
 import { LINKS_COPY as C } from '../../src/web/admin/model/links.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { GrowthWorld } from '../support/growth.js';
@@ -588,6 +593,79 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Links page (plan CUSTOMER INTELLI
         await shot(tight, 'campaign-draw-1024');
         await tight.context().close();
       }
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
+    'opens Links → Ad platforms: off said plainly, KEYS MISSING, each section\'s empty state; a channel mapped to Meta; SWITCH ON refused with every key missing; an AUDITOR reads (K27, M4.12)',
+    async () => {
+      const toAds = async (p: Page) => {
+        await go(p, '#/links', 'Links');
+        await p.click('[data-testid=links-ad-platforms]');
+        await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(AP.title);
+        expect(await p.evaluate(() => location.hash)).toBe('#/links/ads');
+        expect(await p.locator('.side__link.is-active').textContent()).toBe('Links');
+      };
+      const p = await open(ADMIN);
+      await toAds(p);
+      // Off, said plainly; never switched; the three platforms without their keys, nothing counted.
+      expect([await p.locator('[data-testid=ads-state] .adplat__state-label').textContent(), await p.locator('[data-testid=ads-state] .status__text').textContent()]).toEqual([`${AP.conversionsLabel}:`, AP.off]);
+      expect(await p.locator('[data-testid=ads-off]').textContent()).toBe('Conversions are off. Nothing is captured or sent, and collectors see no banner.');
+      expect(await p.locator('[data-testid=ads-switched]').textContent()).toBe(AP.neverSwitched);
+      expect(await p.locator('[data-testid=ads-platform]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.platform))).toEqual(['META', 'TIKTOK', 'GOOGLE']);
+      expect(await p.locator('[data-testid=ads-keys]').allTextContents()).toEqual([AP.keysMissing, AP.keysMissing, AP.keysMissing]);
+      expect(await p.locator('[data-testid=ads-api-version]').allTextContents()).toEqual(['v24.0', 'v1.3', 'v22']);
+      expect(await p.locator('[data-testid=ads-last-send]').allTextContents()).toEqual([AP.never, AP.never, AP.never]);
+      expect(await p.locator('[data-testid=ads-count-SENT]').allTextContents()).toEqual(['0', '0', '0']);
+      expect(await p.locator('[data-testid=ads-test]').count()).toBe(0);
+      expect(await p.locator('[data-testid=ads-test-off]').textContent()).toBe(AP.testWhileOff);
+      // Each section's empty state in its own words.
+      expect(await p.locator('[data-testid=ads-channels-empty] .empty__text').textContent()).toBe(AP.channelsEmpty);
+      expect(await p.locator('[data-testid=ads-consent-empty] .empty__text').textContent()).toBe(AP.consentEmpty);
+      expect(await p.locator('[data-testid=ads-events-empty] .empty__text').textContent()).toBe(AP.eventsEmpty);
+      expect(await p.locator('[data-testid=ads-google-action]').allTextContents()).toEqual([AP.notNamed, AP.notNamed, AP.notNamed, AP.notNamed]);
+      await shot(p, 'ads-off');
+
+      // A channel mapped to Meta, saved on its own row.
+      const instagram = p.locator('[data-testid=ads-channel]', { has: p.locator('[data-testid=ads-channel-name]', { hasText: /^Instagram$/ }) });
+      const save = instagram.locator('[data-testid=ads-channel-save]');
+      expect(await save.isDisabled()).toBe(true);
+      await instagram.locator('[data-testid=ads-channel-META]').click();
+      expect(await save.isDisabled()).toBe(false);
+      await save.click();
+      await toast(p, 'Instagram saved.');
+      await expect.poll(() => p.locator('[data-testid=ads-channels-empty]').count(), POLL).toBe(0);
+      expect(await instagram.locator('[data-testid=ads-channel-META] input').isChecked()).toBe(true);
+      const mapped = await ctx.db.selectFrom('ads_channel_platforms as m').innerJoin('link_channels as c', 'c.id', 'm.channel_id').select(['c.name', 'm.platform']).execute();
+      expect(mapped).toEqual([{ name: 'Instagram', platform: 'META' }]);
+
+      // SWITCH ON: the dialog says what goes live, the phrase typed; refused with every key missing, its message read.
+      await p.click('[data-testid=ads-switch]');
+      await p.locator('dialog.dialog').waitFor();
+      expect(await p.locator('[data-testid=ads-switch-body]').textContent()).toBe('The consent banner and the privacy policy’s advertising section appear at once. Events are sent only for collectors who accept, from now on.');
+      expect(await p.locator('[data-testid=dialog-confirm]').isDisabled()).toBe(true);
+      await p.fill('[data-testid=dialog-phrase]', 'SWITCH ON');
+      await p.click('[data-testid=dialog-confirm]');
+      await expect.poll(() => p.locator('.dialog__error').textContent(), POLL).toBe('No platform has its keys in the server’s .env: conversions cannot be switched on.');
+      await shot(p, 'ads-switch-refused');
+      await p.click('[data-testid=dialog-cancel]');
+      await p.waitForSelector('dialog.dialog', { state: 'detached' });
+      expect(await ctx.db.selectFrom('ads_settings').select(['enabled', 'events_from']).execute()).toEqual([{ enabled: false, events_from: null }]);
+      expect((await ctx.db.selectFrom('audit_logs').select('action').where('action', 'like', 'ads.%').execute()).map((a) => a.action)).toEqual(['ads.channels']);
+      await p.context().close();
+
+      // An AUDITOR reads it all without a button; the phone fits.
+      const a = await open(AUDITOR);
+      await toAds(a);
+      expect(await a.locator('[data-testid=ads-switch], [data-testid=ads-test-codes], [data-testid=ads-google-edit], [data-testid=ads-channel-save]').count()).toBe(0);
+      expect(await a.locator('[data-testid=ads-channel-platforms]').first().textContent()).toBe('Meta');
+      await a.context().close();
+      const phone = await open(ADMIN, 390);
+      await toAds(phone);
+      await fits(phone);
+      await shot(phone, 'ads-phone');
+      await phone.context().close();
     },
     STEP_TIMEOUT,
   );

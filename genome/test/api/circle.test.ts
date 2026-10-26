@@ -17,7 +17,14 @@
  *    once and final, its results shown after it (never audited); no-store;
  *  - the visits counted per day on the feed's first page, with no account;
  *    the Analytics panel: the members by tier now, the visits by day;
- *  - the right-of-access export: the account's answers and votes.
+ *  - the right-of-access export: the account's answers and votes;
+ *  - partner experiences (lot M4, K49 P2 and P3): an invitation of a partner experience linked to a partner's
+ *    experience (422 CIRCLE_PARTNER_NOT_EXPERIENCE on any other post, a cancelled experience refused), the readers'
+ *    WITH <BRAND>, the RSVP body's `shareName` (set with a YES, cleared by a NO, 422 CIRCLE_SHARE_NOT_OFFERED without a
+ *    partner, 409 CIRCLE_SHARE_NAME_MISSING without both names; validated, CSRF as every answer), the post's
+ *    `shareName` with the reader's own name only, the capacity unchanged, SHARES NAME in the console's answers, the
+ *    names cleared when the link moves to another partner, and the name shared in the right-of-access export with its
+ *    time.
  */
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -335,8 +342,10 @@ describe('the owners\' circle (P-X01)', () => {
     expect(seen.items.slice(0, 2).map((p) => p.id)).toEqual([forPlatine.id, forAll.id]);
     expect(seen.items.map((p) => p.id)).not.toContain(draft.id);
     // No body in the feed: a post carries it.
-    // NOCTURNE (addition 6): an invitation's places and whether answers are open; null for another kind.
-    for (const p of seen.items) expect(Object.keys(p).sort()).toEqual(['answer', 'cover', 'eventAt', 'eventPlace', 'experience', 'id', 'invitation', 'kind', 'minTier', 'publishedAt', 'title', 'voted']);
+    // NOCTURNE (addition 6): an invitation's places and whether answers are open; null for another kind. Lot M4 (K49
+    // P2): its partner's brand, null without one.
+    for (const p of seen.items) expect(Object.keys(p).sort()).toEqual(['answer', 'cover', 'eventAt', 'eventPlace', 'experience', 'id', 'invitation', 'kind', 'minTier', 'partner', 'publishedAt', 'title', 'voted']);
+    for (const p of seen.items) expect((p as { partner?: unknown }).partner).toBeNull();
     for (const p of seen.items) if (p.kind !== 'INVITATION') expect((p as { invitation?: unknown }).invitation).toBeNull();
     expect((await read(titane.client, forAll.id)).body).toBe(forAll.body);
     // Below its tier, unpublished, unknown or malformed: one 404.
@@ -638,10 +647,161 @@ describe('the owners\' circle (P-X01)', () => {
     const res = await admin.get(`/api/admin/owners/${m.id}/export`);
     expect(res.statusCode, res.body).toBe(200);
     const x = safeJson(res) as { circleAnswers: Record<string, unknown>[]; circleVotes: Record<string, unknown>[]; activity: { action: string }[] };
-    expect(x.circleAnswers).toEqual([{ postId: invitation.id, title: 'A fitting', answer: 'YES', firstAnsweredAt: h.clock.now().toISOString(), answeredAt: h.clock.now().toISOString() }]);
+    expect(x.circleAnswers).toEqual([
+      { postId: invitation.id, title: 'A fitting', answer: 'YES', firstAnsweredAt: h.clock.now().toISOString(), answeredAt: h.clock.now().toISOString(), shareName: false, shareNameAt: null },
+    ]);
     expect(x.circleVotes).toEqual([{ postId: poll.id, title: 'Which finish?', option: 1, optionText: 'Brushed', votedAt: h.clock.now().toISOString() }]);
     // The answer is in the activity (audited); the vote is not.
     expect(x.activity.map((e) => e.action)).toContain('circle.rsvp');
     expect((await audits('account.export', m.id))[0]!.details).toMatchObject({ circleAnswers: 1, circleVotes: 1 });
+  });
+
+  it('links an invitation of a partner experience to a partner\'s experience (K49 P2): on that experience only, never a cancelled one; WITH <BRAND> for its readers', async () => {
+    const partner = safeJson(await operator.post('/api/admin/partners', { brand: 'Maison Circle' })) as { id: string };
+    const experience = (body: Record<string, unknown> = {}) => operator.post(`/api/admin/partners/${partner.id}/experiences`, { title: 'Dinner', eventOn: '2026-12-01', amountMinor: 1_000_000, currency: 'EUR', ...body });
+    const dinner = safeJson(await experience()) as { id: string };
+    const event = { eventAt: at(72 * HOUR), eventPlace: 'Paris' };
+    // Only an invitation of a partner experience names one (422); an unknown experience is 404; a cancelled one 409.
+    for (const body of [{ kind: 'INVITATION', title: 'An evening', ...event, partnerExperienceId: dinner.id }, { kind: 'INVITATION', title: 'An evening', ...event, experience: 'MEMBERS_EVENING', partnerExperienceId: dinner.id }, { kind: 'NOTE', title: 'A note', partnerExperienceId: dinner.id }]) {
+      const res = await operator.post(posts(), body);
+      expect([res.statusCode, errorOf(res).code], JSON.stringify(body)).toEqual([422, 'CIRCLE_PARTNER_NOT_EXPERIENCE']);
+    }
+    const unknown = await operator.post(posts(), { kind: 'INVITATION', title: 'An evening', ...event, experience: 'PARTNER_EXPERIENCE', partnerExperienceId: '00000000-0000-4000-8000-000000000000' });
+    expect([unknown.statusCode, errorOf(unknown).code]).toEqual([404, 'PARTNER_EXPERIENCE_NOT_FOUND']);
+    const off = safeJson(await experience({ title: 'Called off' })) as { id: string };
+    expect((await operator.post(`/api/admin/partner-experiences/${off.id}/cancel`)).statusCode).toBe(200);
+    const cancelled = await operator.post(posts(), { kind: 'INVITATION', title: 'An evening', ...event, experience: 'PARTNER_EXPERIENCE', partnerExperienceId: off.id });
+    expect([cancelled.statusCode, errorOf(cancelled).code]).toEqual([409, 'PARTNER_EXPERIENCE_STATE']);
+
+    const linked = (await create({ kind: 'INVITATION', title: 'Dinner with the house', ...event, experience: 'PARTNER_EXPERIENCE', partnerExperienceId: dinner.id })) as AdminPostJson & { partnerExperience: unknown };
+    expect(linked.partnerExperience).toEqual({ id: dinner.id, title: 'Dinner', eventOn: '2026-12-01', status: 'DRAFT', partner: { id: partner.id, brand: 'Maison Circle' } });
+    expect((await audits('circle.post.create', linked.id))[0]!.details).toMatchObject({ experience: 'PARTNER_EXPERIENCE', partnerExperienceId: dinner.id });
+    // Its experience no longer a partner's while it is linked: refused; cleared with it, accepted.
+    const away = await operator.patch(posts(linked.id), { experience: 'LAUNCH_PREVIEW' });
+    expect([away.statusCode, errorOf(away).code]).toEqual([422, 'CIRCLE_PARTNER_NOT_EXPERIENCE']);
+    // Opened as THE PROGRAM says, unchanged: from PALLADIUM; its readers see WITH <BRAND>, on the post and in the feed.
+    expect(linked.minTier).toBe(3);
+    await publish(linked.id);
+    const palladium = await accountClient(h);
+    await holdPieces(h.ctx.db, await accountIdOf(palladium.email), 10, catalog.modelId);
+    const view = (await read(palladium.client, linked.id)) as PostJson & { partner: unknown; shareName: unknown };
+    expect(view.partner).toEqual({ brand: 'Maison Circle' });
+    expect(view.shareName).toEqual({ offered: true, on: false, name: 'Owner Test' });
+    expect(((await feed(palladium.client)).items.find((c) => c.id === linked.id) as CardJson & { partner: unknown }).partner).toEqual({ brand: 'Maison Circle' });
+    // Every other post: no partner, no name to share.
+    const plain = await create({ kind: 'INVITATION', title: 'A plain evening', ...event });
+    await publish(plain.id);
+    expect((await read(palladium.client, plain.id)) as PostJson & { partner: unknown; shareName: unknown }).toMatchObject({ partner: null, shareName: null });
+    expect(((await feed(palladium.client)).items.find((c) => c.id === plain.id) as CardJson & { partner: unknown }).partner).toBeNull();
+  });
+
+  it('takes the guest\'s choice to share their name with the partner (K49 P3) with the answer, under the post\'s lock: set with a YES, cleared by a NO, the capacity unchanged; the reader\'s own name only; SHARES NAME in the console', async () => {
+    const partner = safeJson(await operator.post('/api/admin/partners', { brand: 'Maison Partage' })) as { id: string };
+    const dinner = safeJson(await operator.post(`/api/admin/partners/${partner.id}/experiences`, { title: 'Dinner', eventOn: '2026-12-02', amountMinor: 500_000, currency: 'EUR' })) as { id: string };
+    const invitation = await create({ kind: 'INVITATION', title: 'Dinner, shared', eventAt: at(72 * HOUR), capacity: 2, experience: 'PARTNER_EXPERIENCE', partnerExperienceId: dinner.id });
+    await publish(invitation.id);
+    const plain = await create({ kind: 'INVITATION', title: 'Dinner, no partner', eventAt: at(72 * HOUR), minTier: 3 });
+    await publish(plain.id);
+    const guest = async (first: string | null, last: string | null) => {
+      const a = await accountClient(h);
+      const id = await accountIdOf(a.email);
+      await holdPieces(h.ctx.db, id, 10, catalog.modelId);
+      await h.ctx.db.updateTable('account_profiles').set({ first_name: first, last_name: last }).where('account_id', '=', id).execute();
+      return { ...a, id };
+    };
+    const camille = await guest('Camille', 'Durand');
+    const jules = await guest('Jules', 'Morel');
+    const nameless = await guest('Ana', null);
+    const rsvp = (c: Client, body: Record<string, unknown>, id = invitation.id, opts: { noCsrf?: boolean } = {}) => c.post(`/api/v1/club/circle/${id}/rsvp`, body, opts);
+    type Shared = PostJson & { shareName: { offered: boolean; on: boolean; name: string | null } | null };
+
+    // The body: shareName a boolean; a name shared with a YES only; CSRF as every answer.
+    expect(errorOf(await rsvp(camille.client, { answer: 'YES', shareName: true }, invitation.id, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await rsvp(camille.client, { answer: 'YES', shareName: 'yes' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await rsvp(camille.client, { answer: 'NO', shareName: true })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await rsvp(camille.client, { answer: 'YES', share: true })).code).toBe('VALIDATION_FAILED');
+    // A post without partner shares no name (422); without both names, nothing is shared (409) and no box is offered.
+    const notOffered = await rsvp(camille.client, { answer: 'YES', shareName: true }, plain.id);
+    expect([notOffered.statusCode, errorOf(notOffered).code]).toEqual([422, 'CIRCLE_SHARE_NOT_OFFERED']);
+    expect((await read(nameless.client, invitation.id) as Shared).shareName).toEqual({ offered: false, on: false, name: null });
+    const missing = await rsvp(nameless.client, { answer: 'YES', shareName: true });
+    expect([missing.statusCode, errorOf(missing).code]).toEqual([409, 'CIRCLE_SHARE_NAME_MISSING']);
+    expect(await h.ctx.db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', invitation.id).where('account_id', '=', nameless.id).executeTakeFirst()).toBeUndefined();
+
+    // YES with the name shared: the reader's own name, and the time it was shared.
+    const yes = await rsvp(camille.client, { answer: 'YES', shareName: true });
+    expect(yes.statusCode, yes.body).toBe(200);
+    expect(safeJson(yes) as Shared).toMatchObject({ answer: 'YES', invitation: { placesLeft: 1 }, shareName: { offered: true, on: true, name: 'Camille Durand' } });
+    const stored = await h.ctx.db.selectFrom('circle_rsvps').select(['share_name', 'share_name_at']).where('post_id', '=', invitation.id).where('account_id', '=', camille.id).executeTakeFirstOrThrow();
+    expect(stored).toEqual({ share_name: true, share_name_at: h.clock.now() });
+    // Another reader reads their own name, never Camille's.
+    const other = (await read(jules.client, invitation.id)) as Shared;
+    expect(other.shareName).toEqual({ offered: true, on: false, name: 'Jules Morel' });
+    expect(JSON.stringify(other)).not.toContain('Camille');
+
+    // The capacity: Jules takes the last place; Camille unticks and ticks again on a full invitation, never refused.
+    expect((await rsvp(jules.client, { answer: 'YES' })).statusCode).toBe(200);
+    h.clock.advance(1_000);
+    expect(safeJson(await rsvp(camille.client, { answer: 'YES', shareName: false })) as Shared).toMatchObject({ answer: 'YES', invitation: { placesLeft: 0 }, shareName: { on: false } });
+    h.clock.advance(1_000);
+    expect(safeJson(await rsvp(camille.client, { answer: 'YES', shareName: true })) as Shared).toMatchObject({ shareName: { on: true } });
+    // A YES again without shareName keeps the choice; the same answer and choice write nothing.
+    const before = (await audits('circle.rsvp', invitation.id)).length;
+    expect((safeJson(await rsvp(camille.client, { answer: 'YES' })) as Shared).shareName?.on).toBe(true);
+    expect((await audits('circle.rsvp', invitation.id)).length).toBe(before);
+    // A YES past the capacity is still refused.
+    expect(errorOf(await rsvp(nameless.client, { answer: 'YES' })).code).toBe('CIRCLE_FULL');
+
+    // SHARES NAME in the console's answers.
+    const listed = safeJson(await operator.get(`${posts(invitation.id)}/answers`)) as { items: { accountId: string; shareName: boolean }[] };
+    expect(Object.fromEntries(listed.items.map((a) => [a.accountId, a.shareName]))).toEqual({ [camille.id]: true, [jules.id]: false });
+
+    // A NO clears it; audited with the answer, the choice after.
+    h.clock.advance(1_000);
+    expect(safeJson(await rsvp(camille.client, { answer: 'NO' })) as Shared).toMatchObject({ answer: 'NO', shareName: { on: false } });
+    expect(await h.ctx.db.selectFrom('circle_rsvps').select(['share_name', 'share_name_at']).where('post_id', '=', invitation.id).where('account_id', '=', camille.id).executeTakeFirstOrThrow()).toEqual({ share_name: false, share_name_at: null });
+    expect((await audits('circle.rsvp', invitation.id)).filter((e) => e.actor_id === camille.id).map((e) => e.details)).toEqual([
+      { answer: 'YES', shareName: true },
+      { answer: 'YES', shareName: false },
+      { answer: 'YES', shareName: true },
+      { answer: 'NO', previous: 'YES', shareName: false },
+    ]);
+
+    // The link moved to another partner's experience: the names shared with the first are cleared (one brand each).
+    h.clock.advance(1_000);
+    expect((await rsvp(jules.client, { answer: 'YES', shareName: true })).statusCode).toBe(200);
+    const sameBrand = safeJson(await operator.post(`/api/admin/partners/${partner.id}/experiences`, { title: 'Second dinner', eventOn: '2026-12-03', amountMinor: 500_000, currency: 'EUR' })) as { id: string };
+    expect((await operator.patch(posts(invitation.id), { partnerExperienceId: sameBrand.id })).statusCode).toBe(200);
+    expect((await read(jules.client, invitation.id) as Shared).shareName?.on).toBe(true);
+    const otherPartner = safeJson(await operator.post('/api/admin/partners', { brand: 'Maison Autre' })) as { id: string };
+    const theirs = safeJson(await operator.post(`/api/admin/partners/${otherPartner.id}/experiences`, { title: 'Their dinner', eventOn: '2026-12-04', amountMinor: 500_000, currency: 'EUR' })) as { id: string };
+    expect((await operator.patch(posts(invitation.id), { partnerExperienceId: theirs.id })).statusCode).toBe(200);
+    const moved = (await read(jules.client, invitation.id)) as Shared & { partner: unknown };
+    expect([moved.partner, moved.shareName?.on]).toEqual([{ brand: 'Maison Autre' }, false]);
+    expect((await audits('circle.post.update', invitation.id)).at(-1)!.details).toMatchObject({ before: { partnerExperienceId: sameBrand.id }, after: { partnerExperienceId: theirs.id }, sharedNamesCleared: 1 });
+
+    // Answers close when the event begins: the choice too.
+    h.clock.advance(72 * HOUR);
+    await staff();
+    expect(errorOf(await rsvp(jules.client, { answer: 'YES', shareName: true })).code).toBe('CIRCLE_EVENT_PAST');
+  });
+
+  it('lists a YES with the name shared in the right-of-access export, with the time it was shared (K49 P3)', async () => {
+    const partner = safeJson(await operator.post('/api/admin/partners', { brand: 'Maison Export' })) as { id: string };
+    const dinner = safeJson(await operator.post(`/api/admin/partners/${partner.id}/experiences`, { title: 'Dinner', eventOn: '2026-12-05', amountMinor: 500_000, currency: 'EUR' })) as { id: string };
+    const invitation = await create({ kind: 'INVITATION', title: 'A partner dinner', eventAt: at(10 * HOUR), experience: 'PARTNER_EXPERIENCE', partnerExperienceId: dinner.id });
+    await publish(invitation.id);
+    const m = await accountClient(h);
+    const id = await accountIdOf(m.email);
+    await holdPieces(h.ctx.db, id, 10, catalog.modelId);
+    const answeredAt = h.clock.now().toISOString();
+    expect((await m.client.post(`/api/v1/club/circle/${invitation.id}/rsvp`, { answer: 'YES' })).statusCode).toBe(200);
+    h.clock.advance(60_000);
+    const sharedAt = h.clock.now().toISOString();
+    expect((await m.client.post(`/api/v1/club/circle/${invitation.id}/rsvp`, { answer: 'YES', shareName: true })).statusCode).toBe(200);
+    const res = await admin.get(`/api/admin/owners/${id}/export`);
+    expect(res.statusCode, res.body).toBe(200);
+    const x = safeJson(res) as { circleAnswers: Record<string, unknown>[] };
+    expect(x.circleAnswers).toEqual([{ postId: invitation.id, title: 'A partner dinner', answer: 'YES', firstAnsweredAt: answeredAt, answeredAt: sharedAt, shareName: true, shareNameAt: sharedAt }]);
   });
 });

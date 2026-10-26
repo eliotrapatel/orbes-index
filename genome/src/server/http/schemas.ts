@@ -86,6 +86,24 @@ import {
   VAULT_REWARD_LINE_MAX,
   VAULT_REWARD_MODES,
   VAULT_REWARD_POSITION_MAX,
+  MARGIN_COST_MINOR_MAX,
+  MARGIN_UNIT_COST_KEYS,
+  AD_CLICK_ID_MAX,
+  AD_CONSENT_CHOICES,
+  AD_EVENT_STATUSES,
+  ADS_GOOGLE_ACTION_PATTERN,
+  ADS_PLATFORMS,
+  ADS_TEST_EVENT_CODE_MAX,
+  SHIPMENT_WEIGHT_G_MAX,
+  PARTNER_AMOUNT_MINOR_MAX,
+  PARTNER_BILLING_ADDRESS_MAX,
+  PARTNER_BRAND_MAX,
+  PARTNER_COMPANY_NUMBER_MAX,
+  PARTNER_EMAIL_MAX,
+  PARTNER_EXPERIENCE_TITLE_MAX,
+  PARTNER_NAME_MAX,
+  PARTNER_NOTE_MAX,
+  PARTNER_PHONE_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -477,8 +495,12 @@ export const accountSizesBody = body({
   sizes: z.strictObject({ RING: savedSize, BRACELET: savedSize, WRIST: savedSize, NECKLACE: savedSize }, { error: 'Your sizes are an object' }),
 });
 
-/** POST /api/v1/club/circle/:id/rsvp (P-X01): the account's answer to an invitation, YES or NO. */
-export const circleRsvpBody = body({ answer: z.enum(CIRCLE_RSVP_ANSWERS) });
+/**
+ * POST /api/v1/club/circle/:id/rsvp (P-X01): the account's answer to an invitation, YES or NO; on an invitation for a
+ * partner's experience (lot M4, K49 P3), `shareName` shares the guest's name with its partner (true, with a YES) or stops
+ * sharing it (false); left out, a YES keeps the choice as it was.
+ */
+export const circleRsvpBody = body({ answer: z.enum(CIRCLE_RSVP_ANSWERS), shareName: z.boolean({ error: 'Must be true or false' }).optional() });
 
 /** POST /api/v1/club/circle/:id/vote (P-X01): the index of one option of the poll, from 0. */
 export const circleVoteBody = body({
@@ -1232,6 +1254,8 @@ const circleFields = {
   segmentId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   /** BP-19 T7: what an invitation is (the members' evening, a launch preview, a partner experience); its tier then THE PROGRAM's. */
   experience: z.preprocess(emptyToNull, z.enum(CIRCLE_EXPERIENCES).nullable().optional()),
+  /** Lot M4 (K49 P2): the partner's experience an invitation of a partner experience is for; null clears it. */
+  partnerExperienceId: z.preprocess(emptyToNull, uuid.nullable().optional()),
 };
 
 /**
@@ -2939,3 +2963,166 @@ export const liveVaultBody = body({ on: z.boolean() });
 
 /** PUT /api/admin/models/:id/vault-only (OPERATOR; §4.5): VAULT ONLY on or off. */
 export const modelVaultOnlyBody = body({ vaultOnly: z.boolean() });
+
+// ── Admin: the margin's settings (routes/admin/margin.ts, plan M4 §1.2, K43 N1 and N2) ──
+
+/**
+ * GET /api/admin/margin and .csv (plan M4 §1.2, K43): GROWTH's window, the last 12 (default) or 24 UTC months, and
+ * `test` for the test entrants' orders too. Every figure in euros (N2): no currency to choose.
+ */
+export const marginQuery = z.object({
+  months: growthQuery.shape.months,
+  test: queryBool,
+});
+
+/** A currency in the path (/api/admin/margin/rates/:currency), any case; MarginSettingsService refuses EUR (422 MARGIN_RATE_EUR). */
+export const marginRateParams = z.object({ currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'A three-letter code, such as GBP').transform((s) => s.toUpperCase()) });
+
+/** PUT /api/admin/margin/rates/:currency: the euros one unit is worth (a number, or its decimal text), six decimals at most. */
+export const marginRateBody = body({ rate: z.union([z.number(), z.string().trim().max(20, 'At most 20 characters')]) });
+
+const marginCost = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(MARGIN_COST_MINOR_MAX, `At most ${MARGIN_COST_MINOR_MAX} cents`);
+const marginCurrency = z.string().trim().regex(/^[A-Za-z]{3}$/, 'A three-letter code, such as EUR').transform((s) => s.toUpperCase());
+/** A band's country, two letters (null: ALL OTHER COUNTRIES); MarginSettingsService checks it is a country. */
+const bandCountry = z.preprocess(emptyToNull, z.string().trim().regex(/^[A-Za-z]{2}$/, 'A two-letter code, such as FR, or null for ALL OTHER COUNTRIES').transform((s) => s.toUpperCase()).nullable());
+const bandWeight = whole(1, SHIPMENT_WEIGHT_G_MAX, 'grams');
+
+export const shippingCostParams = z.object({ id: uuid });
+
+/** POST /api/admin/margin/shipping-costs: a band, its country (null: ALL OTHER COUNTRIES), weight limit, cost and currency. */
+export const createShippingCostBody = body({ country: bandCountry, maxWeightG: bandWeight, costMinor: marginCost, currency: marginCurrency });
+
+/** PATCH /api/admin/margin/shipping-costs/:id: any of its fields. At least one. */
+export const updateShippingCostBody = body({ country: bandCountry.optional(), maxWeightG: bandWeight.optional(), costMinor: marginCost.optional(), currency: marginCurrency.optional() }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the band to change',
+);
+
+/** A unit cost's key in the path (/api/admin/margin/unit-costs/:key): POUCH, CARD, VAULT_CARD, CARE_SERVICE or CLAIM_<outcome>. */
+export const unitCostParams = z.object({ key: z.enum(MARGIN_UNIT_COST_KEYS, { message: `Must be one of ${MARGIN_UNIT_COST_KEYS.join(', ')}` }) });
+
+/** PUT /api/admin/margin/unit-costs/:key: its cost and currency. */
+export const unitCostBody = body({ costMinor: marginCost, currency: marginCurrency });
+
+/** A category's id in the path (/api/admin/margin/allowances/:categoryId), 1 to 31 (a category's 5-bit index). */
+export const allowanceParams = z.object({
+  categoryId: z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,2}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a category id').min(1, 'At least 1').max(31, 'At most 31')),
+});
+
+/** PUT /api/admin/margin/allowances/:categoryId: a percent of revenue, 0 to 100, two decimals at most (12.5). */
+export const allowanceBody = body({ percent: z.union([z.number().min(0, 'At least 0').max(100, 'At most 100'), z.string().trim().max(6, 'At most 6 characters')]) });
+
+// ── Admin: the partners (routes/admin/partners.ts, plan M4 §2.2, K49 P1 to P4) ──
+
+export const partnerParams = z.object({ id: uuid });
+export const partnerExperienceParams = z.object({ id: uuid });
+export const partnerInvoiceParams = z.object({ id: uuid });
+
+/** A partner's fields; '' and null clear an optional one. PartnerService checks the email and the country. */
+const partnerFields = {
+  brand: text(PARTNER_BRAND_MAX).optional(),
+  contactName: z.preprocess(emptyToNull, text(PARTNER_NAME_MAX).nullable().optional()),
+  contactEmail: z.preprocess(emptyToNull, text(PARTNER_EMAIL_MAX).nullable().optional()),
+  contactPhone: z.preprocess(emptyToNull, text(PARTNER_PHONE_MAX).nullable().optional()),
+  billingName: z.preprocess(emptyToNull, text(PARTNER_NAME_MAX).nullable().optional()),
+  billingAddress: z.preprocess(emptyToNull, text(PARTNER_BILLING_ADDRESS_MAX).nullable().optional()),
+  billingCountry: z.preprocess(emptyToNull, z.string().trim().regex(/^[A-Za-z]{2}$/, 'A two-letter code, such as FR').transform((s) => s.toUpperCase()).nullable().optional()),
+  companyNumber: z.preprocess(emptyToNull, text(PARTNER_COMPANY_NUMBER_MAX).nullable().optional()),
+  note: z.preprocess(emptyToNull, text(PARTNER_NOTE_MAX).nullable().optional()),
+};
+
+/** POST /api/admin/partners: a partner, its brand required. */
+export const createPartnerBody = body({ ...partnerFields, brand: text(PARTNER_BRAND_MAX) });
+
+/** PATCH /api/admin/partners/:id: any of its fields; at least one. */
+export const updatePartnerBody = body(partnerFields).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the partner to change');
+
+const partnerAmount = z.number().int('Must be a whole number of cents').min(1, 'At least 1 cent').max(PARTNER_AMOUNT_MINOR_MAX, `At most ${PARTNER_AMOUNT_MINOR_MAX} cents`);
+const partnerExperienceFields = {
+  title: text(PARTNER_EXPERIENCE_TITLE_MAX).optional(),
+  /** The event's date in Paris. */
+  eventOn: isoDate.optional(),
+  amountMinor: partnerAmount.optional(),
+  currency: z.enum(HOUSE_CURRENCIES, { message: `Must be one of ${HOUSE_CURRENCIES.join(', ')}` }).optional(),
+  note: z.preprocess(emptyToNull, text(PARTNER_NOTE_MAX).nullable().optional()),
+};
+
+/** POST /api/admin/partners/:id/experiences: a DRAFT, its title, date, amount and currency required. */
+export const createPartnerExperienceBody = body({
+  ...partnerExperienceFields,
+  title: text(PARTNER_EXPERIENCE_TITLE_MAX),
+  eventOn: isoDate,
+  amountMinor: partnerAmount,
+  currency: z.enum(HOUSE_CURRENCIES, { message: `Must be one of ${HOUSE_CURRENCIES.join(', ')}` }),
+});
+
+/** PATCH /api/admin/partner-experiences/:id: any of its fields; at least one (the amount and currency of a DRAFT only). */
+export const updatePartnerExperienceBody = body(partnerExperienceFields).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the experience to change');
+
+/** POST /api/admin/partner-experiences/:id/paid: the Paris day the partner's money arrived. */
+export const partnerPaidBody = body({ paidOn: isoDate });
+
+/** GET /api/admin/partner-invoices: a month's partner documents (the current one by default). */
+export const partnerInvoiceListQuery = z.object({ month: queryOptional(invoiceMonth) });
+
+/** GET /api/admin/partner-invoices.csv: the month's partner CSV for the accountant. */
+export const partnerInvoiceCsvQuery = z.object({ month: invoiceMonth });
+
+// ── The server-side conversions (routes/consent.ts, routes/account.ts, routes/admin/ads.ts; plan M4 §3.2, K27) ──
+
+/** A platform's click id as the address carried it: 1 to AD_CLICK_ID_MAX printable characters, no space. */
+const adClickId = z.string().min(1, 'Required').max(AD_CLICK_ID_MAX, `At most ${AD_CLICK_ID_MAX} characters`).regex(/^[!-~]+$/, 'Printable characters, no space');
+
+/**
+ * POST /api/v1/consent: the banner's choice (GRANTED: ACCEPT, DECLINED: DECLINE) and the click ids the address carried,
+ * by their parameter, kept only with GRANTED (services/ads.ts).
+ */
+export const consentBody = body({
+  choice: z.enum(AD_CONSENT_CHOICES, { message: `Must be one of ${AD_CONSENT_CHOICES.join(', ')}` }),
+  clicks: z
+    .strictObject({ fbclid: adClickId.optional(), ttclid: adClickId.optional(), gclid: adClickId.optional(), gbraid: adClickId.optional(), wbraid: adClickId.optional() })
+    .optional(),
+});
+
+/** PUT /api/v1/account/ads-consent: ACCOUNT's ADVERTISING MEASUREMENT, ON (GRANTED) or OFF (DECLINED). */
+export const adsConsentBody = body({ choice: z.enum(AD_CONSENT_CHOICES, { message: `Must be one of ${AD_CONSENT_CHOICES.join(', ')}` }) });
+
+/** PUT /api/admin/ads/switch: on or off, and the typed phrase (SWITCH ON / SWITCH OFF; AdsService checks it). */
+export const adsSwitchBody = body({ on: z.boolean(), phrase: z.string().max(40, 'At most 40 characters') });
+
+/** A link channel in the path (/api/admin/ads/channels/:channelId). */
+export const adsChannelParams = z.object({ channelId: uuid });
+
+/** PUT /api/admin/ads/channels/:channelId: the platforms the channel maps to (none: unmapped). */
+export const adsChannelBody = body({ platforms: z.array(z.enum(ADS_PLATFORMS, { message: `Must be one of ${ADS_PLATFORMS.join(', ')}` })).max(ADS_PLATFORMS.length, `At most ${ADS_PLATFORMS.length} platforms`) });
+
+const adsGoogleAction = z.preprocess(
+  emptyToNull,
+  z.string().trim().max(80, 'At most 80 characters').regex(ADS_GOOGLE_ACTION_PATTERN, 'Must read customers/<id>/conversionActions/<id>').nullable().optional(),
+);
+
+/** PUT /api/admin/ads/google-actions: each act's Google Ads conversion action ('' or null: not named); at least one. */
+export const adsGoogleActionsBody = body({ signup: adsGoogleAction, drawEntry: adsGoogleAction, liveEntry: adsGoogleAction, paidOrder: adsGoogleAction }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one conversion action',
+);
+
+const adsTestCode = z.preprocess(emptyToNull, text(ADS_TEST_EVENT_CODE_MAX).nullable().optional());
+
+/** PUT /api/admin/ads/test-codes: Meta's and TikTok's test event codes ('' or null: none); at least one. */
+export const adsTestCodesBody = body({ meta: adsTestCode, tiktok: adsTestCode }).refine((b) => b.meta !== undefined || b.tiktok !== undefined, 'Send at least one test code');
+
+const adsPlatform = z
+  .string()
+  .trim()
+  .transform((v) => v.toUpperCase())
+  .pipe(z.enum(ADS_PLATFORMS, { message: `Must be one of ${ADS_PLATFORMS.join(', ')}` }));
+
+/** A platform in the path (/api/admin/ads/test/:platform), any case. */
+export const adsPlatformParams = z.object({ platform: adsPlatform });
+
+/** GET /api/admin/ads/events: by status and platform. */
+export const adsEventsQuery = z.object({
+  status: queryOptional(z.enum(AD_EVENT_STATUSES, { message: `Must be one of ${AD_EVENT_STATUSES.join(', ')}` })),
+  platform: queryOptional(adsPlatform),
+});

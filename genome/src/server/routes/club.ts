@@ -37,7 +37,7 @@
  *   GET  /api/v1/club/circle                the feed, paginated, without the posts' bodies (its first page counts a visit,
  *                                            but with visit=0: NOW's read of its next invitation)
  *   GET  /api/v1/club/circle/:id            a post (404 below its tier)
- *   POST /api/v1/club/circle/:id/rsvp       YES or NO to an invitation, within its capacity
+ *   POST /api/v1/club/circle/:id/rsvp       YES or NO to an invitation, within its capacity (and K49 P3's shareName)
  *   POST /api/v1/club/circle/:id/vote       one vote in a poll, final; its results then shown
  *
  * Every route needs a signed-in account (the scope's guard: 401 without one,
@@ -159,7 +159,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { id } = parse(publicCircleParams, request.params);
     const b = parse(circleRsvpBody, request.body);
-    return circle.rsvp(account.id, id, b.answer, accountActor(request));
+    return circle.rsvp(account.id, id, b.answer, accountActor(request), b.shareName !== undefined ? { shareName: b.shareName } : {});
   });
 
   app.post('/api/v1/club/circle/:id/vote', async (request) => {

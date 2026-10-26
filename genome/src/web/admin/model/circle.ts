@@ -103,6 +103,7 @@ export function circleFormValues(kind: CirclePostKind, p: CirclePost | null, now
       externalUrl: p.externalUrl ?? '',
       segmentId: p.segment?.id ?? '',
       experience: p.experience ?? '',
+      partnerExperienceId: p.partnerExperience?.id ?? '',
     };
   }
   const event = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 7, 19));
@@ -119,6 +120,7 @@ export function circleFormValues(kind: CirclePostKind, p: CirclePost | null, now
     externalUrl: '',
     segmentId: '',
     experience: '',
+    partnerExperienceId: '',
   };
 }
 
@@ -191,6 +193,8 @@ export function circleInput(kind: CirclePostKind, v: Record<string, string>): Ci
   };
   if (kind === 'INVITATION') {
     out.experience = (CIRCLE_EXPERIENCES as readonly string[]).includes(v.experience ?? '') ? (v.experience as CircleExperience) : null;
+    // Lot M4 (K49 P2): a partner experience names the partner's experience it is for, sent only then.
+    if (out.experience === 'PARTNER_EXPERIENCE') out.partnerExperienceId = v.partnerExperienceId ? v.partnerExperienceId : null;
     out.eventAt = utcInstant(v.eventAt);
     out.eventPlace = (v.eventPlace ?? '').trim() === '' ? null : v.eventPlace.trim();
     out.capacity = (v.capacity ?? '').trim() === '' ? null : Number(v.capacity);
@@ -213,6 +217,8 @@ export function circleChange(p: CirclePost, v: Record<string, string>): CirclePo
     if (next.eventAt && Date.parse(next.eventAt) !== Date.parse(p.eventAt ?? '')) out.eventAt = next.eventAt;
     if ((next.eventPlace ?? null) !== p.eventPlace) out.eventPlace = next.eventPlace ?? null;
     if ((next.capacity ?? null) !== p.capacity) out.capacity = next.capacity ?? null;
+    // Lot M4 (K49 P2): its partner's experience; any other experience drops the link (the server keeps it on a partner experience only).
+    if ((next.partnerExperienceId ?? null) !== (p.partnerExperience?.id ?? null)) out.partnerExperienceId = next.partnerExperienceId ?? null;
   }
   if (p.kind === 'POLL' && JSON.stringify(next.pollOptions ?? []) !== JSON.stringify(p.pollOptions ?? [])) out.pollOptions = next.pollOptions ?? [];
   if ((next.dropId ?? null) !== (p.drop?.id ?? null)) out.dropId = next.dropId ?? null;

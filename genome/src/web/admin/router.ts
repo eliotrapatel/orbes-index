@@ -19,6 +19,8 @@ export const ROUTES = [
   { name: 'analytics', path: '/analytics' },
   /** Growth (plan NEXT-NINE, BP-29): Analytics' sibling under Overview, after the Dashboard. */
   { name: 'growth', path: '/growth' },
+  /** Margin settings (lot M4 plan §1.3, K43): from Growth's Margin, no link of its own in the sidebar. */
+  { name: 'marginSettings', path: '/growth/margin-settings' },
   { name: 'owners', path: '/owners' },
   /** The Messages board (CS-01): one conversation per client; a conversation's page from its row. */
   { name: 'messages', path: '/messages' },
@@ -40,6 +42,13 @@ export const ROUTES = [
   /** A LIVE RELEASE's page: from its row of the Drops tab, no link of its own in the sidebar. */
   { name: 'liveRelease', path: '/club/live/:dropId' },
   { name: 'circlePost', path: '/club/circle/:postId' },
+  /**
+   * Club → Partners (lot M4 plan §2.3, K49 P1 to P4): entered from the Circle tab's Partners, no link of its own in the
+   * sidebar; a partner's page and an experience's from their rows.
+   */
+  { name: 'clubPartners', path: '/club/partners' },
+  { name: 'clubPartner', path: '/club/partners/:partnerId' },
+  { name: 'partnerExperience', path: '/club/partner-experiences/:experienceId' },
   /** The orders (plan LIVE RELEASE+): the board; an order's page and its packing slip, from its card. */
   { name: 'orders', path: '/orders' },
   /** Orders → Returns (plan MACRO M3 §2.3, R1): from the board's header, before an order's page so its path is never read as an order's id. */
@@ -58,6 +67,11 @@ export const ROUTES = [
    */
   { name: 'links', path: '/links' },
   { name: 'linkCollectors', path: '/links/collectors' },
+  /**
+   * Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5): the server-side conversions' switch and settings, from the
+   * Links page's Ad platforms, before a link's page so its path is never read as a link's id.
+   */
+  { name: 'adPlatforms', path: '/links/ads' },
   { name: 'link', path: '/links/:linkId' },
   /** The Founding list (plan MACRO M1 §3.2, F3, F4): theorbes.com's pre-registrations, under Links in Clients. */
   { name: 'founding', path: '/founding' },

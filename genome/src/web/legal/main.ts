@@ -26,6 +26,11 @@
  * Where a page names ORBES Client Services' contact, it shows the one the
  * server publishes (GET /api/v1/client-services), and nothing when there is
  * none. The pages print as documents (styles.css, @media print).
+ *
+ * The privacy policy's Advertising measurement (lot M4, K27 A4; content/privacy-ads.ts): /legal/privacy reads
+ * GET /api/v1/consent within the same 5 s. Conversions switched on, the page is drawn again with the section after
+ * WORN and the two sentences in their 'on' words, and under the version line « Advertising measurement: since <the
+ * Paris day it was switched on> »; off, refused or no answer in time, the page stays exactly as it is.
  */
 import { CHAPTER_IDS, CHAPTER_LABELS, CHAPTER_PATHS, RAIL_LABEL, showRailLive } from '../shared/chapters.js';
 import { contactLines, phoneHref } from '../shared/client-services.js';
@@ -35,6 +40,7 @@ import { GEOIP_ATTRIBUTION, LEGAL_PAGES } from '../shared/legal.js';
 import { railLive } from '../verify/nocturne-model.js';
 import { forComputer, SECTIONS_LABEL } from './content/desktop.js';
 import { DOCUMENTS, LANGS, LANGUAGE_NAMES, LEGAL_VERSION, WORDS, type Block, type Lang, type LegalDocument, type LegalWords } from './content/index.js';
+import { ADS_SINCE, privacyWithAds } from './content/privacy-ads.js';
 import { hrefOf, parseBlock, type Anchors, pickLanguage, routeOf, splitFigures, typography, type LegalRoute, type Run } from './model.js';
 
 /** How long the page waits for the contact of ORBES Client Services, or for what the rail's dot says, before going on without it. */
@@ -275,6 +281,26 @@ async function fillContacts(root: HTMLElement, words: LegalWords): Promise<void>
   }
 }
 
+/**
+ * Whether conversions are switched on (GET /api/v1/consent: `ads.on`), and the Paris day they were (`ads.since`, an ISO
+ * date or null). Off, refused, malformed or no answer in CONTACT_TIMEOUT_MS: null, and the page stays as it is.
+ */
+async function readAds(): Promise<{ since: string | null } | null> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), CONTACT_TIMEOUT_MS);
+  try {
+    const res = await fetch('/api/v1/consent', { headers: { accept: 'application/json' }, credentials: 'same-origin', signal: abort.signal });
+    if (!res.ok) return null;
+    const ads = ((await res.json()) as { ads?: { on?: unknown; since?: unknown } } | null)?.ads;
+    if (ads?.on !== true) return null;
+    return { since: typeof ads.since === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ads.since) ? ads.since : null };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function start(): void {
   const lang = pickLanguage(location.search, navigator.languages?.length ? navigator.languages : [navigator.language]);
   const { route, path } = routeOf(location.pathname);
@@ -283,7 +309,7 @@ function start(): void {
   if (location.pathname !== path) history.replaceState(null, '', `${path}${location.search}${location.hash}`);
 
   const words = WORDS[lang];
-  const doc = route === 'index' ? null : DOCUMENTS[route][lang];
+  let doc = route === 'index' ? null : DOCUMENTS[route][lang];
   document.title = `${doc ? doc.title : words.indexTitle} — ORBES`;
   const root = byId('app');
   const chapters = rail(lang);
@@ -309,8 +335,7 @@ function start(): void {
   // Desktop (§4: a window resized across the breakpoint never breaks): the document drawn again in the other layout
   // (the sections beside the text, or the phone's column), VERIFY A PIECE leading where that layout verifies a piece,
   // and the reader kept at the section the address names, else at the one they were reading.
-  onDesktopChange((desktop) => {
-    back?.setAttribute('href', desktop ? SCAN_PATH : VERIFY_PATH);
+  const redraw = (): void => {
     if (!doc) return;
     const reading = currentSection().slice(1) || sectionAtTop();
     const next = content();
@@ -319,7 +344,21 @@ function start(): void {
     shown = next;
     void fillContacts(root, words);
     if (reading) document.getElementById(reading)?.scrollIntoView();
+  };
+  onDesktopChange((desktop) => {
+    back?.setAttribute('href', desktop ? SCAN_PATH : VERIFY_PATH);
+    redraw();
   });
+  // The privacy policy while conversions are switched on (content/privacy-ads.ts): drawn again, the reader kept where
+  // they are (or taken to the section the address names, the banner's #ads), the line under the version line.
+  if (route === 'privacy') {
+    void readAds().then((ads) => {
+      if (!ads) return;
+      doc = privacyWithAds(DOCUMENTS.privacy[lang], lang);
+      if (ads.since) root.querySelector('.legal-meta')?.after(h('p', { class: 'n-px n-sm n-num legal__ads-since', text: ADS_SINCE[lang](ads.since) }));
+      redraw();
+    });
+  }
   watchBar();
 }
 

@@ -16,7 +16,10 @@
  *  - the funnel's months, « Buyers » counting a first SALON order as well as LIVE and DRAW, never a GIFT order;
  *  - the revenue of each month equal to the Invoices page's (InvoiceService.list); an order with a supplementary invoice
  *    (plan NEXT LOT §3.6.C) counted once, its net including both invoices;
- *  - Latest releases without drafts, cancelled releases, after-rooms or releases still ahead.
+ *  - Latest releases without drafts, cancelled releases, after-rooms or releases still ahead;
+ *  - (lot M4, K49 P1) the partner experiences beside the revenue: per month, currency and partner, invoiced net of the
+ *    partner credit notes (PC-) and paid by its payment date, never converted, outside the window left out; every
+ *    figure GROWTH showed before unchanged; the margin's partner line in euros, an unrated currency named as missing.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
@@ -465,5 +468,90 @@ describe('GROWTH: a set\'s release and its sales (macro scope K44, plan MACRO M3
     expect(ltv.byFirstModel).toEqual([{ key: halo, label: 'HALO', collectors: 2, totalMinor: null, averageMinor: null, medianMinor: null }]);
     expect(await ctx.services.growth.collectorValue(A)).toEqual([{ currency: 'EUR', valueMinor: 100_000 }]);
     expect(await ctx.services.growth.collectorValue(B)).toEqual([]);
+  });
+});
+
+describe('GROWTH: the partner experiences beside the revenue (lot M4 plan §2.2, K49 P1)', () => {
+  let t: TestDb;
+  let ctx: AppContext;
+  let clock: ManualClock;
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    clock = createManualClock(GROWTH_NOW.toISOString());
+    ctx = await createContext(testConfig(), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+    await seedGrowth(t.db);
+  }, 60_000);
+  afterAll(async () => {
+    await ctx?.close();
+    await t?.close();
+  });
+
+  it('counts each partner\'s invoices less its credit notes in the month of issue and its payments by their date, per currency, never converted; every other figure unchanged', async () => {
+    const before = await ctx.services.growth.report();
+    expect(before.partnerIncome).toEqual({ months: before.window.list.slice().reverse().map((month) => ({ month, currencies: [] })), total: [], byPartner: [] });
+
+    const email = 'growth-partners@orbes.test';
+    const admin = { type: 'admin' as const, id: (await t.db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id };
+    const partners = ctx.services.partners;
+    const billing = { billingName: 'Maison SAS', billingAddress: '1 rue de la Paix\n75002 Paris', billingCountry: 'FR' };
+    const alpha = await partners.create({ brand: 'Maison Alpha', ...billing }, admin);
+    const beta = await partners.create({ brand: 'Maison Beta', ...billing }, admin);
+    const deal = (partnerId: string, amountMinor: number, currency: string) => partners.createExperience(partnerId, { title: 'Dinner', eventOn: '2026-10-20', amountMinor, currency }, admin);
+    // Outside the window (before November 2025): left out.
+    clock.set('2025-09-10T10:00:00.000Z');
+    const old = await deal(alpha.id, 999_999, 'EUR');
+    await partners.issueInvoice(old.id, admin);
+    // September 2026: Alpha's dinner invoiced; paid on 2 October.
+    clock.set('2026-09-10T10:00:00.000Z');
+    const dinner = await deal(alpha.id, 1_200_000, 'EUR');
+    await partners.issueInvoice(dinner.id, admin);
+    clock.set('2026-10-02T10:00:00.000Z');
+    await partners.recordPaid(dinner.id, '2026-10-02', admin);
+    // October: Alpha's GBP deal invoiced, then cancelled (its PC- credit note); Beta's EUR and CHF deals invoiced, unpaid.
+    clock.set('2026-10-05T10:00:00.000Z');
+    const gbp = await deal(alpha.id, 300_000, 'GBP');
+    await partners.issueInvoice(gbp.id, admin);
+    clock.set('2026-10-06T10:00:00.000Z');
+    await partners.cancel(gbp.id, admin, { admin: true });
+    const eur = await deal(beta.id, 800_000, 'EUR');
+    await partners.issueInvoice(eur.id, admin);
+    const chf = await deal(beta.id, 100_000, 'CHF');
+    await partners.issueInvoice(chf.id, admin);
+    // A draft: nothing. A deal paid then cancelled: its invoice and its credit note, never its payment.
+    await deal(beta.id, 50_000, 'EUR');
+    const refunded = await deal(beta.id, 40_000, 'EUR');
+    await partners.issueInvoice(refunded.id, admin);
+    await partners.recordPaid(refunded.id, '2026-10-06', admin);
+    await partners.cancel(refunded.id, admin, { admin: true });
+    clock.set(GROWTH_NOW.toISOString());
+
+    const after = await ctx.services.growth.report();
+    const amounts = (currency: string, invoicedMinor: number, creditedMinor: number, paidMinor: number) => ({ currency, invoicedMinor, creditedMinor, netMinor: invoicedMinor - creditedMinor, paidMinor });
+    const month = (m: string) => after.partnerIncome.months.find((x) => x.month === m)!.currencies;
+    expect(after.partnerIncome.months.map((m) => m.month)).toEqual(after.window.list.slice().reverse());
+    expect(month('2026-10')).toEqual([amounts('EUR', 840_000, 40_000, 1_200_000), amounts('GBP', 300_000, 300_000, 0), amounts('CHF', 100_000, 0, 0)]);
+    expect(month('2026-09')).toEqual([amounts('EUR', 1_200_000, 0, 0)]);
+    expect(after.partnerIncome.months.filter((m) => m.currencies.length > 0).map((m) => m.month)).toEqual(['2026-10', '2026-09']);
+    expect(after.partnerIncome.total).toEqual([amounts('EUR', 2_040_000, 40_000, 1_200_000), amounts('GBP', 300_000, 300_000, 0), amounts('CHF', 100_000, 0, 0)]);
+    expect(after.partnerIncome.byPartner).toEqual([
+      { partnerId: alpha.id, brand: 'Maison Alpha', currencies: [amounts('EUR', 1_200_000, 0, 1_200_000), amounts('GBP', 300_000, 300_000, 0)] },
+      { partnerId: beta.id, brand: 'Maison Beta', currencies: [amounts('EUR', 840_000, 40_000, 0), amounts('CHF', 100_000, 0, 0)] },
+    ]);
+    // Every figure GROWTH showed before is unchanged: the partner income stands beside the revenue, never inside it.
+    const { partnerIncome: _a, window: wa, ...rest } = after;
+    const { partnerIncome: _b, window: wb, ...was } = before;
+    expect(rest).toEqual(was);
+    expect({ ...wa, generatedAt: null }).toEqual({ ...wb, generatedAt: null });
+    expect(Object.keys(after)).toEqual(['window', 'ltv', 'repeat', 'funnel', 'revenue', 'partnerIncome']);
+
+    // The margin's partner line: the same income in euros at the owner's rates, an unrated currency named as missing.
+    await ctx.services.marginSettings.setRate('GBP', 1.15, admin);
+    const margin = await ctx.services.margin.report();
+    expect(margin.partnerIncome).toEqual([
+      { partnerId: alpha.id, brand: 'Maison Alpha', invoicedMinor: 1_200_000, paidMinor: 1_200_000 },
+      { partnerId: beta.id, brand: 'Maison Beta', invoicedMinor: 800_000, paidMinor: 0 },
+    ]);
+    expect(margin.missing.currencies).toContainEqual({ currency: 'CHF', amounts: 1 });
   });
 });

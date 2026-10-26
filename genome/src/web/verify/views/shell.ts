@@ -81,6 +81,12 @@ export interface ShellDeps {
   onHouse(target: HouseTarget): void;
   /** FORGOTTEN PASSWORD? of the write sheet's sign-in: ORBES Client Services' email. */
   recoveryContact(): Promise<ContactModel | undefined>;
+  /**
+   * The consent banner (lot M4 plan §3.4; views/consent-banner.ts): fixed at the foot of the screen beside the SCAN ring,
+   * outside the column, made inert with the page while a sheet covers it. It puts itself in the page only once wanted
+   * (switched on, no choice held): with conversions off the page is as it was.
+   */
+  consentBand?: HTMLElement;
 }
 
 /**
@@ -135,6 +141,8 @@ export class Shell {
   private readonly soundButton: HTMLButtonElement | null;
   /** The SCAN ring, fixed at the foot of the screen. */
   readonly ring: HTMLElement;
+  /** The consent banner, when the app gives one (beside the ring, outside the column; in the page once wanted). */
+  private readonly bands: HTMLElement[];
   readonly sheet: AccountSheet;
   /** Desktop (decision 5): the account as pages of a computer, the sheet's views each at its address. */
   readonly page: AccountPage;
@@ -220,6 +228,7 @@ export class Shell {
       h('span', { class: 'n-g n-scan__label', attrs: { 'aria-hidden': 'true' }, text: CHROME.scan }),
     );
 
+    this.bands = deps.consentBand ? [deps.consentBand] : [];
     this.column = h('div', { class: 'n-column' });
     host.before(this.column);
     this.column.append(this.header, this.rail, banner, host, this.foot);
@@ -242,7 +251,7 @@ export class Shell {
         this.club = club;
         this.drawAccount();
       },
-      outside: () => [this.column, this.ring],
+      outside: () => [this.column, this.ring, ...this.bands],
       onConcerning: (target) => deps.onConcerning(target),
       onHouse: (target) => deps.onHouse(target),
       onRead: (part) => deps.onMessagesRead(part),
@@ -270,7 +279,7 @@ export class Shell {
     this.write = new WriteSheet({
       api: deps.api,
       session: deps.session,
-      outside: () => [this.column, this.ring],
+      outside: () => [this.column, this.ring, ...this.bands],
       recoveryContact: () => deps.recoveryContact(),
       onMessages: (trigger) => this.sheet.openMessages(trigger),
     });
@@ -281,7 +290,7 @@ export class Shell {
       if (isDesktop()) deps.onWrite(context);
       else this.write.open(context, trigger);
     });
-    this.orderSheet = new OrderSheet({ api: deps.api, session: deps.session, outside: () => [this.column, this.ring] });
+    this.orderSheet = new OrderSheet({ api: deps.api, session: deps.session, outside: () => [this.column, this.ring, ...this.bands] });
     registerOrderSheet((request) => {
       if (this.sheet.isOpen) this.sheet.close();
       if (this.write.isOpen) this.write.close();

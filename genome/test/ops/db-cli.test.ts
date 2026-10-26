@@ -209,7 +209,7 @@ describe('db CLI: seed and reset-demo', () => {
 
     const r = await run(['reset-demo', '--yes'], t.db);
     expect(r.code, r.io.text()).toBe(0);
-    expect(r.io.text()).toMatch(/rolled back 0062_vault_rewards, 0061_the_vault, .*0001_initial\)/);
+    expect(r.io.text()).toMatch(/rolled back 0065_ad_conversions, 0064_partners, 0063_margin, 0062_vault_rewards, 0061_the_vault, .*0001_initial\)/);
     // A fresh demo: no vault, the example rewards under the floor again.
     expect(await t.db.selectFrom('vaults').select('id').execute()).toEqual([]);
     expect((await t.db.selectFrom('vault_rewards').select('kind').orderBy('position').execute()).map((x) => x.kind)).toEqual(['I_WAS_THERE', 'CREDIT', 'CREDIT_TO_GIVE', 'PRODUCT', 'GUARANTEED', 'THE_PIECE']);
@@ -219,6 +219,9 @@ describe('db CLI: seed and reset-demo', () => {
     const other = await createTestDb();
     try {
       await other.db.insertInto('vault_rewards').values({ kind: 'GUARANTEED', odds_in: 200, quantity: 1, position: 1 }).execute();
+      expect((await migrateDown(other.db)).reverted).toEqual(['0065_ad_conversions']);
+      expect((await migrateDown(other.db)).reverted).toEqual(['0064_partners']);
+      expect((await migrateDown(other.db)).reverted).toEqual(['0063_margin']);
       expect((await migrateDown(other.db)).reverted).toEqual(['0062_vault_rewards']);
       await expect(migrateDown(other.db)).rejects.toThrow(/migration 0061_the_vault cannot be rolled back: 0 vaults, .* 1 vault rewards/);
       // reset-demo's clearing, on a database where 0062 is no longer applied.

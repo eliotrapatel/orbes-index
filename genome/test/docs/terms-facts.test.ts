@@ -21,9 +21,9 @@
  *    with a recovery code, no undoing an accepted transfer, no account
  *    deletion, no age check, no vote of the circle and no note of the private
  *    salon in the audit log, no payment taken, no public view of a LIVE
- *    RELEASE's room, no call to an online store, SMTP the one connection
- *    out, no house message by email or notification nor answered) holding in
- *    the code;
+ *    RELEASE's room, no call to an online store, SMTP and the ad platforms'
+ *    client the two connections out, no house message by email or
+ *    notification nor answered) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -48,6 +48,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { ADS_HOSTS } from '../../src/server/ads/http.js';
 import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.js';
 import { ADDON_UNITS_MAX, EMAIL_KINDS, SET_PIECES_MAX, SET_PIECES_MIN, VAULT_WAIT_DAYS, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
@@ -709,6 +710,21 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a piece won free claimed within 30 days, PAID at no cost (D20, N12)': "const paid = await step(tx, o, { to: 'PAID', note: null }, actor, at, notes, this.mail);",
   'a piece won free not claimed cancelled (D20)': "await step(tx, o, { to: 'CANCELLED', note: VAULT_NOT_CLAIMED }, SYSTEM_ACTOR, now, notes, this.mail);",
   'a right to buy within 24 hours at its usual price (round 2)': 'throw vaultOfferEnded(VAULT_BUY_ENDED);',
+  // Lot M4 of the macro plan (K49 P3, P-legal, L2; plan §6, step M4.14): the privacy policy's partner paragraph, §31's four
+  // facts: opt-in, YES only, the headcount otherwise, untick until the event.
+  'a name shared with a partner on the guest\'s choice only, off by default (P3)': "if (opts.shareName === true && !partner) throw shareNotOffered();",
+  'a name shared with a YES only, a NO clears it (P3)': "if (opts.shareName === true && answer !== 'YES') throw validationError('A name is shared with a YES only.');",
+  'the partner gets the headcount, the names of those who chose only (P3)': 'return { experienceId: id, headcount: rows.length, sharedCount: shared.length, shared };',
+  'the choice changed and unticked until the event begins (P3)': 'if (p.event_at && now.getTime() >= p.event_at.getTime()) throw eventBegun();',
+  // K27 (A1 to A5; plan §3.1, §6): the advertising rules as code facts, applying while K27 is switched on: off by default,
+  // consent before any event, §3.1's lists (only the platforms the collector came from, what is sent, what never is).
+  'advertising measurement off by default (A1)': 'return s?.enabled === true;',
+  'no event without the consent at the act\'s time (A4)': "if (c.consent !== 'GRANTED') continue;",
+  'only the platforms the collector came from (A3)': 'return ADS_PLATFORMS.filter((p) => mapped.includes(p)',
+  'what a platform receives, at most (§3.1)': 'export interface AdEvent {',
+  'never a test entrant, the team or an account not ACTIVE (§3.1)': "WHERE a.status = 'ACTIVE' AND ${notTestEntrant('cand.account_id')} AND NOT ${houseAccount('cand.account_id')}",
+  'never a GIFT, an EXCHANGE, a VAULT order at 0 or a Shopify order (§3.1, S2)': 'return order.shopify_order_id === null;',
+  'never an act past the platform\'s age (§3.1)': "if (now.getTime() - actAt.getTime() > AD_MAX_AGE_DAYS[platform] * DAY_MS) return 'TOO_OLD';",
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -842,14 +858,17 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(deps.filter((d) => /stripe|whop|paypal|adyen|braintree|mollie|checkout|payment|billing/i.test(d))).toEqual([]);
     expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge/i.test(r.path))).toEqual([]);
     // The invoices of the orders paid (plan LIVE RELEASE+, M7) are documents read, never a payment taken. A supplier's
-    // invoice (plan NEXT LOT §3.5.6.3) is ORBES's own record of what it owes a supplier, paid outside the service: the
-    // only invoice routes that write are those two.
+    // invoice (plan NEXT LOT §3.5.6.3) is ORBES's own record of what it owes a supplier, paid outside the service; a
+    // partner's (lot M4, K49 P1) the document ORBES issues to a brand that pays it by its own means, outside the service,
+    // its payment only recorded: the only invoice routes that write are those three.
     const supplierInvoice = (r: { path: string }) => r.path.startsWith('/api/admin/supplier-orders/:id/invoice');
-    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get' && !supplierInvoice(r))).toEqual([]);
+    const partnerInvoice = (r: { path: string }) => r.path === '/api/admin/partner-experiences/:id/invoice';
+    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get' && !supplierInvoice(r) && !partnerInvoice(r))).toEqual([]);
     expect(ROUTES.filter(supplierInvoice)).toEqual([
       { method: 'put', path: '/api/admin/supplier-orders/:id/invoice' },
       { method: 'post', path: '/api/admin/supplier-orders/:id/invoice/paid' },
     ]);
+    expect(ROUTES.filter(partnerInvoice)).toEqual([{ method: 'post', path: '/api/admin/partner-experiences/:id/invoice' }]);
     // The confirmation is a status, and the only one PAY writes.
     expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/live/:id/confirm' });
   },
@@ -870,13 +889,27 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   },
   N10: () => {
     // No call to an online store (plan LIVE RELEASE+, choice 9: Shopify not decided, exports only): no dependency for
-    // one, and no request the server sends out at all.
+    // one, and no request the server sends out but the ad platforms'.
     const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
     expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((d) => /shopify/i.test(d))).toEqual([]);
     const server = SOURCES.filter(({ file }) => file.startsWith(join('src', 'server')));
     expect(server.length).toBeGreaterThan(50);
-    expect(server.filter(({ text }) => /\bfetch\(|\bhttps?\.request\(|\bhttps?\.get\(/.test(text)).map(({ file }) => file)).toEqual([]);
-    // Its one connection out is the emails' SMTP client (lot M1 §5): no other file opens a socket.
+    // Two connections out, named (lot M4 §3.2). The advertising client (K27, used only while its switch is on) is the
+    // one file that calls `fetch(`, once, to the four fixed ADS_HOSTS only; no file sends an http(s).request.
+    const ads = join('src', 'server', 'ads', 'http.ts');
+    expect(server.filter(({ text }) => /\bfetch\(/.test(text)).map(({ file }) => file)).toEqual([ads]);
+    expect(server.filter(({ text }) => /\bhttps?\.request\(|\bhttps?\.get\(/.test(text)).map(({ file }) => file)).toEqual([]);
+    const client = readDoc('genome/src/server/ads/http.ts');
+    expect(client.match(/\bfetch\(/g)).toHaveLength(1);
+    const hosts = /^export const ADS_HOSTS = Object\.freeze\(\[([^\]]*)\] as const\);$/m.exec(client);
+    expect(hosts?.[1].split(',').map((h) => h.trim())).toEqual(["'graph.facebook.com'", "'business-api.tiktok.com'", "'googleads.googleapis.com'", "'oauth2.googleapis.com'"]);
+    expect(ADS_HOSTS).toEqual(['graph.facebook.com', 'business-api.tiktok.com', 'googleads.googleapis.com', 'oauth2.googleapis.com']);
+    expect(ADS_HOSTS.filter((h) => /shopify/i.test(h))).toEqual([]);
+    // The host is checked before the request: the refusal comes first in the one method that calls fetch.
+    expect(client.indexOf('if (!this.allows(url)) throw')).toBeGreaterThan(0);
+    expect(client.indexOf('if (!this.allows(url)) throw')).toBeLessThan(client.indexOf('fetch('));
+    expect(client).toContain("redirect: 'error'");
+    // The other is the emails' SMTP client (lot M1 §5): no other file opens a socket.
     const opens = /import \{[^}]*\b(?:connect|createConnection)\b[^}]*\} from 'node:(?:net|tls)'|\b(?:net|tls)\.(?:connect|createConnection)\(/;
     expect(server.filter(({ text }) => opens.test(text)).map(({ file }) => file)).toEqual([join('src', 'server', 'email', 'smtp.ts')]);
     // The exports exist, as files of the console.

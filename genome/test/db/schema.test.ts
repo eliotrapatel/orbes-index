@@ -163,6 +163,18 @@ describe('schema', () => {
       ['orders', 'address_by', S.ADDRESS_SOURCES],
       ['orders', 'engraving_by', S.ADDRESS_SOURCES],
       ['invoices', 'credit_scope', S.CREDIT_SCOPES],
+      ['partner_experiences', 'status', S.PARTNER_EXPERIENCE_STATUSES],
+      ['partner_experiences', 'currency', S.HOUSE_CURRENCIES],
+      ['partner_invoices', 'kind', S.PARTNER_INVOICE_KINDS],
+      ['partner_invoices', 'currency', S.HOUSE_CURRENCIES],
+      ['ads_channel_platforms', 'platform', S.ADS_PLATFORMS],
+      ['ad_consents', 'choice', S.AD_CONSENT_CHOICES],
+      ['ad_consents', 'source', S.AD_CONSENT_SOURCES],
+      ['ad_clicks', 'kind', S.AD_CLICK_KINDS],
+      ['ad_events', 'platform', S.ADS_PLATFORMS],
+      ['ad_events', 'kind', S.AD_EVENT_KINDS],
+      ['ad_events', 'status', S.AD_EVENT_STATUSES],
+      ['ad_events', 'skip_reason', S.AD_SKIP_REASONS],
       ['account_profiles', 'birth_date_by', S.PROFILE_SOURCES],
       ['account_profiles', 'updated_by', S.PROFILE_SOURCES],
       ['account_tastes', 'kind', S.TASTE_KINDS],
@@ -1765,6 +1777,237 @@ describe('schema', () => {
     expect(await def('house_guarantees', 'house_guarantees_scope')).toContain(`(scope = 'LIVE'::text) = (vault_id IS NOT NULL)`);
     expect([...S.GUARANTEE_SCOPES]).toEqual([...S.GRANTED_GUARANTEE_SCOPES, 'LIVE']);
     for (const list of [S.ORDER_CHANNELS, S.TIER_GRANT_KINDS, S.ORDER_ADDON_ADDED_BY] as const) expect(list.at(-1)).toBe('VAULT');
+  });
+
+  it('margin settings (0063): every bound is schema.ts\'s, the unit costs\' keys the pouch, the card, THE VAULT CARD, a care service and CLAIM_ with each of WARRANTY_CLAIM_OUTCOMES; the mirror at work: a euro rate read as its decimal text, a shipping cost band per country and one for ALL OTHER COUNTRIES, a unit cost, a category\'s allowance', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('currency_rates', 'currency_rates_eur_rate_check')).toContain(`<= (${S.CURRENCY_RATE_MAX})::numeric`);
+    expect(await def('currency_rates', 'currency_rates_not_eur')).toBe(`CHECK ((currency <> '${S.MARGIN_CURRENCY}'::text))`);
+    expect(
+      (await sql<{ scale: number }>`SELECT numeric_scale AS scale FROM information_schema.columns WHERE table_name = 'currency_rates' AND column_name = 'eur_rate'`.execute(t.db)).rows[0].scale,
+    ).toBe(S.CURRENCY_RATE_DECIMALS);
+    expect(await def('shipping_cost_rates', 'shipping_cost_rates_max_weight_g_check')).toContain(`<= ${S.SHIPMENT_WEIGHT_G_MAX}`);
+    expect(await def('shipping_cost_rates', 'shipping_cost_rates_cost_minor_check')).toContain(`<= ${S.MARGIN_COST_MINOR_MAX}`);
+    expect(await def('margin_unit_costs', 'margin_unit_costs_cost_minor_check')).toContain(`<= ${S.MARGIN_COST_MINOR_MAX}`);
+    expect(await def('category_allowances', 'category_allowances_allowance_bp_check')).toContain(`<= ${S.ALLOWANCE_BP_MAX}`);
+    // The unit costs' keys: the CHECK's, THE VAULT CARD's (D61) among them, and one per warranty claim outcome, in its order.
+    expect(await checkValues(t.db, 'margin_unit_costs', 'key')).toEqual(sorted(S.MARGIN_UNIT_COST_KEYS));
+    expect(S.MARGIN_UNIT_COST_KEYS).toEqual(['POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE', ...S.WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}`)]);
+
+    const { category } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'margin-s0063@orbes.test', email_normalized: 'margin-s0063@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    // A rate written as a number or a string, read as its decimal text with six decimals.
+    expect(await t.db.insertInto('currency_rates').values({ currency: 'GBP', eur_rate: 1.15, updated_by: admin.id }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      currency: 'GBP', eur_rate: '1.150000', updated_by: admin.id, updated_at: expect.any(Date),
+    });
+    expect(await t.db.insertInto('currency_rates').values({ currency: 'USD', eur_rate: '0.921234' }).returning(['eur_rate', 'updated_by']).executeTakeFirstOrThrow()).toEqual({ eur_rate: '0.921234', updated_by: null });
+    await expect(t.db.insertInto('currency_rates').values({ currency: 'EUR', eur_rate: 1 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'currency_rates_not_eur'));
+    // A band for a country and one for ALL OTHER COUNTRIES at the same limit; the same twice refused.
+    const bands = await t.db
+      .insertInto('shipping_cost_rates')
+      .values([
+        { country: 'FR', max_weight_g: 500, cost_minor: 690, currency: 'EUR', updated_by: admin.id },
+        { country: null, max_weight_g: 500, cost_minor: 1290, currency: 'EUR' },
+      ])
+      .returningAll()
+      .execute();
+    expect(bands).toEqual([
+      { id: expect.any(String), country: 'FR', max_weight_g: 500, cost_minor: 690, currency: 'EUR', updated_by: admin.id, updated_at: expect.any(Date) },
+      { id: expect.any(String), country: null, max_weight_g: 500, cost_minor: 1290, currency: 'EUR', updated_by: null, updated_at: expect.any(Date) },
+    ]);
+    await expect(t.db.insertInto('shipping_cost_rates').values({ country: null, max_weight_g: 500, cost_minor: 1, currency: 'EUR' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'shipping_cost_rates_band_key'));
+    // A unit cost (THE VAULT CARD's, D61) and an allowance.
+    expect(await t.db.insertInto('margin_unit_costs').values({ key: 'CLAIM_REPAIR', cost_minor: 2500, currency: 'EUR', updated_by: admin.id }).returning(['key', 'cost_minor', 'currency']).executeTakeFirstOrThrow()).toEqual({
+      key: 'CLAIM_REPAIR', cost_minor: 2500, currency: 'EUR',
+    });
+    expect(await t.db.insertInto('margin_unit_costs').values({ key: 'VAULT_CARD', cost_minor: 45, currency: 'GBP' }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      key: 'VAULT_CARD', cost_minor: 45, currency: 'GBP', updated_by: null, updated_at: expect.any(Date),
+    });
+    expect(await t.db.insertInto('category_allowances').values({ category_id: category.id, allowance_bp: 350 }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      category_id: category.id, allowance_bp: 350, updated_by: null, updated_at: expect.any(Date),
+    });
+    await expect(sql`UPDATE currency_rates SET currency = 'CHF' WHERE currency = 'GBP'`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+    // Cleared: the rows deleted (absent rows read as not set).
+    await t.db.deleteFrom('currency_rates').execute();
+    await t.db.deleteFrom('shipping_cost_rates').execute();
+    await t.db.deleteFrom('margin_unit_costs').execute();
+    await t.db.deleteFrom('category_allowances').execute();
+    await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
+  });
+
+  it('partners (0064): every bound is schema.ts\'s; the mirror at work: a partner, an experience paid then cancelled, its invoice and credit note as issued (bigint amounts read as numbers, the date as its text), an invitation linked to it and a name shared on a YES', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    for (const [table, constraint, max] of [
+      ['partners', 'partners_brand_check', S.PARTNER_BRAND_MAX],
+      ['partners', 'partners_contact_name_check', S.PARTNER_NAME_MAX],
+      ['partners', 'partners_contact_email_check', S.PARTNER_EMAIL_MAX],
+      ['partners', 'partners_contact_phone_check', S.PARTNER_PHONE_MAX],
+      ['partners', 'partners_billing_name_check', S.PARTNER_NAME_MAX],
+      ['partners', 'partners_billing_address_check', S.PARTNER_BILLING_ADDRESS_MAX],
+      ['partners', 'partners_company_number_check', S.PARTNER_COMPANY_NUMBER_MAX],
+      ['partners', 'partners_note_check', S.PARTNER_NOTE_MAX],
+      ['partner_experiences', 'partner_experiences_title_check', S.PARTNER_EXPERIENCE_TITLE_MAX],
+      ['partner_experiences', 'partner_experiences_note_check', S.PARTNER_NOTE_MAX],
+      ['partner_experiences', 'partner_experiences_amount_minor_check', S.PARTNER_AMOUNT_MINOR_MAX],
+      ['partner_invoices', 'partner_invoices_total_minor_check', S.PARTNER_AMOUNT_MINOR_MAX],
+    ] as const) {
+      expect(await def(table, constraint), constraint).toContain(`<= ${max}`);
+    }
+    expect(S.PARTNER_INVOICE_KINDS).toEqual(S.INVOICE_KINDS);
+
+    const admin = await t.db.insertInto('admin_users').values({ email: 'partners-s0064@orbes.test', email_normalized: 'partners-s0064@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const partner = await t.db
+      .insertInto('partners')
+      .values({ brand: 'MAISON S', billing_name: 'MAISON S SAS', billing_address: '1 place Vendôme\n75001 Paris', billing_country: 'FR', created_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(partner).toMatchObject({ brand: 'MAISON S', contact_email: null, billing_country: 'FR', company_number: null, active: true, created_by: admin.id });
+    await expect(t.db.insertInto('partners').values({ brand: 'maison s' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'partners_brand_key'));
+    const experience = await t.db
+      .insertInto('partner_experiences')
+      .values({ partner_id: partner.id, title: 'DINNER', event_on: '2026-11-12', amount_minor: 100_000_000, currency: 'GBP', created_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(experience).toMatchObject({ status: 'DRAFT', event_on: '2026-11-12', amount_minor: 100_000_000, currency: 'GBP', invoiced_at: null, paid_on: null, cancelled_at: null });
+    const issuedAt = new Date();
+    await t.db.updateTable('partner_experiences').set({ status: 'INVOICED', invoiced_at: issuedAt }).where('id', '=', experience.id).execute();
+    const invoice = await t.db
+      .insertInto('partner_invoices')
+      .values({
+        kind: 'INVOICE', year: 2026, sequence: 1, experience_id: experience.id, issuer: JSON.stringify({ name: 'CONGLOMERAT LLC', address: [] }),
+        buyer: JSON.stringify({ name: 'MAISON S SAS', address: ['1 place Vendôme', '75001 Paris'], country: 'FR' }),
+        lines: JSON.stringify([{ label: 'Partner experience · DINNER · 12 NOV', amountMinor: 100_000_000 }]), currency: 'GBP', total_minor: 100_000_000, issued_by: admin.id,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(invoice).toMatchObject({ kind: 'INVOICE', year: 2026, sequence: 1, credits_invoice_id: null, total_minor: 100_000_000, buyer: { name: 'MAISON S SAS', country: 'FR' } });
+    await t.db.updateTable('partner_experiences').set({ status: 'PAID', paid_on: '2026-11-20', paid_recorded_at: new Date(), paid_recorded_by: admin.id }).where('id', '=', experience.id).execute();
+    await t.db.updateTable('partner_experiences').set({ status: 'CANCELLED', cancelled_at: new Date(), cancelled_by: admin.id }).where('id', '=', experience.id).execute();
+    const credit = await t.db
+      .insertInto('partner_invoices')
+      .values({
+        kind: 'CREDIT_NOTE', year: 2026, sequence: 1, experience_id: experience.id, credits_invoice_id: invoice.id, issuer: JSON.stringify(invoice.issuer), buyer: JSON.stringify(invoice.buyer),
+        lines: JSON.stringify(invoice.lines), currency: 'GBP', total_minor: 100_000_000,
+      })
+      .returning(['kind', 'sequence', 'credits_invoice_id', 'issued_by'])
+      .executeTakeFirstOrThrow();
+    expect(credit).toEqual({ kind: 'CREDIT_NOTE', sequence: 1, credits_invoice_id: invoice.id, issued_by: null });
+    expect(await t.db.selectFrom('partner_experiences').select(['status', 'paid_on']).where('id', '=', experience.id).executeTakeFirstOrThrow()).toEqual({ status: 'CANCELLED', paid_on: '2026-11-20' });
+    await expect(t.db.updateTable('partner_invoices').set({ total_minor: 1 }).where('id', '=', invoice.id).execute()).rejects.toSatisfy(isGuardViolation);
+
+    // An invitation for it, an answer sharing its name.
+    const live = await t.db.insertInto('partner_experiences').values({ partner_id: partner.id, title: 'GALA', event_on: '2026-12-01', amount_minor: 1, currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    const post = await t.db
+      .insertInto('circle_posts')
+      .values({ kind: 'INVITATION', title: 'Gala', event_at: new Date('2026-12-01T19:00:00Z'), experience: 'PARTNER_EXPERIENCE', partner_experience_id: live.id })
+      .returning(['id', 'partner_experience_id'])
+      .executeTakeFirstOrThrow();
+    expect(post.partner_experience_id).toBe(live.id);
+    const account = await t.db.insertInto('accounts').values({ email: 'partners-s0064@example.com', email_normalized: 'partners-s0064@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    expect(await t.db.insertInto('circle_rsvps').values({ post_id: post.id, account_id: account.id, answer: 'YES' }).returning(['share_name', 'share_name_at']).executeTakeFirstOrThrow()).toEqual({ share_name: false, share_name_at: null });
+    await t.db.updateTable('circle_rsvps').set({ share_name: true, share_name_at: new Date() }).where('post_id', '=', post.id).execute();
+    await expect(t.db.updateTable('circle_rsvps').set({ answer: 'NO' }).where('post_id', '=', post.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'circle_rsvps_share_name_yes'));
+    await t.db.updateTable('circle_rsvps').set({ answer: 'NO', share_name: false, share_name_at: null }).where('post_id', '=', post.id).execute();
+
+    // Taken away by hand (partners, experiences and invoices are never deleted).
+    await t.db.deleteFrom('circle_rsvps').where('post_id', '=', post.id).execute();
+    await t.db.deleteFrom('circle_posts').where('id', '=', post.id).execute();
+    await t.db.deleteFrom('accounts').where('id', '=', account.id).execute();
+    await sql`ALTER TABLE partner_invoices DISABLE TRIGGER partner_invoices_immutable`.execute(t.db);
+    await t.db.deleteFrom('partner_invoices').where('kind', '=', 'CREDIT_NOTE').execute();
+    await t.db.deleteFrom('partner_invoices').execute();
+    await sql`ALTER TABLE partner_invoices ENABLE TRIGGER partner_invoices_immutable`.execute(t.db);
+    await sql`ALTER TABLE partner_experiences DISABLE TRIGGER partner_experiences_no_delete`.execute(t.db);
+    await t.db.deleteFrom('partner_experiences').execute();
+    await sql`ALTER TABLE partner_experiences ENABLE TRIGGER partner_experiences_no_delete`.execute(t.db);
+    await sql`ALTER TABLE partners DISABLE TRIGGER partners_no_delete`.execute(t.db);
+    await t.db.deleteFrom('partners').execute();
+    await sql`ALTER TABLE partners ENABLE TRIGGER partners_no_delete`.execute(t.db);
+    await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
+  });
+
+  it('ad conversions (0065): every bound is schema.ts\'s, the acts are the conversions\' with the order paid, the Google pattern the database\'s; the mirror at work: the switch row, a channel mapped, a choice on a device then on its account, a click id taking the account, an event queued then sent (bigint ids read as numbers)', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    for (const [table, constraint, max] of [
+      ['ads_settings', 'ads_settings_meta_test_event_code_check', S.ADS_TEST_EVENT_CODE_MAX],
+      ['ads_settings', 'ads_settings_tiktok_test_event_code_check', S.ADS_TEST_EVENT_CODE_MAX],
+      ['ad_consents', 'ad_consents_user_agent_check', S.AD_USER_AGENT_MAX],
+      ['ad_clicks', 'ad_clicks_click_id_check', S.AD_CLICK_ID_MAX],
+      ['ad_events', 'ad_events_last_error_check', S.AD_EVENT_ERROR_MAX],
+    ] as const) {
+      expect(await def(table, constraint), constraint).toContain(`<= ${max}`);
+    }
+    // The acts sent are the conversions recorded, an ORDER sent once paid.
+    expect(S.AD_EVENT_KINDS).toEqual(S.CONVERSION_KINDS.map((k) => (k === 'ORDER' ? 'PAID_ORDER' : k)));
+    for (const act of ['signup', 'draw_entry', 'live_entry', 'paid_order']) {
+      expect(await def('ads_settings', `ads_settings_google_action_${act}_check`), act).toContain(`'${S.ADS_GOOGLE_ACTION_PATTERN.source.replace(/\\\//g, '/')}'`);
+    }
+    expect(S.ADS_GOOGLE_ACTION_PATTERN.test('customers/1234567890/conversionActions/987654321')).toBe(true);
+    expect(S.ADS_GOOGLE_ACTION_PATTERN.test('customers/1234567890/conversionActions/')).toBe(false);
+
+    const admin = await t.db.insertInto('admin_users').values({ email: 'ads-s0065@orbes.test', email_normalized: 'ads-s0065@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const from = new Date('2026-11-02T09:00:00.000Z');
+    const settings = await t.db
+      .insertInto('ads_settings')
+      .values({ enabled: true, events_from: from, switched_at: from, switched_by: admin.id, meta_test_event_code: 'TEST12345', google_action_paid_order: 'customers/1234567890/conversionActions/42', updated_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(settings).toMatchObject({ id: 1, enabled: true, events_from: from, tiktok_test_event_code: null, google_action_signup: null, google_action_paid_order: 'customers/1234567890/conversionActions/42' });
+    await t.db.updateTable('ads_settings').set({ enabled: false, switched_at: new Date('2026-11-03T09:00:00.000Z') }).execute();
+    await expect(t.db.updateTable('ads_settings').set({ events_from: new Date('2026-11-03T09:00:00.000Z') }).execute()).rejects.toSatisfy(isGuardViolation);
+
+    const channel = await t.db.insertInto('link_channels').values({ name: 'Ads s0065' }).returning('id').executeTakeFirstOrThrow();
+    expect(await t.db.insertInto('ads_channel_platforms').values({ channel_id: channel.id, platform: 'META' }).returningAll().executeTakeFirstOrThrow()).toEqual({ channel_id: channel.id, platform: 'META' });
+    const account = await t.db.insertInto('accounts').values({ email: 'ads-s0065@example.com', email_normalized: 'ads-s0065@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const device = await t.db.insertInto('tracking_devices').values({ device_hash: 'S'.repeat(43) }).returning('id').executeTakeFirstOrThrow();
+    const signedOut = await t.db
+      .insertInto('ad_consents')
+      .values({ device_id: device.id, choice: 'GRANTED', source: 'BANNER', text_version: '2026-11-02', user_agent: 'Mozilla/5.0 (iPhone)' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(signedOut).toMatchObject({ id: expect.any(Number), device_id: device.id, account_id: null, choice: 'GRANTED', chosen_at: expect.any(Date) });
+    await expect(sql`UPDATE ad_consents SET choice = 'DECLINED' WHERE id = ${signedOut.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    const withdrawn = await t.db.insertInto('ad_consents').values({ account_id: account.id, choice: 'DECLINED', source: 'ACCOUNT', text_version: '2026-11-02' }).returning(['id', 'user_agent']).executeTakeFirstOrThrow();
+    expect(withdrawn.id).toBeGreaterThan(signedOut.id);
+    expect(withdrawn.user_agent).toBeNull();
+    const click = await t.db
+      .insertInto('ad_clicks')
+      .values({ device_id: device.id, kind: 'FBCLID', click_id: 'IwAR0abc-_.~', clicked_at: from })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(click).toMatchObject({ id: expect.any(Number), account_id: null, kind: 'FBCLID', clicked_at: from });
+    await t.db.updateTable('ad_clicks').set({ account_id: account.id }).where('id', '=', click.id).execute();
+    await expect(t.db.updateTable('ad_clicks').set({ click_id: 'other' }).where('id', '=', click.id).execute()).rejects.toSatisfy(isGuardViolation);
+
+    const source = await t.db.insertInto('acquisition_sources').values({ kind: 'DIRECT', key: 'ads-s0065' }).returning('id').executeTakeFirstOrThrow();
+    const conversion = await t.db
+      .insertInto('acquisition_conversions')
+      .values({ kind: 'SIGNUP', ref_id: account.id, account_id: account.id, at: from, last_source_id: source.id })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const event = await t.db.insertInto('ad_events').values({ platform: 'META', conversion_id: conversion.id, kind: 'SIGNUP' }).returningAll().executeTakeFirstOrThrow();
+    expect(event).toMatchObject({ id: expect.any(Number), conversion_id: conversion.id, status: 'QUEUED', skip_reason: null, attempts: 0, sent_at: null, settled_at: null });
+    const sentAt = new Date('2026-11-02T09:00:30.000Z');
+    await t.db.updateTable('ad_events').set({ status: 'SENT', attempts: 1, sent_at: sentAt, settled_at: sentAt }).where('id', '=', event.id).execute();
+    await expect(t.db.updateTable('ad_events').set({ kind: 'PAID_ORDER' }).where('id', '=', event.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.insertInto('ad_events').values({ platform: 'META', conversion_id: conversion.id, kind: 'SIGNUP' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'ad_events_key'));
+
+    // Taken away (the cases after this one start without them).
+    await t.db.deleteFrom('ad_events').execute();
+    await t.db.deleteFrom('acquisition_conversions').where('id', '=', conversion.id).execute();
+    await t.db.deleteFrom('acquisition_sources').where('id', '=', source.id).execute();
+    await t.db.deleteFrom('ad_clicks').execute();
+    await t.db.deleteFrom('ad_consents').execute();
+    await t.db.deleteFrom('tracking_devices').where('id', '=', device.id).execute();
+    await t.db.deleteFrom('accounts').where('id', '=', account.id).execute();
+    await t.db.deleteFrom('ads_channel_platforms').execute();
+    await t.db.deleteFrom('link_channels').where('id', '=', channel.id).execute();
+    await t.db.deleteFrom('ads_settings').execute();
+    await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
   });
 
   it('sets (0057): every bound is schema.ts\'s; the mirror at work: a set of two models, its draw with sizes per piece, an entry\'s size per piece, a set sale with one order per piece, a grouped return', async () => {

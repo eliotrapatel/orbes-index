@@ -37,6 +37,7 @@ import { messageRoutes } from './routes/messages.js';
 import { ownershipRoutes } from './routes/ownership.js';
 import { publicRoutes } from './routes/public.js';
 import { seenRoutes } from './routes/seen.js';
+import { consentRoutes } from './routes/consent.js';
 import { acquisitionRoutes } from './routes/acquisition.js';
 import { emailRoutes } from './routes/email.js';
 import { foundingRoutes } from './routes/founding.js';
@@ -178,6 +179,7 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   const requireAdminMfa = opts.requireAdminMfa ?? config.adminRequireMfa;
   await app.register(publicRoutes, { ...deps, requireAdminMfa });
   await app.register(seenRoutes, deps);
+  await app.register(consentRoutes, deps);
   await app.register(acquisitionRoutes, deps);
   await app.register(foundingRoutes, deps);
   await app.register(emailRoutes, deps);

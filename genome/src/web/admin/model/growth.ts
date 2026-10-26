@@ -2,8 +2,8 @@
  * The Growth page of the console (plan NEXT-NINE, §3.9 BP-29, step 9.2) — pure helpers, no DOM.
  *
  *  - The page's state reads from its query, kept to what the server takes: the window (`months`, 12 or 24), one
- *    currency of the house, the tab of the lifetime value's breakdowns (`ltv`), the revenue's (`rev`), the page of
- *    COLLECTORS BY VALUE (`page`).
+ *    currency of the house, the tab of the lifetime value's breakdowns (`ltv`), the revenue's (`rev`), the margin's
+ *    (`mg`, model/margin.ts), the page of COLLECTORS BY VALUE (`page`).
  *  - The words and figures of each section: amounts in the house's money (`€ 4 800`, never converted), a group under
  *    three collectors read as its count and '—', a mark not reached yet as '—'. Figures read in the console's --font;
  *    the labels that sit in the display face carry no figure.
@@ -40,6 +40,15 @@ export type RevenueTab = (typeof REVENUE_TABS)[number];
 
 export const LTV_TAB_LABELS: Readonly<Record<LtvTab, string>> = Object.freeze({ tier: 'By tier', country: 'By country', model: 'By first model', channel: 'By channel' });
 export const REVENUE_TAB_LABELS: Readonly<Record<RevenueTab, string>> = Object.freeze({ channel: 'By channel', country: 'By country', model: 'By model' });
+/** The Margin's views (lot M4 plan §1.3, N3: never by release), as its tabs; model/margin.ts reads the rest. */
+export const MARGIN_TABS = ['model', 'channel', 'tier'] as const;
+export type MarginTab = (typeof MARGIN_TABS)[number];
+export const MARGIN_TAB_LABELS: Readonly<Record<MarginTab, string>> = Object.freeze({ model: 'By model', channel: 'By channel', tier: 'By tier' });
+
+/** The Margin's tab named by the query (`mg`), BY MODEL otherwise. */
+export function marginTab(value: string | undefined): MarginTab {
+  return (MARGIN_TABS as readonly string[]).includes(value ?? '') ? (value as MarginTab) : 'model';
+}
 
 /** COLLECTORS BY VALUE: rows per page (services/growth.ts GROWTH_COLLECTORS_PAGE). */
 export const GROWTH_COLLECTORS_PAGE = 25;
@@ -50,6 +59,8 @@ export interface GrowthParams {
   currency: HouseCurrency | null;
   ltv: LtvTab;
   rev: RevenueTab;
+  /** The Margin's tab (lot M4 plan §1.3): BY MODEL by default, then left out of the address. */
+  mg: MarginTab;
   page: number;
 }
 
@@ -62,6 +73,7 @@ export function growthParams(query: Readonly<Record<string, string | undefined>>
     currency: (HOUSE_CURRENCIES as readonly string[]).includes(query.currency ?? '') ? (query.currency as HouseCurrency) : null,
     ltv: (LTV_TABS as readonly string[]).includes(query.ltv ?? '') ? (query.ltv as LtvTab) : 'tier',
     rev: (REVENUE_TABS as readonly string[]).includes(query.rev ?? '') ? (query.rev as RevenueTab) : 'channel',
+    mg: marginTab(query.mg),
     page: Number.isInteger(page) && page > 0 ? page : 1,
   };
 }

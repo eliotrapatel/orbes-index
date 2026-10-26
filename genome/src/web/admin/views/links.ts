@@ -63,7 +63,7 @@ import {
 import { can } from '../model/permissions.js';
 import { href } from '../router.js';
 import { HOUSE_CURRENCIES, LINKS_VIEWS, type LinkChannelView, type LinkDestinations, type LinksReport, type LinkView } from '../types.js';
-import { button, checkbox, copyButton, emptyState, field, input, pageHeader, select, setFieldError, textarea } from '../ui/components.js';
+import { button, checkbox, copyButton, emptyState, field, input, linkButton, pageHeader, select, setFieldError, textarea } from '../ui/components.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
@@ -320,6 +320,10 @@ export async function linksView(ctx: ViewContext): Promise<HTMLElement> {
   const actions: Child[] = manage
     ? [button(C.newLink, { kind: 'primary', testId: 'links-new', onClick: () => void newLink() }), button(C.channels, { kind: 'secondary', testId: 'links-channels', onClick: () => void channels() })]
     : [];
+  // Links → Ad platforms (lot M4 plan §3.5): every reader of Links reads it; an ADMIN switches and maps there.
+  const adPlatforms = linkButton(C.adPlatforms, href('adPlatforms'), 'ghost');
+  adPlatforms.setAttribute('data-testid', 'links-ad-platforms');
+  actions.push(adPlatforms);
 
   let body: Child[];
   if (!report) {

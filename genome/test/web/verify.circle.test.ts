@@ -204,3 +204,57 @@ describe('a post (P-X01)', () => {
     expect(lines.join('\n')).not.toContain('!');
   });
 });
+
+describe('an invitation for a partner\'s experience (lot M4, step M4.8; K49 P2, P3)', () => {
+  const partner = (share: CirclePost['shareName'], answer: CirclePost['answer'] = 'YES', extra: Partial<NonNullable<CirclePost['invitation']>> = {}) => ({
+    ...invitation(extra, answer),
+    experience: 'PARTNER_EXPERIENCE' as const,
+    partner: { brand: ' Maison Orvale ' },
+    shareName: share,
+  });
+  const P = CIRCLE.partner;
+
+  it('names its partner WITH <BRAND> under its kind, on the feed\'s card and on the post; never on another post', () => {
+    const [linked, plain, note] = circleCards([
+      card({ kind: 'INVITATION', experience: 'PARTNER_EXPERIENCE', partner: { brand: 'Maison Orvale' } }),
+      card({ id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c96', kind: 'INVITATION', experience: 'PARTNER_EXPERIENCE', partner: null }),
+      card({ id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c97', kind: 'NOTE', partner: { brand: 'Maison Orvale' } }),
+    ]);
+    expect([linked!.partner, plain!.partner, note!.partner]).toEqual(['WITH MAISON ORVALE', null, null]);
+    // Before M4 the server sent no partner: the card is as it was.
+    expect(circleCards([card({ kind: 'INVITATION' })])[0]!.partner).toBeNull();
+    expect(circlePostModel(partner({ offered: true, on: false, name: 'Inès Laurent' }), 0).partner).toBe('WITH MAISON ORVALE');
+    expect(circlePostModel(invitation({}, 'YES'), 0)).toMatchObject({ partner: null, share: null });
+    // The longest brand is said whole.
+    const long = 'Maison Orvale, Parfumeurs et Arts de la Table, Paris · Genève · Milan';
+    expect(circlePostModel({ ...partner({ offered: true, on: false, name: 'Inès Laurent' }), partner: { brand: long } }, 0).share?.box?.label).toBe(`SHARE MY NAME, INÈS LAURENT, WITH ${long.toUpperCase()}`);
+  });
+
+  it('offers SHARE MY NAME, <NAME>, WITH <BRAND> once answered YES while answers are taken, ticked or not, with its line', () => {
+    expect(circlePostModel(partner({ offered: true, on: false, name: 'Inès Laurent' }), 0).share).toEqual({
+      brand: 'MAISON ORVALE',
+      box: { label: 'SHARE MY NAME, INÈS LAURENT, WITH MAISON ORVALE', on: false },
+      line: 'Unticked, MAISON ORVALE receives only the number of guests.',
+    });
+    expect(circlePostModel(partner({ offered: true, on: true, name: 'Camille Durand' }), 0).share).toEqual({
+      brand: 'MAISON ORVALE',
+      box: { label: 'SHARE MY NAME, CAMILLE DURAND, WITH MAISON ORVALE', on: true },
+      line: 'Your name is shared with MAISON ORVALE.',
+    });
+  });
+
+  it('says only the number of guests without both names, the choice as a line once closed, and nothing before a YES', () => {
+    expect(circlePostModel(partner({ offered: false, on: false, name: null }), 0).share).toEqual({ brand: 'MAISON ORVALE', box: null, line: P.headcountOnly('MAISON ORVALE') });
+    expect(circlePostModel(partner({ offered: true, on: true, name: 'Camille Durand' }, 'YES', { open: false }), 0).share).toEqual({ brand: 'MAISON ORVALE', box: null, line: P.shareOn('MAISON ORVALE') });
+    expect(circlePostModel(partner({ offered: true, on: false, name: 'Inès Laurent' }, 'YES', { open: false }), 0).share).toEqual({ brand: 'MAISON ORVALE', box: null, line: P.headcountOnly('MAISON ORVALE') });
+    for (const answer of [null, 'NO'] as const) expect(circlePostModel(partner({ offered: true, on: false, name: 'Hugo Marchand' }, answer), 0).share).toEqual({ brand: 'MAISON ORVALE', box: null, line: null });
+    // A tick the server would never send with a NO is never shown.
+    expect(circlePostModel(partner({ offered: true, on: true, name: 'Hugo Marchand' }, 'NO'), 0).share?.line).toBeNull();
+  });
+
+  it('writes its lines in the house\'s words, the same on a phone and a computer', () => {
+    const lines = [P.with('MAISON ORVALE'), P.share('CAMILLE DURAND', 'MAISON ORVALE'), P.shareOn('MAISON ORVALE'), P.shareOff('MAISON ORVALE'), P.headcountOnly('MAISON ORVALE'), P.failed];
+    expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(lines.join('\n')).not.toMatch(/!|\btap|\bclick/i);
+  });
+});

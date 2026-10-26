@@ -28,6 +28,10 @@
  * through toDocumentText: accents dropped, capitals, the punctuation of an address and an email kept. No VAT line: the
  * VAT fields stay in the data, empty (the owner's decision). Deterministic for one input (the PDF's dates are the
  * document's issue).
+ *
+ * A partner's invoice and credit note (lot M4, K49 P1 and P4; services/partners.ts) are the same page in their own
+ * series (P-2026-0001, PC-2026-0001): no ORDER row, the partner's billing details as BILLED TO, its company number
+ * under its country when given, one line « Partner experience · <title> · <date> ».
  */
 import { MONOGRAM_BOUNDS, monogramPathData } from '../../core/render/monogram.js';
 import { CertificateInputError, fittedRun, fmt, INK, longDate, MIN_STROKE_MM, PDF_TYPE, stroked, type LineSpec } from './certificate.js';
@@ -52,8 +56,11 @@ export interface InvoiceDocument {
   /** `INV-2026-000001`, `CN-2026-000001`. */
   number: string;
   issuedAt: Date;
-  /** The order's reference, `OR-1A2B3C4D`. */
-  order: string;
+  /**
+   * The order's reference, `OR-1A2B3C4D`; null on a partner's document (lot M4, K49 P1: an experience, not an order,
+   * numbered P-2026-0001 / PC-2026-0001), whose facts then have no ORDER row.
+   */
+  order: string | null;
   /** The number of the invoice a credit note cancels; null for an invoice. */
   credits: string | null;
   /** Plan NEXT LOT §3.6.C: the number of the invoice a supplementary invoice supplements (an engraving after PAID). */
@@ -64,7 +71,8 @@ export interface InvoiceDocument {
   issuer: { name: string; address: readonly string[] };
   /** As entered by ORBES Client Services (masked for an AUDITOR by the caller), and the account's email. */
   /** Plan NEXT LOT §3.6.B: the delivery country's English name, the address's last line (none on an invoice of before). */
-  buyer: { name: string | null; address: string | null; email: string | null; country?: string | null };
+  /** A partner (lot M4, K49 P1): its company number, printed under its country when given. */
+  buyer: { name: string | null; address: string | null; email: string | null; country?: string | null; companyNumber?: string | null };
   lines: readonly InvoiceDocumentLine[];
   currency: string;
   totalMinor: number;
@@ -84,6 +92,8 @@ export const INVOICE_COPY = Object.freeze({
   cancelsLines: (invoice: string) => `THIS CREDIT NOTE CANCELS THE LINES ABOVE OF INVOICE ${invoice}.`,
   cancelsRemains: (invoice: string) => `THIS CREDIT NOTE CANCELS WHAT REMAINS OF INVOICE ${invoice}.`,
   supplements: (invoice: string) => `THIS INVOICE SUPPLEMENTS INVOICE ${invoice}.`,
+  /** A partner's company number, under its billing details (lot M4, K49 P1). */
+  companyNumber: (n: string) => `COMPANY NUMBER ${n}`,
   foot: 'ORBES · THEORBES.COM',
 });
 
@@ -147,6 +157,8 @@ export function invoiceTablePitch(count: number): { pitch: number; detailGap: nu
 }
 
 const NUMBER_RE = /^(INV|CN)-20\d{2}-\d{6}$/;
+/** A partner's document (lot M4, K49 P4): its own series, P-2026-0001 and PC-2026-0001, four figures at least. */
+const PARTNER_NUMBER_RE = /^(P|PC)-20\d{2}-\d{4,6}$/;
 const ORDER_RE = /^OR-[0-9A-F]{8}$/;
 
 /**
@@ -169,9 +181,13 @@ export function addressLines(address: string | null): string[] {
 
 /** The page of an invoice or a credit note. Throws CertificateInputError on input it cannot draw. */
 export function layoutInvoice(d: InvoiceDocument): PdfPage {
-  if (!NUMBER_RE.test(d.number) || (d.kind === 'INVOICE') !== d.number.startsWith('INV-')) throw new CertificateInputError('not a document number');
-  if (!ORDER_RE.test(d.order)) throw new CertificateInputError('not an order reference');
-  if ((d.kind === 'CREDIT_NOTE') !== (d.credits !== null) || (d.credits !== null && !NUMBER_RE.test(d.credits))) throw new CertificateInputError('a credit note names the invoice it cancels');
+  // An order's document (INV-, CN-) names its order; a partner's (P-, PC-) none, and its credit note a partner invoice.
+  const partner = d.order === null;
+  const numbers = partner ? PARTNER_NUMBER_RE : NUMBER_RE;
+  if (!numbers.test(d.number) || (d.kind === 'INVOICE') !== d.number.startsWith(partner ? 'P-' : 'INV-')) throw new CertificateInputError('not a document number');
+  if (!partner && !ORDER_RE.test(d.order!)) throw new CertificateInputError('not an order reference');
+  if ((d.kind === 'CREDIT_NOTE') !== (d.credits !== null) || (d.credits !== null && (!numbers.test(d.credits) || !d.credits.startsWith(partner ? 'P-' : 'INV-')))) throw new CertificateInputError('a credit note names the invoice it cancels');
+  if (partner && d.supplements) throw new CertificateInputError('a partner invoice supplements none');
   if (d.supplements && (d.kind !== 'INVOICE' || !NUMBER_RE.test(d.supplements))) throw new CertificateInputError('a supplementary invoice names the invoice it supplements');
   if (!/^[A-Z]{3}$/.test(d.currency)) throw new CertificateInputError('not a currency');
   if (d.lines.length < 1 || d.lines.length > INVOICE_MAX_LINES) throw new CertificateInputError(`one to ${INVOICE_MAX_LINES} lines`);
@@ -205,7 +221,7 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   const facts: [string, string][] = [
     [C.rows.number, d.number],
     [C.rows.date, longDate(d.issuedAt)],
-    [C.rows.order, d.order],
+    ...(d.order !== null ? [[C.rows.order, d.order] as [string, string]] : []),
     ...(d.credits ? [[C.rows.credits, d.credits] as [string, string]] : []),
     ...(d.supplements ? [[C.rows.supplements, d.supplements] as [string, string]] : []),
     [C.rows.currency, d.currency],
@@ -223,7 +239,8 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   for (const l of [d.issuer.name, ...d.issuer.address]) value(toDocumentText(l), P.x, (y += R.pitch), P.width);
   y += R.pitch * 1.6;
   section(C.billedTo, P.x, y);
-  const buyer = [d.buyer.name, ...addressLines(d.buyer.address), d.buyer.country ?? null, d.buyer.email].map((l) => toDocumentText(l ?? '')).filter((l) => l.length > 0);
+  const company = d.buyer.companyNumber ? C.companyNumber(d.buyer.companyNumber) : null;
+  const buyer = [d.buyer.name, ...addressLines(d.buyer.address), d.buyer.country ?? null, company, d.buyer.email].map((l) => toDocumentText(l ?? '')).filter((l) => l.length > 0);
   for (const l of buyer) value(l, P.x, (y += R.pitch), P.width);
   if (y > L.ruleParties - 4) throw new CertificateInputError('the parties overflow their block');
   rule(L.ruleParties);
@@ -251,7 +268,10 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   return { widthMm: pw, heightMm: ph, placements: [], marks: strokes, markColor: INK, shapes: monogram.map((m) => ({ d: m, color: INK })) };
 }
 
-/** The file of a document: `ORBES-invoice-INV-2026-000001.pdf`, `ORBES-credit-note-CN-2026-000001.pdf`. */
+/**
+ * The file of a document: `ORBES-invoice-INV-2026-000001.pdf`, `ORBES-credit-note-CN-2026-000001.pdf`; a partner's
+ * `ORBES-invoice-P-2026-0001.pdf`, `ORBES-credit-note-PC-2026-0001.pdf`.
+ */
 export function invoiceFilename(kind: InvoiceDocumentKind, number: string): string {
   return `ORBES-${kind === 'INVOICE' ? 'invoice' : 'credit-note'}-${number}.pdf`;
 }
@@ -262,8 +282,8 @@ export async function renderInvoicePdf(d: InvoiceDocument): Promise<{ contentTyp
   const name = d.kind === 'INVOICE' ? 'invoice' : 'credit note';
   const body = await renderPdf([page], {
     title: `ORBES ${INVOICE_COPY.title[d.kind]} ${d.number}`,
-    subject: `The ${name} ${d.number} of order ${d.order}, issued by ${d.issuer.name}.`,
-    keywords: ['ORBES', name, d.number, d.order].join(', '),
+    subject: d.order === null ? `The ${name} ${d.number} of a partner experience, issued by ${d.issuer.name}.` : `The ${name} ${d.number} of order ${d.order}, issued by ${d.issuer.name}.`,
+    keywords: ['ORBES', name, d.number, ...(d.order === null ? ['partner experience'] : [d.order])].join(', '),
     creationDate: d.issuedAt,
   });
   return { contentType: PDF_TYPE, body, filename: invoiceFilename(d.kind, d.number) };

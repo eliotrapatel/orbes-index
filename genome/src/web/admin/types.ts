@@ -419,6 +419,115 @@ export const SET_PIECES_MAX = 4;
 export const SET_PRICE_MINOR_MAX = 100_000_000;
 export const DROP_SIZE_POSITION_MAX = 96;
 
+/**
+ * The margin's settings (currency_rates, shipping_cost_rates, margin_unit_costs, category_allowances, migration 0063,
+ * macro scope K43 N1 and N2, D61): a currency's euro rate, above 0 and at most 100 000, six decimals, EUR never set; a
+ * shipping cost band's upper limit, a parcel's weight at most; a band's and a unit cost's amount, at most; an allowance in
+ * hundredths of a percent (100 %, at most); the unit costs' keys: the pouch, the card, THE VAULT CARD, a PRIVATE CARE
+ * service and each warranty claim outcome.
+ */
+export const CURRENCY_RATE_MAX = 100_000;
+export const CURRENCY_RATE_DECIMALS = 6;
+export const SHIPMENT_WEIGHT_G_MAX = 100_000;
+export const MARGIN_COST_MINOR_MAX = 100_000_000;
+export const ALLOWANCE_BP_MAX = 10_000;
+export const MARGIN_CURRENCY = 'EUR';
+export const MARGIN_UNIT_COST_KEYS = ['POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE', ...WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}` as const)] as const;
+export type MarginUnitCostKey = (typeof MARGIN_UNIT_COST_KEYS)[number];
+
+/**
+ * Partner-paid experiences (partners, partner_experiences, partner_invoices, migration 0064, macro scope K49 P1 to P4): a
+ * brand's, a contact's or billing name's, an email's, a phone's, a billing address's, a company number's, a note's and an
+ * experience title's length, at most; an amount's, at most (from 1, in minor units); an experience's states; a partner
+ * invoice's kinds, each its own series (P-, PC-).
+ */
+export const PARTNER_BRAND_MAX = 80;
+export const PARTNER_NAME_MAX = 120;
+export const PARTNER_EMAIL_MAX = 254;
+export const PARTNER_PHONE_MAX = 40;
+export const PARTNER_BILLING_ADDRESS_MAX = 1_000;
+export const PARTNER_COMPANY_NUMBER_MAX = 60;
+export const PARTNER_NOTE_MAX = 2_000;
+export const PARTNER_EXPERIENCE_TITLE_MAX = 120;
+export const PARTNER_AMOUNT_MINOR_MAX = 100_000_000;
+export const PARTNER_EXPERIENCE_STATUSES = ['DRAFT', 'INVOICED', 'PAID', 'CANCELLED'] as const;
+export type PartnerExperienceStatus = (typeof PARTNER_EXPERIENCE_STATUSES)[number];
+export const PARTNER_INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type PartnerInvoiceKind = (typeof PARTNER_INVOICE_KINDS)[number];
+
+/**
+ * The server-side conversions, built and switched off (ads_settings, ads_channel_platforms, ad_consents, ad_events,
+ * migration 0065, macro scope K27 A1 to A5), as Links → Ad platforms reads and writes them: the platforms, a collector's
+ * choice, an event's act, its states and the reason one is skipped; a test event code's length, at most; a Google Ads
+ * conversion action's resource name.
+ */
+export const ADS_PLATFORMS = ['META', 'TIKTOK', 'GOOGLE'] as const;
+export type AdsPlatform = (typeof ADS_PLATFORMS)[number];
+export const AD_CONSENT_CHOICES = ['GRANTED', 'DECLINED'] as const;
+export type AdConsentChoice = (typeof AD_CONSENT_CHOICES)[number];
+export const AD_EVENT_KINDS = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'PAID_ORDER'] as const;
+export type AdEventKind = (typeof AD_EVENT_KINDS)[number];
+export const AD_EVENT_STATUSES = ['QUEUED', 'SENT', 'FAILED', 'SKIPPED', 'CANCELLED'] as const;
+export type AdEventStatus = (typeof AD_EVENT_STATUSES)[number];
+export const AD_SKIP_REASONS = ['TOO_OLD', 'NO_CLICK_ID', 'NOT_READY'] as const;
+export type AdSkipReason = (typeof AD_SKIP_REASONS)[number];
+export const ADS_TEST_EVENT_CODE_MAX = 40;
+export const ADS_GOOGLE_ACTION_PATTERN = /^customers\/[0-9]{1,12}\/conversionActions\/[0-9]{1,20}$/;
+
+/**
+ * A platform as Links → Ad platforms reads it (GET /api/admin/ads, services/ads.ts AdsPlatformView, lot M4 plan §3.5):
+ * its keys present or missing (never a key), its API version, its last send and last error, its events by status, and
+ * Meta's and TikTok's test event code (Google's test mode is validateOnly: null).
+ */
+export interface AdsPlatformView {
+  platform: AdsPlatform;
+  ready: boolean;
+  apiVersion: string;
+  lastSentAt: string | null;
+  lastError: { error: string; at: string } | null;
+  counts: Record<AdEventStatus, number>;
+  testCode: string | null;
+}
+
+/**
+ * GET /api/admin/ads (AUDITOR): the switch (since when, by whom), the phrases it asks for, the three platforms, the link
+ * channels and the platforms each maps to, each act's Google Ads conversion action, the choices of this Paris month.
+ */
+export interface AdsSettings {
+  on: boolean;
+  eventsFrom: string | null;
+  switchedAt: string | null;
+  switchedBy: { id: string; email: string } | null;
+  phrases: { on: string; off: string };
+  platforms: AdsPlatformView[];
+  channels: { id: string; name: string; platforms: AdsPlatform[] }[];
+  googleActions: Record<AdEventKind, string | null>;
+  consent: { month: string; granted: number; declined: number };
+}
+
+/** GET /api/admin/ads/events (AUDITOR): an event of the outbox, no account and no email. */
+export interface AdEventView {
+  id: number;
+  platform: AdsPlatform;
+  kind: AdEventKind;
+  status: AdEventStatus;
+  skipReason: AdSkipReason | null;
+  attempts: number;
+  createdAt: string;
+  notBefore: string;
+  sentAt: string | null;
+  settledAt: string | null;
+  lastError: string | null;
+}
+
+/** POST /api/admin/ads/test/:platform (ADMIN): SEND A TEST EVENT's answer, scrubbed of every key. */
+export interface AdsTestResult {
+  platform: AdsPlatform;
+  ok: boolean;
+  status: number | null;
+  answer: string;
+}
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
@@ -2980,6 +3089,8 @@ export interface CirclePost {
   externalUrl: string | null;
   /** Read by this segment's members only (among its tiers); null: by its tiers. */
   segment: { id: string; name: string } | null;
+  /** The partner's experience an invitation of a partner experience is for (lot M4, K49 P2), or null. */
+  partnerExperience?: { id: string; title: string; eventOn: string; status: PartnerExperienceStatus; partner: { id: string; brand: string } } | null;
   published: boolean;
   publishedAt: Iso | null;
   createdAt: Iso;
@@ -3006,6 +3117,8 @@ export interface CirclePostInput {
   segmentId?: string | null;
   /** An invitation's experience (BP-19 T7); its tier then THE PROGRAM's. */
   experience?: CircleExperience | null;
+  /** The partner's experience of an invitation of a partner experience (lot M4, K49 P2); null clears it. */
+  partnerExperienceId?: string | null;
 }
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind; null clears an optional one. */
@@ -3016,6 +3129,8 @@ export interface CircleAnswer {
   accountId: string;
   email: string;
   answer: CircleRsvpAnswer;
+  /** SHARES NAME (lot M4, K49 P3): the guest shares their name with the invitation's partner. */
+  shareName?: boolean;
   createdAt: Iso;
   answeredAt: Iso;
 }
@@ -4575,6 +4690,8 @@ export interface GrowthReport {
     byCountry: GrowthRevenueGroup[];
     byModel: GrowthRevenueGroup[];
   };
+  /** Partner experiences (lot M4, K49 P1), beside the revenue: each currency apart; absent from an older server. */
+  partnerIncome?: PartnerIncome;
 }
 
 /** A row of COLLECTORS BY VALUE (GET /api/admin/growth/collectors): the email masked for an AUDITOR. */
@@ -4615,6 +4732,312 @@ export interface GrowthRelease {
 
 /** The client sheet's Lifetime value: per currency. */
 export type LifetimeValue = { currency: string; valueMinor: number }[];
+
+// ── The margin on GROWTH and its settings (lot M4 plan §1.2, §1.3; macro scope K43 N1 to N3; D61 THE VAULT's cost) ──
+
+/** The channel view's rows (services/margin.ts MARGIN_CHANNELS): the orders' channels, VAULT among them, then ELSEWHERE (care and warranty only). */
+export const MARGIN_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'VAULT', 'ELSEWHERE'] as const;
+export type MarginChannel = (typeof MARGIN_CHANNELS)[number];
+/** The tier view's rows, the highest first (services/margin.ts MARGIN_TIERS); NONE: below TITANE when the order was paid. */
+export const MARGIN_TIERS = ['PALLADIUM', 'PLATINE', 'TITANE', 'NONE'] as const;
+export type MarginTier = (typeof MARGIN_TIERS)[number];
+
+/** THE VAULT's five parts of a group's costs (euro cents, D61): house credits won, credits to give, the free add-ons, the products won (a VAULT order at 0), THE VAULT CARDs. */
+export interface MarginVaultCosts {
+  credits: number;
+  creditsToGive: number;
+  addons: number;
+  productsWon: number;
+  cards: number;
+}
+
+/** A group's cost columns, in euro cents. */
+export interface MarginCosts {
+  piece: number;
+  inbound: number;
+  packaging: number;
+  outbound: number;
+  allowance: number;
+  perks: { credits: number; freeShipping: number; gifts: number };
+  vault: MarginVaultCosts;
+  careWarranty: number;
+}
+
+/** A row of a view, or the totals (GET /api/admin/margin). Never a release. */
+export interface MarginGroup {
+  /** A main model's id, a channel, a tier, or 'ALL' for the totals. */
+  key: string;
+  /** The model's name; null for a channel, a tier and the totals. */
+  label: string | null;
+  orders: number;
+  pieces: number;
+  revenueMinor: number;
+  costs: MarginCosts;
+  marginMinor: number;
+  /** MARGIN / REVENUE in hundredths of a percent; null when REVENUE is 0. */
+  marginBp: number | null;
+  /** How many of its orders hold an estimate. */
+  estimated: number;
+}
+
+/** What the margin counts as 0, and where it is fixed. */
+export interface MarginMissing {
+  piecePrices: number;
+  parcelWeights: number;
+  shippingRates: number;
+  boxCosts: number;
+  allowances: { categoryId: number; code: string; name: string; orders: number }[];
+  unitCosts: MarginUnitCostKey[];
+  currencies: { currency: string; amounts: number }[];
+}
+
+/** The report's cost of one reward kind won in the window (CLUB > THE VAULT's own reading). */
+export interface MarginRewardKindCost {
+  kind: VaultRewardKind;
+  /** By currency, before conversion. */
+  cost: VaultMoney[];
+  /** In euros at the owner's rates (an amount without a rate left out, and named in What is missing). */
+  costMinor: number;
+  /** Its rewards won without a supplier price. */
+  costUnknown: number;
+}
+
+/** THE VAULT's line (D61, OP-26, OP-22): beside the views, never inside them. No account, vault or release. */
+export interface MarginVaultLine {
+  claimed: { orders: number; costMinor: number };
+  credits: { orders: number; costMinor: number };
+  creditsToGive: { orders: number; costMinor: number };
+  addons: { units: number; costMinor: number };
+  cards: { cards: number; estimated: number; costMinor: number };
+  /** LIVE guarantees from a vault used in the window: a piece each, bought at its price. */
+  guaranteedPieces: number;
+  /** The report's cost of the rewards won in the window: every vault opened, as CLUB > THE VAULT reads it. */
+  rewardsCost: { byKind: MarginRewardKindCost[]; costMinor: number; costUnknown: number };
+}
+
+/** A partner's income beside the margin (K49, P1; filled from step M4.6), in euros: invoiced in the window, and paid. */
+export interface MarginPartnerIncome {
+  partnerId: string;
+  brand: string;
+  invoicedMinor: number;
+  paidMinor: number;
+}
+
+/** The margin of GROWTH's window, in euros (GET /api/admin/margin, AUDITOR). */
+export interface MarginReport {
+  window: { months: GrowthWindowMonths; from: string; to: string; list: string[]; currency: typeof MARGIN_CURRENCY; test: boolean; generatedAt: Iso };
+  currency: typeof MARGIN_CURRENCY;
+  totals: MarginGroup;
+  byModel: MarginGroup[];
+  byChannel: MarginGroup[];
+  byTier: MarginGroup[];
+  vault: MarginVaultLine;
+  /** Partner experiences (K49, P1), beside the margin and never inside it: empty until partners are recorded (M4.6). */
+  partnerIncome: MarginPartnerIncome[];
+  estimated: number;
+  missing: MarginMissing;
+}
+
+/** A currency's euro rate: one unit is worth `eurRate` euros ('1.150000'). */
+export interface CurrencyRateView {
+  currency: string;
+  eurRate: string;
+  updatedAt: Iso;
+}
+
+/** A band of the outbound shipping cost table; `country` null: ALL OTHER COUNTRIES. */
+export interface ShippingCostView {
+  id: string;
+  country: string | null;
+  maxWeightG: number;
+  costMinor: number;
+  currency: string;
+  updatedAt: Iso;
+}
+
+/** A band as POST /api/admin/margin/shipping-costs takes it (PATCH: any of its fields). */
+export interface ShippingCostInput {
+  country: string | null;
+  maxWeightG: number;
+  costMinor: number;
+  currency: string;
+}
+
+/** A unit cost; cost and currency null while it is not set. */
+export interface UnitCostView {
+  key: MarginUnitCostKey;
+  costMinor: number | null;
+  currency: string | null;
+  updatedAt: Iso | null;
+}
+
+/** A category's returns and claims allowance, in hundredths of a percent; null while it is not set. */
+export interface AllowanceView {
+  categoryId: number;
+  code: string;
+  name: string;
+  active: boolean;
+  allowanceBp: number | null;
+  updatedAt: Iso | null;
+}
+
+/** Margin settings (GET /api/admin/margin/settings, AUDITOR; every write answers it whole). */
+export interface MarginSettings {
+  currency: typeof MARGIN_CURRENCY;
+  rates: CurrencyRateView[];
+  currenciesWithoutRate: string[];
+  shippingCosts: ShippingCostView[];
+  unitCosts: UnitCostView[];
+  allowances: AllowanceView[];
+}
+
+// ── The partners (lot M4 plan §2.2, §2.3; macro scope K49 P1 to P4; server services/partners.ts, routes/admin/partners.ts) ──
+
+/** An amount in one of the house's currencies. */
+export interface PartnerAmount {
+  currency: HouseCurrency;
+  amountMinor: number;
+}
+
+/** A partner (GET /api/admin/partners): its contact's email and phone masked for an AUDITOR by the server. */
+export interface Partner {
+  id: string;
+  brand: string;
+  contact: { name: string | null; email: string | null; phone: string | null };
+  /** As its invoices print them; `country` ISO 3166-1 alpha-2. */
+  billing: { name: string | null; address: string | null; country: string | null; companyNumber: string | null };
+  note: string | null;
+  /** false: SET ASIDE, offered for no new experience. */
+  active: boolean;
+  experienceCount: number;
+  /** Its invoices less its credit notes, per currency. */
+  invoiced: PartnerAmount[];
+  /** Its experiences PAID, per currency. */
+  paid: PartnerAmount[];
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+}
+
+/** One experience as its partner's page lists it. */
+export interface PartnerExperienceCard {
+  id: string;
+  title: string;
+  /** The event's date in Paris, `YYYY-MM-DD`. */
+  eventOn: string;
+  amountMinor: number;
+  currency: HouseCurrency;
+  status: PartnerExperienceStatus;
+  invoice: { id: string; number: string; issuedAt: Iso } | null;
+  creditNote: { id: string; number: string; issuedAt: Iso } | null;
+  /** The Paris day the money arrived. */
+  paidOn: string | null;
+}
+
+/** A partner and its experiences (GET /api/admin/partners/:id). */
+export interface PartnerDetail extends Partner {
+  experiences: PartnerExperienceCard[];
+}
+
+/** An invitation of the circle linked to an experience. */
+export interface PartnerInvitation {
+  id: string;
+  title: string;
+  minTier: number;
+  segment: { id: string; name: string } | null;
+  published: boolean;
+  eventAt: Iso | null;
+  yes: number;
+  /** null: no limit. */
+  capacity: number | null;
+}
+
+/** An experience (GET /api/admin/partner-experiences/:id). */
+export interface PartnerExperience extends PartnerExperienceCard {
+  partner: { id: string; brand: string; active: boolean };
+  note: string | null;
+  invoicedAt: Iso | null;
+  paidRecordedAt: Iso | null;
+  paidRecordedBy: { id: string; email: string } | null;
+  cancelledAt: Iso | null;
+  cancelledBy: { id: string; email: string } | null;
+  invitations: PartnerInvitation[];
+  createdAt: Iso;
+  createdBy: { id: string; email: string } | null;
+  updatedAt: Iso;
+}
+
+/** POST /api/admin/partners, PATCH /api/admin/partners/:id: null clears an optional field. */
+export interface PartnerInput {
+  brand?: string;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  billingName?: string | null;
+  billingAddress?: string | null;
+  billingCountry?: string | null;
+  companyNumber?: string | null;
+  note?: string | null;
+}
+
+/** POST /api/admin/partners/:id/experiences; PATCH /api/admin/partner-experiences/:id (any of them; the amount and currency while DRAFT). */
+export interface PartnerExperienceInput {
+  title?: string;
+  eventOn?: string;
+  amountMinor?: number;
+  currency?: HouseCurrency;
+  note?: string | null;
+}
+
+/** An experience's guests (GET …/guests): every YES counted; the names shared for OPERATOR and ADMIN only. */
+export interface PartnerGuests {
+  experienceId: string;
+  headcount: number;
+  sharedCount: number;
+  /** Absent for an AUDITOR. */
+  shared?: { firstName: string; lastName: string }[];
+}
+
+/** A partner invoice or credit note (GET /api/admin/partner-invoices). */
+export interface PartnerInvoice {
+  id: string;
+  kind: PartnerInvoiceKind;
+  number: string;
+  issuedAt: Iso;
+  experience: { id: string; title: string; eventOn: string };
+  partner: { id: string; brand: string };
+  credits: { id: string; number: string } | null;
+  creditedBy: { id: string; number: string } | null;
+  issuer: { name: string; address: string[] };
+  buyer: { name: string | null; address: string | null; country: string | null; companyNumber: string | null };
+  lines: { kind: string; label: string; detail: string | null; amountMinor: number }[];
+  currency: HouseCurrency;
+  totalMinor: number;
+}
+
+/** A month's partner documents and their totals per currency. */
+export interface PartnerInvoiceList {
+  month: string;
+  currentMonth: string;
+  items: PartnerInvoice[];
+  totals: { currency: HouseCurrency; invoiced: number; credited: number; net: number }[];
+}
+
+/** A currency's partner income on GROWTH (services/growth.ts PartnerIncomeAmounts). */
+export interface PartnerIncomeAmounts {
+  currency: HouseCurrency;
+  invoicedMinor: number;
+  creditedMinor: number;
+  netMinor: number;
+  paidMinor: number;
+}
+
+/** GROWTH's Partner experiences (since lot M4): per month (the newest first), over the window, per partner; never converted. */
+export interface PartnerIncome {
+  months: { month: string; currencies: PartnerIncomeAmounts[] }[];
+  total: PartnerIncomeAmounts[];
+  byPartner: { partnerId: string; brand: string; currencies: PartnerIncomeAmounts[] }[];
+}
 
 // ── Test entrants and the server's status (plan TEST ENTRANTS, 2026-10-07) ──
 

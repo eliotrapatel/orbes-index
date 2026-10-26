@@ -44,6 +44,15 @@
  * LAUNCH_PREVIEW or PARTNER_EXPERIENCE, migration 0026): its tier is then the one THE PROGRAM names for it
  * (`experienceTier`, the members' evening from PLATINE, the others from PALLADIUM by default), set when the experience
  * is, whatever tier is sent; any other kind refuses one (422). /verify shows it above the invitation's title.
+ *
+ * A partner experience (macro scope K49 P2 and P3, lot M4 plan §2.2, migration 0064): an invitation whose experience is
+ * PARTNER_EXPERIENCE may name the partner's experience it is for (`partnerExperienceId`, OPERATOR; 422
+ * CIRCLE_PARTNER_NOT_EXPERIENCE on any other post; an unknown experience 404, a cancelled one 409), opened as THE
+ * PROGRAM says, unchanged. Its readers see the partner's brand (`partner`, « WITH <BRAND> »); a guest who answers YES
+ * may share their name with it (`shareName`: the account's first and last name, off by default, changed while answers
+ * are taken, cleared by a NO; 422 CIRCLE_SHARE_NOT_OFFERED on a post without partner, 409 CIRCLE_SHARE_NAME_MISSING
+ * without both names), taken with the answer under the post's row lock and audited with it. A link moved to another
+ * partner's experience, or removed, clears the names shared with the first: a guest shares their name with one brand.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -54,6 +63,7 @@ import { makePage, noopLogger, pageOffset, pageRequest, systemClock, type Actor,
 import type { AuditService } from './audit.js';
 import { clubMembersByTier, ownersOnly, tierOf, type ClubMembers } from './club.js';
 import { experienceTier, readProgram } from './club-program.js';
+import { partnerExperienceNotFound, partnerExperienceState } from './partners.js';
 import { dropNotFound, dropState, type DropState } from './drops.js';
 import { isAnnounced, liveStages, stagesAt } from './live.js';
 import { storyFingerprint } from './lookbook.js';
@@ -210,6 +220,9 @@ const alreadyPublished = () => conflict('CIRCLE_ALREADY_PUBLISHED', 'This post i
 const notPublished = () => conflict('CIRCLE_NOT_PUBLISHED', 'This post is not in the circle.');
 const pollVoted = () => conflict('CIRCLE_POLL_VOTED', 'Votes have been cast: the options of this poll no longer change.');
 const capacityBelow = (taken: number) => conflict('CIRCLE_CAPACITY_BELOW', `${taken} ${taken === 1 ? 'place is' : 'places are'} taken already: the capacity cannot go under that.`);
+const notPartnerExperience = () => new DomainError('CIRCLE_PARTNER_NOT_EXPERIENCE', 422, 'Only an invitation of a partner experience names a partner’s experience.');
+const shareNotOffered = () => new DomainError('CIRCLE_SHARE_NOT_OFFERED', 422, 'This invitation has no partner: no name is shared.');
+const shareNameMissing = () => conflict('CIRCLE_SHARE_NAME_MISSING', 'Your account needs your first and last name to share them.');
 
 function assertStaff(actor: Actor, what: string): void {
   if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden(`Only an ORBES admin can ${what}.`);
@@ -259,6 +272,8 @@ export interface CircleCard {
   minTier: number;
   /** An invitation's experience of the tier program (BP-19 T7), or null. */
   experience: CircleExperience | null;
+  /** An invitation for a partner's experience (K49 P2): its brand, as « WITH <BRAND> »; null otherwise. */
+  partner: { brand: string } | null;
   publishedAt: Date;
   /** Its first photograph, or null. */
   cover: CirclePhoto | null;
@@ -304,6 +319,12 @@ export interface CirclePostView extends CircleCard {
     /** The votes by option, shown once the reader voted; null before. */
     results: { counts: number[]; total: number } | null;
   } | null;
+  /**
+   * On an invitation for a partner's experience (K49 P3): whether the reader may share their name with its partner
+   * (`offered`: the account has its first and last name), whether it does (`on`, with a YES only), and the name it would
+   * share, the reader's own (`name`, null when not offered); null on any other post.
+   */
+  shareName: { offered: boolean; on: boolean; name: string | null } | null;
   links: {
     /** A published drop: its page, /verify/releases/<id>. */
     drop: { id: string; title: string } | null;
@@ -340,6 +361,8 @@ export interface AdminCirclePost {
   externalUrl: string | null;
   /** Read by this segment's members only (among its tiers); null: by its tiers. */
   segment: { id: string; name: string } | null;
+  /** The partner's experience an invitation is for (K49 P2), or null. */
+  partnerExperience: { id: string; title: string; eventOn: string; status: string; partner: { id: string; brand: string } } | null;
   published: boolean;
   publishedAt: Date | null;
   createdAt: Date;
@@ -360,6 +383,8 @@ export interface AdminCircleAnswer {
   /** As stored. */
   email: string;
   answer: CircleRsvpAnswer;
+  /** SHARES NAME (K49 P3): the guest shares their name with the invitation's partner. */
+  shareName: boolean;
   /** The first answer, and the latest change of it. */
   createdAt: Date;
   answeredAt: Date;
@@ -390,6 +415,8 @@ export interface CirclePostInput {
   segmentId?: string | null;
   /** An invitation's experience (BP-19 T7); its tier is then THE PROGRAM's, whatever `minTier` says. */
   experience?: CircleExperience | null;
+  /** The partner's experience an invitation of a partner experience is for (K49 P2); null clears it. */
+  partnerExperienceId?: string | null;
 }
 
 /** A change of a post: any field but its kind; null (or '') clears an optional one. */
@@ -403,6 +430,9 @@ export interface ExportedCircleAnswer {
   /** The first answer, and the latest change of it. */
   firstAnsweredAt: Date;
   answeredAt: Date;
+  /** K49 P3: the name shared with the invitation's partner, and since when (null: not shared). */
+  shareName: boolean;
+  shareNameAt: Date | null;
 }
 
 export interface ExportedCircleVote {
@@ -420,7 +450,7 @@ export async function accountCircleData(db: Db, accountId: string): Promise<{ an
   const answers = await db
     .selectFrom('circle_rsvps as r')
     .innerJoin('circle_posts as p', 'p.id', 'r.post_id')
-    .select(['r.post_id', 'p.title', 'r.answer', 'r.created_at', 'r.updated_at'])
+    .select(['r.post_id', 'p.title', 'r.answer', 'r.created_at', 'r.updated_at', 'r.share_name', 'r.share_name_at'])
     .where('r.account_id', '=', accountId)
     .orderBy('r.created_at')
     .orderBy('r.post_id')
@@ -434,7 +464,7 @@ export async function accountCircleData(db: Db, accountId: string): Promise<{ an
     .orderBy('v.post_id')
     .execute();
   return {
-    answers: answers.map((r) => ({ postId: r.post_id, title: r.title, answer: r.answer, firstAnsweredAt: r.created_at, answeredAt: r.updated_at })),
+    answers: answers.map((r) => ({ postId: r.post_id, title: r.title, answer: r.answer, firstAnsweredAt: r.created_at, answeredAt: r.updated_at, shareName: r.share_name, shareNameAt: r.share_name_at })),
     votes: votes.map((v) => ({ postId: v.post_id, title: v.title, option: v.option_index, optionText: v.poll_options?.[v.option_index] ?? null, votedAt: v.created_at })),
   };
 }
@@ -459,6 +489,7 @@ const CARD_COLUMNS = [
   'p.created_at',
   'p.segment_id',
   'p.experience',
+  'p.partner_experience_id',
 ] as const;
 
 /** A post's card: everything but its body. */
@@ -517,11 +548,12 @@ export class CircleService {
     const rows = await shown.select([...CARD_COLUMNS]).orderBy('p.published_at', 'desc').orderBy('p.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const ids = rows.map((r) => r.id);
     const limited = rows.filter((r) => r.kind === 'INVITATION' && r.capacity !== null).map((r) => r.id);
-    const [covers, answers, votes, counts] = await Promise.all([
+    const [covers, answers, votes, counts, partners] = await Promise.all([
       this.covers(this.db, ids),
       this.myAnswers(this.db, accountId, ids),
       this.myVotes(this.db, accountId, ids),
       this.answerCounts(this.db, limited),
+      partnerBrands(this.db, rows.map((r) => r.partner_experience_id)),
     ]);
     if (page.page === 1 && opts.visit !== false) await this.countVisit(now);
     return makePage(
@@ -531,6 +563,7 @@ export class CircleService {
         title: r.title,
         minTier: r.min_tier,
         experience: r.experience,
+        partner: r.partner_experience_id && partners.has(r.partner_experience_id) ? { brand: partners.get(r.partner_experience_id)! } : null,
         publishedAt: r.published_at!,
         cover: covers.get(r.id) ?? null,
         eventAt: r.event_at,
@@ -565,24 +598,41 @@ export class CircleService {
    * event begins (409 CIRCLE_EVENT_PAST). Under the post's row lock, the YES of the other accounts are counted: a YES
    * past its capacity is 409 CIRCLE_FULL. A LOCKED account is refused. The same answer again writes nothing; any
    * other is audited `circle.rsvp` (the account as actor), with the answer it replaced.
+   *
+   * On an invitation for a partner's experience (K49 P3), `shareName` shares the guest's name with its partner (true,
+   * with a YES only: the account's first and last name, 409 CIRCLE_SHARE_NAME_MISSING without both) or stops sharing it
+   * (false); left out, a YES keeps the choice as it was. A NO clears it. Taken with the answer, under the same lock;
+   * audited with it (`shareName`, the choice after). On any other post, a name is never shared (422
+   * CIRCLE_SHARE_NOT_OFFERED).
    */
-  async rsvp(accountId: string, postId: string, answer: CircleRsvpAnswer, actor: Actor): Promise<CirclePostView> {
+  async rsvp(accountId: string, postId: string, answer: CircleRsvpAnswer, actor: Actor, opts: { shareName?: boolean } = {}): Promise<CirclePostView> {
     assertAccount(accountId);
     const id = knownPost(postId);
     if (!(CIRCLE_RSVP_ANSWERS as readonly string[]).includes(answer)) throw validationError('Answer YES or NO.');
+    if (opts.shareName !== undefined && typeof opts.shareName !== 'boolean') throw validationError('Share your name: true or false.');
+    if (opts.shareName === true && answer !== 'YES') throw validationError('A name is shared with a YES only.');
     const tier = await inTransaction(this.db, async (tx) => {
       const now = this.clock();
       const account = await readActingAccount(tx, accountId);
       if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < 1) throw ownersOnly();
-      const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'segment_id', 'event_at', 'capacity']).where('id', '=', id).forUpdate().executeTakeFirst();
+      const p = await tx.selectFrom('circle_posts').select(['kind', 'published_at', 'min_tier', 'segment_id', 'event_at', 'capacity', 'partner_experience_id']).where('id', '=', id).forUpdate().executeTakeFirst();
       if (!p || !shownAt(p.published_at, now) || p.min_tier > standing.tier || !(await this.inSegment(tx, p.segment_id, accountId, now))) throw circlePostNotFound();
       if (p.kind !== 'INVITATION') throw notInvitation();
       if (p.event_at && now.getTime() >= p.event_at.getTime()) throw eventBegun();
-      const mine = await tx.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
-      if (mine?.answer === answer) return standing.tier;
-      if (answer === 'YES' && p.capacity !== null) {
+      const partner = p.partner_experience_id !== null;
+      if (opts.shareName === true && !partner) throw shareNotOffered();
+      const mine = await tx.selectFrom('circle_rsvps').select(['answer', 'share_name']).where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
+      // K49 P3: the choice after this answer; a NO clears it, a YES left without one keeps it.
+      const share = partner && answer === 'YES' ? (opts.shareName ?? (mine?.answer === 'YES' && mine.share_name)) : false;
+      if (share && !(mine?.answer === 'YES' && mine.share_name)) {
+        const names = await tx.selectFrom('account_profiles').select(['first_name', 'last_name']).where('account_id', '=', accountId).executeTakeFirst();
+        if (!names?.first_name || !names.last_name) throw shareNameMissing();
+      }
+      const shareChanges = (mine?.share_name ?? false) !== share;
+      if (mine?.answer === answer && !shareChanges) return standing.tier;
+      if (answer === 'YES' && mine?.answer !== 'YES' && p.capacity !== null) {
         const yes = await tx
           .selectFrom('circle_rsvps')
           .select((eb) => eb.fn.countAll<number>().as('n'))
@@ -591,9 +641,11 @@ export class CircleService {
           .executeTakeFirstOrThrow();
         if (Number(yes.n) >= p.capacity) throw circleFull();
       }
-      if (mine) await tx.updateTable('circle_rsvps').set({ answer, updated_at: now }).where('post_id', '=', id).where('account_id', '=', accountId).execute();
-      else await tx.insertInto('circle_rsvps').values({ post_id: id, account_id: accountId, answer, created_at: now, updated_at: now }).execute();
-      await this.audit.record({ actor, action: 'circle.rsvp', targetType: 'circle_post', targetId: id, details: { answer, ...(mine ? { previous: mine.answer } : {}) } }, tx);
+      const shared = shareChanges ? { share_name: share, share_name_at: share ? now : null } : {};
+      if (mine) await tx.updateTable('circle_rsvps').set({ answer, updated_at: now, ...shared }).where('post_id', '=', id).where('account_id', '=', accountId).execute();
+      else await tx.insertInto('circle_rsvps').values({ post_id: id, account_id: accountId, answer, created_at: now, updated_at: now, ...shared }).execute();
+      const previous = mine && mine.answer !== answer ? { previous: mine.answer } : {};
+      await this.audit.record({ actor, action: 'circle.rsvp', targetType: 'circle_post', targetId: id, details: { answer, ...previous, ...(partner ? { shareName: share } : {}) } }, tx);
       return standing.tier;
     });
     return this.memberView(accountId, id, tier);
@@ -668,9 +720,11 @@ export class CircleService {
     const dropId = input.dropId === undefined || input.dropId === null || input.dropId === '' ? null : knownLink(input.dropId, dropNotFound);
     const modelId = input.modelId === undefined || input.modelId === null || input.modelId === '' ? null : knownLink(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
     const segmentId = input.segmentId === undefined || input.segmentId === null || input.segmentId === '' ? null : knownLink(input.segmentId, segmentNotFound);
+    const partnerExperienceId = cleanPartnerLink(input.partnerExperienceId, experience);
     return inTransaction(this.db, async (tx) => {
       await this.checkLinks(tx, dropId, modelId);
       await this.checkSegment(tx, segmentId);
+      await checkPartnerExperience(tx, partnerExperienceId);
       // An experience's invitation reads from the tier THE PROGRAM names for it (BP-19 T7).
       const minTier = experience ? experienceTier(await readProgram(tx), experience) : sentTier;
       const row = await tx
@@ -689,6 +743,7 @@ export class CircleService {
           external_url: externalUrl,
           segment_id: segmentId,
           experience,
+          partner_experience_id: partnerExperienceId,
           created_by: actor.id!,
           created_at: this.clock(),
         })
@@ -714,6 +769,7 @@ export class CircleService {
             externalUrl,
             segmentId,
             experience,
+            partnerExperienceId,
           },
         },
         tx,
@@ -778,9 +834,22 @@ export class CircleService {
       const segmentId = change.segmentId === undefined ? p.segment_id : change.segmentId === null || change.segmentId === '' ? null : knownLink(change.segmentId, segmentNotFound);
       if (segmentId !== p.segment_id) await this.checkSegment(tx, segmentId);
       note('segmentId', 'segment_id', p.segment_id, segmentId);
+      // K49 P2: the partner's experience, on an invitation of a partner experience only; moved to another partner's, or
+      // removed, the names shared with the first are cleared (a guest shares their name with one brand).
+      const partnerExperienceId = change.partnerExperienceId !== undefined ? cleanPartnerLink(change.partnerExperienceId, experience) : p.partner_experience_id;
+      if (partnerExperienceId !== null && experience !== 'PARTNER_EXPERIENCE') throw notPartnerExperience();
+      let sharedNamesCleared = 0;
+      if (partnerExperienceId !== p.partner_experience_id) {
+        await checkPartnerExperience(tx, partnerExperienceId);
+        if (p.partner_experience_id !== null && (await partnerOf(tx, p.partner_experience_id)) !== (partnerExperienceId === null ? null : await partnerOf(tx, partnerExperienceId))) {
+          const cleared = await tx.updateTable('circle_rsvps').set({ share_name: false, share_name_at: null }).where('post_id', '=', id).where('share_name', '=', true).executeTakeFirst();
+          sharedNamesCleared = Number(cleared.numUpdatedRows ?? 0);
+        }
+      }
+      note('partnerExperienceId', 'partner_experience_id', p.partner_experience_id, partnerExperienceId);
       if (Object.keys(set).length > 0) {
         await tx.updateTable('circle_posts').set(set).where('id', '=', id).execute();
-        await this.audit.record({ actor, action: 'circle.post.update', targetType: 'circle_post', targetId: id, details: { before, after } }, tx);
+        await this.audit.record({ actor, action: 'circle.post.update', targetType: 'circle_post', targetId: id, details: { before, after, ...(sharedNamesCleared > 0 ? { sharedNamesCleared } : {}) } }, tx);
       }
       return this.adminPost(tx, id);
     });
@@ -827,14 +896,14 @@ export class CircleService {
     const total = await scoped.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await scoped
       .innerJoin('accounts as a', 'a.id', 'r.account_id')
-      .select(['r.account_id', 'a.email', 'r.answer', 'r.created_at', 'r.updated_at'])
+      .select(['r.account_id', 'a.email', 'r.answer', 'r.share_name', 'r.created_at', 'r.updated_at'])
       .orderBy('r.updated_at', 'desc')
       .orderBy('r.account_id')
       .limit(page.pageSize)
       .offset(pageOffset(page))
       .execute();
     return makePage(
-      rows.map((r) => ({ accountId: r.account_id, email: r.email, answer: r.answer, createdAt: r.created_at, answeredAt: r.updated_at })),
+      rows.map((r) => ({ accountId: r.account_id, email: r.email, answer: r.answer, shareName: r.share_name, createdAt: r.created_at, answeredAt: r.updated_at })),
       Number(total.n),
       page,
     );
@@ -968,13 +1037,18 @@ export class CircleService {
     const now = this.clock();
     const p = await db.selectFrom('circle_posts').selectAll().where('id', '=', id).executeTakeFirst();
     if (!p || !shownAt(p.published_at, now) || p.min_tier > tier || !(await this.inSegment(db, p.segment_id, accountId, now))) throw circlePostNotFound();
-    const [images, mine, vote, drop, model] = await Promise.all([
+    const [images, mine, vote, drop, model, partners, names] = await Promise.all([
       db.selectFrom('circle_post_images').select(['sha256', 'alt']).where('post_id', '=', id).orderBy('position').execute(),
-      db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
+      db.selectFrom('circle_rsvps').select(['answer', 'share_name']).where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       db.selectFrom('circle_poll_votes').select('option_index').where('post_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       p.drop_id ? db.selectFrom('drops').select([...LINKED_DROP_COLUMNS]).where('id', '=', p.drop_id).executeTakeFirst() : undefined,
       p.model_id ? db.selectFrom('models').select(['slug', 'name', 'type', 'lookbook', 'private_min_tier']).where('id', '=', p.model_id).executeTakeFirst() : undefined,
+      partnerBrands(db, [p.partner_experience_id]),
+      // K49 P3: the reader's own name, never another's, on an invitation for a partner's experience only.
+      p.partner_experience_id ? db.selectFrom('account_profiles').select(['first_name', 'last_name']).where('account_id', '=', accountId).executeTakeFirst() : undefined,
     ]);
+    const brand = p.partner_experience_id ? partners.get(p.partner_experience_id) : undefined;
+    const name = names?.first_name && names.last_name ? `${names.first_name} ${names.last_name}` : null;
     const photos = images.flatMap((i) => {
       const url = mediaUrl(i.sha256);
       return url ? [{ url, alt: i.alt }] : [];
@@ -1006,6 +1080,7 @@ export class CircleService {
       title: p.title,
       minTier: p.min_tier,
       experience: p.experience,
+      partner: brand !== undefined ? { brand } : null,
       publishedAt: p.published_at!,
       cover: photos[0] ?? null,
       eventAt: p.event_at,
@@ -1016,6 +1091,7 @@ export class CircleService {
       photos,
       invitation,
       poll,
+      shareName: brand !== undefined ? { offered: name !== null, on: mine?.answer === 'YES' && mine.share_name, name } : null,
       links: {
         drop: drop ? linkedDrop(drop, now) : null,
         // A RESERVED model is linked only for a member whose tier reaches it in the private salon (P-X08): its sheet is 404 below.
@@ -1041,7 +1117,8 @@ export class CircleService {
     const modelIds = [...new Set(rows.map((r) => r.model_id).filter((x): x is string => x !== null))];
     const staff = [...new Set(rows.map((r) => r.created_by).filter((x): x is string => x !== null))];
     const segmentIds = [...new Set(rows.map((r) => r.segment_id).filter((x): x is string => x !== null))];
-    const [images, answers, results, drops, models, creators, segments] = await Promise.all([
+    const experienceIds = [...new Set(rows.map((r) => r.partner_experience_id).filter((x): x is string => x !== null))];
+    const [images, answers, results, drops, models, creators, segments, experiences] = await Promise.all([
       db.selectFrom('circle_post_images').select(['post_id', 'sha256', 'alt', 'position']).where('post_id', 'in', ids).orderBy('post_id').orderBy('position').execute(),
       this.answerCounts(db, ids),
       this.results(
@@ -1052,7 +1129,16 @@ export class CircleService {
       modelIds.length ? db.selectFrom('models').select(['id', 'name', 'type', 'lookbook', 'slug']).where('id', 'in', modelIds).execute() : [],
       staff.length ? db.selectFrom('admin_users').select(['id', 'email']).where('id', 'in', staff).execute() : [],
       segmentIds.length ? db.selectFrom('segments').select(['id', 'name']).where('id', 'in', segmentIds).execute() : [],
+      experienceIds.length
+        ? db
+            .selectFrom('partner_experiences as e')
+            .innerJoin('partners as pa', 'pa.id', 'e.partner_id')
+            .select(['e.id', 'e.title', 'e.event_on', 'e.status', 'pa.id as partner_id', 'pa.brand'])
+            .where('e.id', 'in', experienceIds)
+            .execute()
+        : [],
     ]);
+    const experienceOf = new Map(experiences.map((x) => [x.id, x]));
     const segmentOf = new Map(segments.map((x) => [x.id, x]));
     const photos = new Map<string, AdminCirclePhoto[]>();
     for (const i of images) {
@@ -1082,6 +1168,7 @@ export class CircleService {
         model: m ? { id: m.id, name: m.name, type: m.type, lookbook: m.lookbook, slug: m.slug } : null,
         externalUrl: r.external_url,
         segment: r.segment_id ? (segmentOf.get(r.segment_id) ?? null) : null,
+        partnerExperience: partnerExperienceView(r.partner_experience_id ? experienceOf.get(r.partner_experience_id) : undefined),
         published: r.published_at !== null,
         publishedAt: r.published_at,
         createdAt: r.created_at,
@@ -1098,6 +1185,49 @@ export class CircleService {
 function knownLink(id: string, missing: () => DomainError): string {
   if (typeof id !== 'string' || !UUID_RE.test(id)) throw missing();
   return id.toLowerCase();
+}
+
+// ── Partner experiences (K49 P2, P3) ──────────────────────────────────────
+
+/** The partner's experience an invitation names, or null; on an invitation of a partner experience only (422). */
+function cleanPartnerLink(v: unknown, experience: CircleExperience | null): string | null {
+  if (v === undefined || v === null || v === '') return null;
+  const id = knownLink(v as string, partnerExperienceNotFound);
+  if (experience !== 'PARTNER_EXPERIENCE') throw notPartnerExperience();
+  return id;
+}
+
+/**
+ * The experience an invitation is linked to exists (404 PARTNER_EXPERIENCE_NOT_FOUND) and is not cancelled (409
+ * PARTNER_EXPERIENCE_STATE), read FOR SHARE: a cancellation under way waits for this transaction, or this one for it.
+ */
+async function checkPartnerExperience(tx: Db, experienceId: string | null): Promise<void> {
+  if (experienceId === null) return;
+  const e = await tx.selectFrom('partner_experiences').select('status').where('id', '=', experienceId).forShare().executeTakeFirst();
+  if (!e) throw partnerExperienceNotFound();
+  if (e.status === 'CANCELLED') throw partnerExperienceState('This experience is cancelled: no invitation is linked to it.');
+}
+
+/** The partner of an experience. */
+async function partnerOf(db: Db, experienceId: string): Promise<string | null> {
+  return (await db.selectFrom('partner_experiences').select('partner_id').where('id', '=', experienceId).executeTakeFirst())?.partner_id ?? null;
+}
+
+/** The brand of each experience's partner, as « WITH <BRAND> » names it. */
+async function partnerBrands(db: Db, experienceIds: readonly (string | null)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(experienceIds.filter((x): x is string => x !== null))];
+  if (ids.length === 0) return new Map();
+  const rows = await db.selectFrom('partner_experiences as e').innerJoin('partners as pa', 'pa.id', 'e.partner_id').select(['e.id', 'pa.brand']).where('e.id', 'in', ids).execute();
+  return new Map(rows.map((r) => [r.id, r.brand]));
+}
+
+/** The console's view of an invitation's experience. */
+function partnerExperienceView(
+  e: { id: string; title: string; event_on: unknown; status: string; partner_id: string; brand: string } | undefined,
+): AdminCirclePost['partnerExperience'] {
+  if (!e) return null;
+  const eventOn = e.event_on instanceof Date ? e.event_on.toISOString().slice(0, 10) : String(e.event_on).slice(0, 10);
+  return { id: e.id, title: e.title, eventOn, status: e.status, partner: { id: e.partner_id, brand: e.brand } };
 }
 
 // ── A post as its readers see it ──────────────────────────────────────────

@@ -58,6 +58,7 @@ import { auditView } from './views/audit.js';
 import { casesView } from './views/cases.js';
 import { catalogueView } from './views/catalogue.js';
 import { circlePostView } from './views/circle.js';
+import { partnerExperienceView, partnersView, partnerView } from './views/partners.js';
 import { clubView } from './views/club.js';
 import { codesView, resetCodesViewState } from './views/codes.js';
 import type { View, ViewContext } from './views/context.js';
@@ -66,6 +67,7 @@ import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { growthView } from './views/growth.js';
+import { marginSettingsView } from './views/margin-settings.js';
 import { collectorsListView } from './views/collectors-list.js';
 import { collectorsView } from './views/collectors.js';
 import { keysView } from './views/keys.js';
@@ -90,6 +92,7 @@ import { supplierOrdersView } from './views/supplier-orders.js';
 import { linkCollectorsView } from './views/link-collectors.js';
 import { linkView } from './views/link.js';
 import { linksView } from './views/links.js';
+import { adPlatformsView } from './views/ad-platforms.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -200,6 +203,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
   analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
   growth: { view: growthView, title: 'Growth', nav: 'growth' },
+  marginSettings: { view: marginSettingsView, title: 'Margin settings', nav: 'growth' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   messages: { view: messagesView, title: 'Messages', nav: 'messages' },
@@ -215,6 +219,9 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   drop: { view: dropView, title: 'Drop', nav: 'club' },
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },
   circlePost: { view: circlePostView, title: 'Circle', nav: 'club' },
+  clubPartners: { view: partnersView, title: 'Partners', nav: 'club' },
+  clubPartner: { view: partnerView, title: 'Partner', nav: 'club' },
+  partnerExperience: { view: partnerExperienceView, title: 'Partner experience', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
   warrantyClaim: { view: warrantyClaimView, title: 'Warranty claim', nav: 'warranties' },
   care: { view: careView, title: 'PRIVATE CARE', nav: 'care' },
@@ -240,6 +247,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   links: { view: linksView, title: 'Links', nav: 'links' },
   link: { view: linkView, title: 'Link', nav: 'links' },
   linkCollectors: { view: linkCollectorsView, title: 'Collectors', nav: 'links' },
+  adPlatforms: { view: adPlatformsView, title: 'Ad platforms', nav: 'links' },
   founding: { view: foundingView, title: 'Founding list', nav: 'founding' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },

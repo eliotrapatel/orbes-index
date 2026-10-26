@@ -3541,6 +3541,14 @@ body.nocturne[data-screen="live"] {
   margin-top: 6px;
 }
 
+/* An invitation for a partner's experience (lot M4, K49 P2): WITH <BRAND> in the eyebrow's style under its kind (and its
+   experience), whole: a long brand wraps between its words, a word longer than the line within it, never cut. */
+.n-circle-card__partner,
+.circle-post__partner {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
 .n-circle-card__date {
   margin-top: 6px;
 }
@@ -3661,6 +3669,31 @@ body.nocturne[data-screen="live"] {
 
 .n-post__choice {
   margin-top: 14px;
+}
+
+/* SHARE MY NAME (lot M4, K49 P3), under YES / NO: the house's switch row on the column's width between two hairlines, its
+   whole row the target (54 px), its words wrapping beside the switch (a long brand, a long name); its line under it. The
+   line alone (no name on the account, answers closed) under the sentence. */
+.n-post__share-block {
+  margin-top: 18px;
+}
+
+.n-post__share {
+  padding: 14px 0;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-post__share-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.n-post__share + .n-post__share-line {
+  margin-top: 12px;
+}
+
+.n-post__share-error {
+  margin-top: 10px;
 }
 
 .n-post__options {
@@ -4301,6 +4334,46 @@ body.nocturne[data-screen="live"] {
 
 .n-profile__notices-error {
   margin-top: 10px;
+}
+
+/* ── The consent banner (lot M4 plan §3.4; K27 A4), only while conversions are switched on and no choice is held: a band
+   at the foot of the screen, NOCTURNE's ground and a hairline above, the words in ivory at reading size and PRIVACY
+   after them, ACCEPT and DECLINE of equal weight; the SCAN ring stays over its foot. Never modal; no motion but a fade
+   (cut short when motion is reduced, by shared/brand.css's global rule). In English, the browser's hyphenation never
+   applied (`lang`, hyphens manual). ── */
+.n-consent {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 19;
+  max-width: var(--n-column);
+  margin: 0 auto;
+  padding: 20px 22px calc(var(--n-foot) + var(--safe-bottom) - 2px);
+  border-top: 1px solid var(--vault-hairline-strong);
+  background: var(--vault-ground);
+  animation: n-story-fade 240ms ease-out both;
+}
+
+.n-consent[hidden] {
+  display: none;
+}
+
+.n-consent__side {
+  margin-top: 16px;
+}
+
+/* The line under the buttons (ONE MOMENT…, a refusal) keeps its place while empty: the band never changes height. */
+.n-consent__line {
+  display: flex;
+  align-items: center;
+  min-height: calc(var(--n-fs-sm) * var(--n-lh-base));
+  margin-top: 14px;
+}
+
+/* The page's end scrolls into view above the band (its height measured: views/consent-banner.ts). */
+body.nocturne.n-consent-on .n-column {
+  padding-bottom: max(calc(var(--n-foot) + var(--safe-bottom)), var(--n-consent-h, 0px));
 }
 
 /* INSTAGRAM: a fixed @ before the username, on the field's line. */

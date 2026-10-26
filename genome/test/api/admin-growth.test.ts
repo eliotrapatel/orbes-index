@@ -7,7 +7,9 @@
  *  - GET /api/admin/growth/collectors: the accounts, their emails masked for an AUDITOR and in clear for OPERATOR and
  *    ADMIN; GET /api/admin/growth/releases;
  *  - AUDITOR and up read, RETAIL gets 403;
- *  - the scan days not counted yet are counted first; a count that fails is logged and the report still answers.
+ *  - the scan days not counted yet are counted first; a count that fails is logged and the report still answers;
+ *  - (lot M4, K49 P1) `partnerIncome` beside the revenue: per month, currency and partner, a PC- credit note netting
+ *    its invoice; an AUDITOR reads it; every field of the answer before it unchanged.
  */
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -40,7 +42,8 @@ describe('GET /api/admin/growth', () => {
 
   it('gives an AUDITOR the report: the window, lifetime value, repeat buying, the funnel and the revenue', async () => {
     const r = await get('AUDITOR', '/api/admin/growth');
-    expect(Object.keys(r)).toEqual(['window', 'ltv', 'repeat', 'funnel', 'revenue']);
+    // Lot M4 (K49 P1): the partner experiences beside the revenue, after every field of before.
+    expect(Object.keys(r)).toEqual(['window', 'ltv', 'repeat', 'funnel', 'revenue', 'partnerIncome']);
     expect(r.window).toMatchObject({ months: 12, from: '2025-11', to: '2026-10', currency: 'EUR', currencies: ['EUR', 'GBP'] });
     expect(Object.keys(r.ltv)).toEqual(['perCollector', 'unpricedPieces', 'byTier', 'byCountry', 'byFirstModel', 'byChannel']);
     expect(r.ltv.perCollector).toEqual({ collectors: 7, totalMinor: 2_715_000, averageMinor: 387_857, medianMinor: 240_000, topTenthFromMinor: 960_000 });
@@ -127,5 +130,42 @@ describe('GET /api/admin/growth', () => {
       await sql`ALTER TABLE scan_daily_stats DROP CONSTRAINT growth_test_refuses`.execute(h.ctx.db);
       h.clock.set(GROWTH_NOW.toISOString());
     }
+  });
+
+  it('carries the partner experiences (lot M4, K49 P1): per month, currency and partner, a PC- credit note netting its invoice; read by an AUDITOR; every other field unchanged', async () => {
+    const before = await get('AUDITOR', '/api/admin/growth');
+    expect(before.partnerIncome.total).toEqual([]);
+    const partner = await (async () => {
+      const res = await clients.OPERATOR.post('/api/admin/partners', { brand: 'Maison Growth', billingName: 'Maison Growth SAS', billingAddress: '1 rue de la Paix\n75002 Paris', billingCountry: 'FR' });
+      expect(res.statusCode, res.body).toBe(201);
+      return safeJson(res) as { id: string };
+    })();
+    const deal = async (amountMinor: number, currency: string) => {
+      const res = await clients.OPERATOR.post(`/api/admin/partners/${partner.id}/experiences`, { title: 'Dinner', eventOn: '2026-10-20', amountMinor, currency });
+      expect(res.statusCode, res.body).toBe(201);
+      return (safeJson(res) as { id: string }).id;
+    };
+    const kept = await deal(1_200_000, 'EUR');
+    const cancelled = await deal(300_000, 'GBP');
+    for (const id of [kept, cancelled]) expect((await clients.ADMIN.post(`/api/admin/partner-experiences/${id}/invoice`)).statusCode).toBe(200);
+    expect((await clients.ADMIN.post(`/api/admin/partner-experiences/${kept}/paid`, { paidOn: '2026-10-14' })).statusCode).toBe(200);
+    expect((await clients.ADMIN.post(`/api/admin/partner-experiences/${cancelled}/cancel`)).statusCode).toBe(200);
+
+    const r = await get('AUDITOR', '/api/admin/growth');
+    const eur = { currency: 'EUR', invoicedMinor: 1_200_000, creditedMinor: 0, netMinor: 1_200_000, paidMinor: 1_200_000 };
+    const gbp = { currency: 'GBP', invoicedMinor: 300_000, creditedMinor: 300_000, netMinor: 0, paidMinor: 0 };
+    expect(r.partnerIncome.months[0]).toEqual({ month: '2026-10', currencies: [eur, gbp] });
+    expect(r.partnerIncome.months).toHaveLength(12);
+    expect(r.partnerIncome.total).toEqual([eur, gbp]);
+    expect(r.partnerIncome.byPartner).toEqual([{ partnerId: partner.id, brand: 'Maison Growth', currencies: [eur, gbp] }]);
+    // Every field of before unchanged; the revenue of GBP (the collectors' invoices) too.
+    const { partnerIncome: _a, window: wa, ...rest } = r;
+    const { partnerIncome: _b, window: wb, ...was } = before;
+    expect(rest).toEqual(was);
+    expect({ ...wa, generatedAt: null }).toEqual({ ...wb, generatedAt: null });
+    expect((await get('AUDITOR', '/api/admin/growth?currency=GBP')).revenue.total.netMinor).toBe(100_000);
+    // Read by every role from AUDITOR; never by RETAIL.
+    for (const role of ['OPERATOR', 'ADMIN'] as const) expect((await get(role, '/api/admin/growth')).partnerIncome.byPartner).toHaveLength(1);
+    expect((await clients.RETAIL.get('/api/admin/growth')).statusCode).toBe(403);
   });
 });

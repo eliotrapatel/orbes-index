@@ -63,9 +63,13 @@ export function selfSigned(names: { dns?: string[]; ip?: string[] } = { dns: ['l
     ...(names.ip ?? []).map((ip) => tlv(0x87, Buffer.from(ip.split('.').map(Number)))),
   ];
   const ecdsaSha256 = seq(oid('1.2.840.10045.4.3.2'));
+  // A DER integer is minimal: a serial opening on 0x00 then a byte below 0x80 is refused (illegal padding), so its first
+  // byte is never 0 (and stays below 0x80, positive without a padding byte).
+  const serial = randomBytes(16);
+  serial[0] = (serial[0]! & 0x7f) | 0x01;
   const tbs = seq(
     tlv(0xa0, integer(Buffer.from([2]))),
-    integer(randomBytes(16)),
+    integer(serial),
     ecdsaSha256,
     name(cn),
     seq(utcTime(new Date(now - 3_600_000)), utcTime(new Date(now + 86_400_000))),

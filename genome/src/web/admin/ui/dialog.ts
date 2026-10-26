@@ -70,6 +70,8 @@ export interface DialogOptions {
   danger?: boolean | ((values: DialogValues) => boolean);
   /** Typed confirmation phrase for irreversible actions; a function decides from the fields (null: none needed). */
   phrase?: string | ((values: DialogValues) => string | null);
+  /** The line under the phrase's field ('This cannot be undone.' by default): a switch that can be turned back says so. */
+  phraseHint?: string;
   fields?: DialogField[];
   /** Client-side check; return a message to block submission. */
   validate?: (values: DialogValues) => string | null;
@@ -181,7 +183,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
       // The phrase can hold an identifier (REVOKE O26-J-00184): it reads in --font, the words around it in the display face.
       const phraseText = h('span', { class: 'cfield__phrase' });
       const label = h('span', null, 'Type ', phraseText, ' to confirm');
-      const phraseField = field(label, phraseInput, { wide: true, hint: 'This cannot be undone.' });
+      const phraseField = field(label, phraseInput, { wide: true, hint: o.phraseHint ?? 'This cannot be undone.' });
       controls.push(phraseField);
       syncPhrase = (values) => {
         const p = phraseOf(values);
