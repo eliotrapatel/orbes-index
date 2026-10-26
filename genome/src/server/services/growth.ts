@@ -8,9 +8,11 @@
  * with the most invoices, EUR when there is none).
  *
  *   report      GET /api/admin/growth (AUDITOR): the window (the last 12 or 24 UTC months, the current one included),
- *               `ltv`, `repeat`, `funnel` and `revenue`, read in one REPEATABLE READ, READ ONLY transaction. It names
- *               no account: counts, amounts and groups, the groups of fewer than GROWTH_MIN_GROUP collectors without
- *               their amounts (`maskSmallGroups`).
+ *               `ltv`, `repeat`, `funnel` and `revenue`, and since lot M4 (K49 P1) `partnerIncome`, the partner
+ *               experiences beside the revenue (`partnerIncomeRows`: each currency apart, invoiced net of the partner
+ *               credit notes and paid, by month and by partner), read in one REPEATABLE READ, READ ONLY transaction. It
+ *               names no account: counts, amounts and groups, the groups of fewer than GROWTH_MIN_GROUP collectors
+ *               without their amounts (`maskSmallGroups`); a partner is a brand, never a collector.
  *   collectors  GET /api/admin/growth/collectors (AUDITOR): COLLECTORS BY VALUE, every collector with a counted piece in
  *               the currency, highest value first then by account id, GROWTH_COLLECTORS_PAGE a page; each row its
  *               account, email (as stored: the route masks it for an AUDITOR, as on the owners' list), tier now,
@@ -319,6 +321,108 @@ export interface GrowthReport {
     byCountry: RevenueGroup[];
     byModel: RevenueGroup[];
   };
+  /**
+   * Partner experiences (macro scope K49 P1, lot M4 plan §2.2, step M4.6): beside the revenue, never inside it. Each
+   * currency apart (GROWTH never converts): per month of the window, the newest first, then over the window and by
+   * partner. Invoiced is the partner invoices issued in the month less their credit notes issued in it; paid is the
+   * amount of each experience PAID whose payment date falls in the month.
+   */
+  partnerIncome: PartnerIncome;
+}
+
+/** A currency's partner income: invoiced, credited, their net, and paid. */
+export interface PartnerIncomeAmounts {
+  currency: Currency;
+  invoicedMinor: number;
+  creditedMinor: number;
+  netMinor: number;
+  paidMinor: number;
+}
+
+export interface PartnerIncome {
+  /** The months of the window, the newest first; each with the currencies it has income in (none: empty). */
+  months: { month: string; currencies: PartnerIncomeAmounts[] }[];
+  /** Over the window, per currency. */
+  total: PartnerIncomeAmounts[];
+  /** Over the window, per partner (by brand) and currency. */
+  byPartner: { partnerId: string; brand: string; currencies: PartnerIncomeAmounts[] }[];
+}
+
+/** One partner's income of a month in a currency, as GROWTH and the margin read it (`partnerIncomeRows`). */
+export interface PartnerIncomeRow {
+  month: string;
+  partnerId: string;
+  brand: string;
+  currency: Currency;
+  invoicedMinor: number;
+  creditedMinor: number;
+  paidMinor: number;
+}
+
+/**
+ * The partners' income in the UTC months from `from` to `to` (excluded), per month, partner and currency (lot M4 plan
+ * §2.2, K49 P1): the partner invoices issued in the month (P-…) and their credit notes issued in it (PC-…), by their
+ * time of issue; the payments of the experiences PAID by their payment date (a Paris day, read in its month). A
+ * cancelled experience's payment is not counted: its credit note cancels its invoice. Read only.
+ */
+export async function partnerIncomeRows(db: Db, from: Date, to: Date): Promise<PartnerIncomeRow[]> {
+  const fromDay = from.toISOString().slice(0, 10);
+  const toDay = to.toISOString().slice(0, 10);
+  const rows = (
+    await sql<{ month: string; partner_id: string; brand: string; currency: Currency; invoiced: string | number; credited: string | number; paid: string | number }>`
+      SELECT month, partner_id, min(brand) AS brand, currency,
+             sum(invoiced)::bigint AS invoiced, sum(credited)::bigint AS credited, sum(paid)::bigint AS paid
+        FROM (
+          SELECT to_char(i.issued_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month, e.partner_id, p.brand, i.currency,
+                 CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE 0 END AS invoiced,
+                 CASE WHEN i.kind = 'CREDIT_NOTE' THEN i.total_minor ELSE 0 END AS credited, 0 AS paid
+            FROM partner_invoices i
+            JOIN partner_experiences e ON e.id = i.experience_id
+            JOIN partners p ON p.id = e.partner_id
+           WHERE i.issued_at >= ${from} AND i.issued_at < ${to}
+          UNION ALL
+          SELECT to_char(e.paid_on, 'YYYY-MM') AS month, e.partner_id, p.brand, e.currency, 0, 0, e.amount_minor
+            FROM partner_experiences e
+            JOIN partners p ON p.id = e.partner_id
+           WHERE e.status = 'PAID' AND e.paid_on >= ${fromDay}::date AND e.paid_on < ${toDay}::date
+        ) x
+       GROUP BY month, partner_id, currency
+       ORDER BY month, partner_id, currency`.execute(db)
+  ).rows;
+  return rows.map((r) => ({
+    month: r.month,
+    partnerId: r.partner_id,
+    brand: r.brand,
+    currency: r.currency,
+    invoicedMinor: Number(r.invoiced),
+    creditedMinor: Number(r.credited),
+    paidMinor: Number(r.paid),
+  }));
+}
+
+/** GROWTH's Partner experiences from `partnerIncomeRows`, for the months of `list` (oldest first). */
+export function partnerIncomeOf(rows: readonly PartnerIncomeRow[], list: readonly string[]): PartnerIncome {
+  const sum = (of: readonly PartnerIncomeRow[]): PartnerIncomeAmounts[] => {
+    const by = new Map<Currency, PartnerIncomeAmounts>();
+    for (const r of of) {
+      const a = by.get(r.currency) ?? { currency: r.currency, invoicedMinor: 0, creditedMinor: 0, netMinor: 0, paidMinor: 0 };
+      a.invoicedMinor += r.invoicedMinor;
+      a.creditedMinor += r.creditedMinor;
+      a.netMinor += r.invoicedMinor - r.creditedMinor;
+      a.paidMinor += r.paidMinor;
+      by.set(r.currency, a);
+    }
+    return HOUSE_CURRENCIES.flatMap((c) => (by.has(c) ? [by.get(c)!] : []));
+  };
+  const partners = new Map<string, string>();
+  for (const r of rows) partners.set(r.partnerId, r.brand);
+  return {
+    months: [...list].reverse().map((month) => ({ month, currencies: sum(rows.filter((r) => r.month === month)) })),
+    total: sum(rows),
+    byPartner: [...partners.entries()]
+      .map(([partnerId, brand]) => ({ partnerId, brand, currencies: sum(rows.filter((r) => r.partnerId === partnerId)) }))
+      .sort((a, b) => byName(a.brand, b.brand) || (a.partnerId < b.partnerId ? -1 : 1)),
+  };
 }
 
 export interface GrowthCollector {
@@ -607,7 +711,8 @@ export class GrowthService {
       };
 
       const revenue = await this.revenue(trx, currency, list, from, to);
-      return { window, ltv, repeat, funnel, revenue };
+      const partnerIncome = partnerIncomeOf(await partnerIncomeRows(trx, from, to), list);
+      return { window, ltv, repeat, funnel, revenue, partnerIncome };
     });
   }
 

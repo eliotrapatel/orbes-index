@@ -7,7 +7,10 @@
  *   PATCH /api/admin/circle/posts/:id                 OPERATOR  any field but its kind
  *   POST  /api/admin/circle/posts/:id/publish         OPERATOR  shown in the circle, from its tier up
  *   POST  /api/admin/circle/posts/:id/unpublish       OPERATOR  withdrawn from it (its answers and votes kept)
- *   GET   /api/admin/circle/posts/:id/answers         AUDITOR   the answers to an invitation
+ *   GET   /api/admin/circle/posts/:id/answers         AUDITOR   the answers to an invitation (SHARES NAME: whether the
+ *                                                               guest shares their name with the partner, K49 P3)
+ *
+ * An invitation of a partner experience names the partner's experience it is for (`partnerExperienceId`, lot M4, K49 P2).
  *
  * Its photographs are routes/admin/media.ts's (the image itself, through
  * MediaService); the panel of Analytics, routes/admin/analytics.ts's. An
@@ -43,6 +46,7 @@ export const adminCircleRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
         ...(b.externalUrl !== undefined ? { externalUrl: b.externalUrl } : {}),
         ...(b.segmentId !== undefined ? { segmentId: b.segmentId } : {}),
         ...(b.experience !== undefined ? { experience: b.experience } : {}),
+        ...(b.partnerExperienceId !== undefined ? { partnerExperienceId: b.partnerExperienceId } : {}),
       },
       adminActor(request),
     );
@@ -73,6 +77,7 @@ export const adminCircleRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app,
         ...(b.externalUrl !== undefined ? { externalUrl: b.externalUrl } : {}),
         ...(b.segmentId !== undefined ? { segmentId: b.segmentId } : {}),
         ...(b.experience !== undefined ? { experience: b.experience } : {}),
+        ...(b.partnerExperienceId !== undefined ? { partnerExperienceId: b.partnerExperienceId } : {}),
       },
       adminActor(request),
     );

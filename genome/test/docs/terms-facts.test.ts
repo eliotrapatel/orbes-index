@@ -842,14 +842,17 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(deps.filter((d) => /stripe|whop|paypal|adyen|braintree|mollie|checkout|payment|billing/i.test(d))).toEqual([]);
     expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge/i.test(r.path))).toEqual([]);
     // The invoices of the orders paid (plan LIVE RELEASE+, M7) are documents read, never a payment taken. A supplier's
-    // invoice (plan NEXT LOT §3.5.6.3) is ORBES's own record of what it owes a supplier, paid outside the service: the
-    // only invoice routes that write are those two.
+    // invoice (plan NEXT LOT §3.5.6.3) is ORBES's own record of what it owes a supplier, paid outside the service; a
+    // partner's (lot M4, K49 P1) the document ORBES issues to a brand that pays it by its own means, outside the service,
+    // its payment only recorded: the only invoice routes that write are those three.
     const supplierInvoice = (r: { path: string }) => r.path.startsWith('/api/admin/supplier-orders/:id/invoice');
-    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get' && !supplierInvoice(r))).toEqual([]);
+    const partnerInvoice = (r: { path: string }) => r.path === '/api/admin/partner-experiences/:id/invoice';
+    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get' && !supplierInvoice(r) && !partnerInvoice(r))).toEqual([]);
     expect(ROUTES.filter(supplierInvoice)).toEqual([
       { method: 'put', path: '/api/admin/supplier-orders/:id/invoice' },
       { method: 'post', path: '/api/admin/supplier-orders/:id/invoice/paid' },
     ]);
+    expect(ROUTES.filter(partnerInvoice)).toEqual([{ method: 'post', path: '/api/admin/partner-experiences/:id/invoice' }]);
     // The confirmation is a status, and the only one PAY writes.
     expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/live/:id/confirm' });
   },

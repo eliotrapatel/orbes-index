@@ -433,7 +433,7 @@ export interface AccountExport {
    * Services added on its conclusion; never who concluded it.
    */
   dropEntries: ExportedDropEntry[];
-  /** The account's answers to the invitations of the circle (P-X01), oldest first: the post, YES or NO, when. */
+  /** The account's answers to the invitations of the circle (P-X01), oldest first: the post, YES or NO, when; its name shared with a partner and since when (K49 P3). */
   circleAnswers: ExportedCircleAnswer[];
   /** The account's votes in the polls of the circle (P-X01), oldest first: the post, the option and its words, when. */
   circleVotes: ExportedCircleVote[];

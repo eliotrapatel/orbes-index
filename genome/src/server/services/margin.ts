@@ -5,7 +5,7 @@
  * and no cache; one REPEATABLE READ, READ ONLY transaction per reading, as GROWTH.
  *
  *   report  GET /api/admin/margin?months=12|24&test= (AUDITOR): GROWTH's window (its UTC months, services/growth.ts
- *           GROWTH_WINDOWS), the totals, the three views, THE VAULT's line, the partner income (step M4.6), how many
+ *           GROWTH_WINDOWS), the totals, the three views, THE VAULT's line, the partner income (in euros, by partner), how many
  *           orders hold an estimate and what is missing. Amounts, counts and groups only: no account, no email, no vault,
  *           no release.
  *   csv     GET /api/admin/margin.csv (AUDITOR): the totals and the three views, in euros, THE VAULT's five parts as
@@ -93,7 +93,7 @@ import { csvField, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { systemClock, type Clock } from '../types.js';
 import { boxRef, modelPackings, type BoxRef } from './boxes.js';
 import { CLUB_TIER_NAMES, clubCounts, CLUB_TIER_THRESHOLDS, tierName } from './club.js';
-import { GROWTH_WINDOWS, heldAt, monthsOfWindow, monthStart, tierAt, type GrowthWindowMonths } from './growth.js';
+import { GROWTH_WINDOWS, heldAt, monthsOfWindow, monthStart, partnerIncomeRows, tierAt, type GrowthWindowMonths, type PartnerIncomeRow } from './growth.js';
 import { marginSettingRows, type MarginSettingRows } from './margin-settings.js';
 import { parcelAddonItems } from './order-addons.js';
 import { parcelWeight, suggestPacking, vaultCardOrders } from './parcels.js';
@@ -293,7 +293,7 @@ export interface MarginVaultLine {
   rewardsCost: { byKind: MarginRewardKindCost[]; costMinor: number; costUnknown: number };
 }
 
-/** A partner's income beside the margin (K49, P1; filled from step M4.6), in euros: invoiced in the window, and paid. */
+/** A partner's income beside the margin (K49, P1; step M4.6), in euros: invoiced in the window net of its credit notes, and paid. */
 export interface MarginPartnerIncome {
   partnerId: string;
   brand: string;
@@ -309,7 +309,7 @@ export interface MarginReport {
   byChannel: MarginGroup[];
   byTier: MarginGroup[];
   vault: MarginVaultLine;
-  /** Beside the margin, never inside its views (step M4.6 fills it; empty until then). */
+  /** Beside the margin, never inside its views: each partner with income in the window (none: empty). */
   partnerIncome: MarginPartnerIncome[];
   /** Orders holding an estimate, over the window. */
   estimated: number;
@@ -955,10 +955,12 @@ class MarginReading {
 
     // THE VAULT's line: the column's parts, the guarantees used, the report's cost of the rewards won.
     const vault = vaultLine(rounded, await this.guaranteedPieces(db, from, to, test), await this.rewardsCost(db, from, to));
+    // Partner experiences (K49 P1), beside the margin and never inside it: GROWTH's partner income of the window, in euros.
+    const partnerIncome = this.partnerIncome(await partnerIncomeRows(db, from, to));
     return {
       ...views,
       vault,
-      partnerIncome: [],
+      partnerIncome,
       estimated: views.totals.estimated,
       missing: {
         ...this.missing,
@@ -969,6 +971,24 @@ class MarginReading {
         currencies: [...this.money.missing.entries()].map(([currency, amounts]) => ({ currency, amounts })).sort((a, b) => (a.currency < b.currency ? -1 : 1)),
       },
     };
+  }
+
+  /**
+   * Each partner's income of the window in euro cents (K49 P1, step M4.6): its invoices less its credit notes, and its
+   * payments, as GROWTH reads them (growth.ts partnerIncomeRows), converted at the owner's rates; an amount in a
+   * currency without a rate is left out and named in the missing list. By brand; a partner without income is not listed.
+   */
+  private partnerIncome(rows: readonly PartnerIncomeRow[]): MarginPartnerIncome[] {
+    const by = new Map<string, { partnerId: string; brand: string; invoiced: number; paid: number }>();
+    for (const r of rows) {
+      const p = by.get(r.partnerId) ?? { partnerId: r.partnerId, brand: r.brand, invoiced: 0, paid: 0 };
+      p.invoiced += this.money.eur(r.invoicedMinor - r.creditedMinor, r.currency);
+      p.paid += this.money.eur(r.paidMinor, r.currency);
+      by.set(r.partnerId, p);
+    }
+    return [...by.values()]
+      .map((p) => ({ partnerId: p.partnerId, brand: p.brand, invoicedMinor: Math.round(p.invoiced), paidMinor: Math.round(p.paid) }))
+      .sort((a, b) => (a.brand < b.brand ? -1 : a.brand > b.brand ? 1 : a.partnerId < b.partnerId ? -1 : 1));
   }
 
   /** A unit cost in euro cents (0, and needed, when not set). */
