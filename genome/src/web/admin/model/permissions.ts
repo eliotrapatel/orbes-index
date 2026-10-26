@@ -30,6 +30,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   read: 'AUDITOR',
   /** Growth (plan NEXT-NINE, BP-29): the report and COLLECTORS BY VALUE, the emails masked for an AUDITOR; never RETAIL. */
   readGrowth: 'AUDITOR',
+  /**
+   * Margin settings (lot M4 plan §1.3, K43 N1 and N2): the euro rates, the shipping cost bands, the pouch and card,
+   * the allowances, the care and claim costs, written as Orders → Settings is (server: ADMIN). Every reader of Growth reads them.
+   */
+  manageMargin: 'ADMIN',
   verifyAudit: 'AUDITOR',
   /** Customers' emails in clear (the server masks them for an AUDITOR: j***@example.com). */
   readClientEmails: 'OPERATOR',

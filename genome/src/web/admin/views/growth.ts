@@ -11,6 +11,10 @@
  *   - Repeat buying: the second piece, the time to it, the cohorts by month of the first piece;
  *   - From scan to PALLADIUM: each step and its share of the one before, the months, the club now;
  *   - Revenue: the net of each month (each opening its Invoices page), BY CHANNEL · BY COUNTRY · BY MODEL;
+ *   - Margin (lot M4 plan §1.3, K43 N1 to N3, D61): from GET /api/admin/margin, the same window in euros at the rates of
+ *     Margin settings: Revenue, Costs, Margin and Margin %, BY MODEL · BY CHANNEL · BY TIER (never by release) with
+ *     PERKS' and THE VAULT's parts, the orders holding an estimate, THE VAULT's line and its way to Club → THE VAULT's
+ *     report, Partner experiences beside it (once recorded), What is missing, its CSV and Margin settings;
  *   - Elsewhere in the console: the console's own figures, each linking to its detailed page.
  *
  * The console's house style: white paper, ink, hairlines, hairline bars, no cards; figures in --font, so the labels set in
@@ -44,6 +48,7 @@ import {
   repeatFigures,
   revenueBars,
   revenueGroupRows,
+  MARGIN_TABS,
   REVENUE_TABS,
   REVENUE_TAB_LABELS,
   secondPieceBars,
@@ -52,9 +57,27 @@ import {
   type RevenueTab,
 } from '../model/growth.js';
 import { monthLabel } from '../model/invoices.js';
+import {
+  MARGIN_GROUP_HEAD,
+  MARGIN_TAB_LABELS,
+  MARGIN_TEXT,
+  MARGIN_VAULT_WORDS,
+  marginEmpty,
+  marginKpis,
+  marginRows,
+  missingItems,
+  partnerLine,
+  vaultLineEmpty,
+  vaultLineItems,
+  vaultReportCost,
+  vaultReportHref,
+  type MarginRow,
+} from '../model/margin.js';
 import { href } from '../router.js';
-import { FUNNEL_STEPS, GROWTH_WINDOWS, type AnalyticsData, type BestTime, type CircleStats, type GrowthCollectors, type GrowthRelease, type GrowthReport } from '../types.js';
-import { barList, emptyState, kpi, linkButton, pageHeader, section, select, table } from '../ui/components.js';
+import { FUNNEL_STEPS, GROWTH_WINDOWS, type AnalyticsData, type BestTime, type CircleStats, type GrowthCollectors, type GrowthRelease, type GrowthReport, type MarginReport } from '../types.js';
+import { barList, busy, button, emptyState, kpi, linkButton, pageHeader, section, select, table } from '../ui/components.js';
+import { saveDownload } from '../ui/download.js';
+import { notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 type Failed = 'failed';
@@ -67,7 +90,7 @@ function figures(text: string): Child[] {
 
 /** The page's own address with `q` merged in (an empty value dropped). */
 function growthHref(p: GrowthParams, q: Partial<Record<keyof GrowthParams, string | number | null>>): string {
-  const all: Record<string, string | number | null> = { months: p.months, currency: p.currency, ltv: p.ltv, rev: p.rev, page: p.page > 1 ? p.page : null, ...q };
+  const all: Record<string, string | number | null> = { months: p.months, currency: p.currency, ltv: p.ltv, rev: p.rev, mg: p.mg === 'model' ? null : p.mg, page: p.page > 1 ? p.page : null, ...q };
   return href('growth', {}, all);
 }
 
@@ -303,6 +326,168 @@ function revenueSection(p: GrowthParams, r: GrowthReport): HTMLElement {
   );
 }
 
+// ── Margin (lot M4 plan §1.3) ────────────────────────────────────────────
+
+/** A money cell, a loss marked. */
+function moneyCell(text: string, loss = false): HTMLElement {
+  return h('span', { class: ['margin__money', loss ? 'margin__money--loss' : null] }, text);
+}
+
+/** A cost column with its parts under its total (PERKS' three, THE VAULT's five), once there is a part to show. */
+function partsCell(cls: string, testid: string, total: string, parts: readonly { key: string; label: string; amount: string }[]): HTMLElement {
+  return h(
+    'span',
+    { class: cls, data: { testid } },
+    moneyCell(total),
+    ...parts.map((part) =>
+      h('span', { class: ['cell-sub', 'margin__part'], data: { part: part.key } }, h('span', { class: 'margin__part-label' }, part.label), ' ', h('span', { class: 'margin__part-amount' }, part.amount)),
+    ),
+  );
+}
+
+function marginTable(p: GrowthParams, rows: MarginRow[]): HTMLElement {
+  return table<MarginRow>(
+    [
+      {
+        label: MARGIN_GROUP_HEAD[p.mg],
+        cell: (x) =>
+          h(
+            'span',
+            { class: 'margin__group', data: { testid: 'margin-group' } },
+            h('span', { class: 'margin__name' }, x.label),
+            x.hint ? h('span', { class: 'cell-sub' }, x.hint) : null,
+            x.estimate ? h('span', { class: ['cell-sub', 'margin__estimate'], data: { testid: 'margin-estimate' } }, x.estimate) : null,
+          ),
+        kind: ['wide'],
+      },
+      { label: 'Orders', cell: (x) => x.orders, kind: ['num'] },
+      { label: 'Revenue', cell: (x) => moneyCell(x.revenue), kind: ['num', 'nowrap'] },
+      { label: 'Piece', cell: (x) => moneyCell(x.piece), kind: ['num', 'nowrap'] },
+      { label: 'Inbound', cell: (x) => moneyCell(x.inbound), kind: ['num', 'nowrap'] },
+      { label: 'Packaging', cell: (x) => moneyCell(x.packaging), kind: ['num', 'nowrap'] },
+      { label: 'Outbound', cell: (x) => moneyCell(x.outbound), kind: ['num', 'nowrap'] },
+      { label: 'Allowance', cell: (x) => moneyCell(x.allowance), kind: ['num', 'nowrap'] },
+      { label: 'Perks', cell: (x) => partsCell('margin__perks', 'margin-perks', x.perks, x.perkParts), kind: ['num', 'nowrap'] },
+      { label: 'THE VAULT', cell: (x) => partsCell('margin__vault', 'margin-vault', x.vault, x.vaultParts), kind: ['num', 'nowrap'] },
+      { label: 'Care and warranty', cell: (x) => moneyCell(x.care), kind: ['num', 'nowrap'] },
+      { label: 'Margin', cell: (x) => h('span', { data: { testid: 'margin-value' } }, moneyCell(x.margin, x.loss)), kind: ['num', 'nowrap'] },
+      { label: 'Margin %', cell: (x) => h('span', { data: { testid: 'margin-percent' } }, moneyCell(x.percent, x.loss)), kind: ['num', 'nowrap'] },
+    ],
+    rows,
+    { empty: MARGIN_TEXT.empty, caption: `Margin ${MARGIN_TAB_LABELS[p.mg].toLowerCase()}` },
+  );
+}
+
+function missingBlock(r: MarginReport): HTMLElement {
+  const items = missingItems(r.missing);
+  return h(
+    'div',
+    { class: ['growth__block', 'margin__missing'], data: { testid: 'margin-missing' } },
+    subtitle(MARGIN_TEXT.missing),
+    items.length === 0
+      ? h('p', { class: 'growth__line', data: { testid: 'margin-missing-none' } }, MARGIN_TEXT.missingNone)
+      : h(
+          'div',
+          null,
+          h('p', { class: 'growth__line' }, MARGIN_TEXT.missingLead),
+          h(
+            'ul',
+            { class: 'margin__list' },
+            ...items.map((m) =>
+              h(
+                'li',
+                { class: 'margin__item', data: { testid: 'margin-missing-item', key: m.key } },
+                h('span', { class: 'margin__item-text' }, m.text),
+                h('a', { class: ['idlink', 'margin__fix'], attrs: { href: m.fix.href } }, m.fix.label),
+              ),
+            ),
+          ),
+        ),
+  );
+}
+
+/** THE VAULT's line, beside the tables (D61, OP-26, OP-22): what it cost as the margin counts it, the report's own cost, and the way to it. */
+function vaultBlock(r: MarginReport): HTMLElement {
+  const cost = vaultReportCost(r.vault);
+  const link = linkButton(MARGIN_TEXT.vaultLink, vaultReportHref(), 'ghost');
+  link.setAttribute('data-testid', 'margin-vault-link');
+  return h(
+    'div',
+    { class: ['growth__block', 'margin__vault-line'], data: { testid: 'margin-vault-line' } },
+    subtitle(MARGIN_TEXT.vault),
+    h('p', { class: 'growth__line' }, MARGIN_TEXT.vaultLead),
+    h(
+      'ul',
+      { class: 'margin__list' },
+      ...vaultLineItems(r.vault).map((v) =>
+        h(
+          'li',
+          { class: 'margin__item', data: { testid: 'margin-vault-item', key: v.key } },
+          h('span', { class: 'margin__item-text' }, v.text, v.note ? h('span', { class: 'cell-sub' }, v.note) : null),
+          h('span', { class: 'margin__figure' }, v.figure),
+        ),
+      ),
+      h(
+        'li',
+        { class: ['margin__item', 'margin__item--report'], data: { testid: 'margin-vault-report', key: 'report' } },
+        h(
+          'span',
+          { class: 'margin__item-text' },
+          cost.text,
+          cost.kinds ? h('span', { class: 'cell-sub', data: { testid: 'margin-vault-kinds' } }, cost.kinds) : null,
+          cost.unknown ? h('span', { class: 'cell-sub', data: { testid: 'margin-vault-unknown' } }, cost.unknown) : null,
+        ),
+        h('span', { class: 'margin__figure' }, cost.figure),
+      ),
+    ),
+    h('p', { class: ['growth__line', 'margin__reading'], data: { testid: 'margin-vault-reading' } }, MARGIN_VAULT_WORDS.reading),
+    h('div', { class: ['margin__item', 'margin__item--link'] }, h('span', { class: 'margin__item-text' }, MARGIN_VAULT_WORDS.report), link),
+  );
+}
+
+function marginSection(ctx: ViewContext, p: GrowthParams, r: MarginReport | Failed): HTMLElement {
+  const settings = linkButton(MARGIN_TEXT.settings, href('marginSettings'), 'ghost');
+  settings.setAttribute('data-testid', 'margin-settings-link');
+  if (r === 'failed') return section(MARGIN_TEXT.title, emptyState(NOTES.failed), { class: 'panel--growth-margin growth__failed', id: 'growth-margin', tools: [settings] });
+  const csv = button(MARGIN_TEXT.csv, { kind: 'ghost', testId: 'margin-csv' });
+  csv.addEventListener('click', () =>
+    void busy(csv, async () => {
+      try {
+        saveDownload(await ctx.api.marginCsv({ months: r.window.months }));
+      } catch (e) {
+        notifyError(e);
+      }
+    }),
+  );
+  const empty = marginEmpty(r);
+  const vaultShown = !(empty && vaultLineEmpty(r.vault));
+  const partner = partnerLine(r);
+  return section(
+    MARGIN_TEXT.title,
+    [
+      h('p', { class: ['growth__line', 'margin__lead'], data: { testid: 'margin-line' } }, MARGIN_TEXT.line),
+      ...(empty
+        ? [h('div', { data: { testid: 'margin-empty' } }, emptyState(MARGIN_TEXT.empty))]
+        : [
+            h('div', { class: ['kpis', 'margin__kpis'], data: { testid: 'margin-kpis' } }, ...marginKpis(r).map((k) => kpi(k.label, k.value, k.note, 'solid'))),
+            h(
+              'div',
+              { class: 'growth__block', data: { testid: 'margin-groups' } },
+              tabs(
+                'Margin by',
+                MARGIN_TABS.map((t) => ({ key: t, text: [MARGIN_TAB_LABELS[t]], href: growthHref(p, { mg: t === 'model' ? null : t }), current: t === p.mg, testid: `growth-margin-${t}` })),
+              ),
+              marginTable(p, marginRows(r, p.mg)),
+            ),
+          ]),
+      vaultShown ? vaultBlock(r) : null,
+      partner ? h('p', { class: ['growth__line', 'margin__partner'], data: { testid: 'margin-partner' } }, partner) : null,
+      missingBlock(r),
+    ],
+    { note: MARGIN_TEXT.note, class: 'panel--growth-margin', id: 'growth-margin', tools: empty ? [settings] : [csv, settings] },
+  );
+}
+
 // ── Elsewhere in the console ───────────────────────────────────────────────
 
 function elsewhere(a: AnalyticsData | Failed, circle: CircleStats | Failed, releases: { items: GrowthRelease[] } | Failed, best: BestTime | Failed): HTMLElement {
@@ -359,13 +544,14 @@ function elsewhere(a: AnalyticsData | Failed, circle: CircleStats | Failed, rele
 export async function growthView(ctx: ViewContext): Promise<HTMLElement> {
   const p = growthParams(ctx.route.query);
   const q = { months: p.months, ...(p.currency ? { currency: p.currency } : {}) };
-  const [r, collectors, releases, analytics, circle, best] = await Promise.all([
+  const [r, collectors, releases, analytics, circle, best, margin] = await Promise.all([
     ctx.api.growth(q),
     ctx.api.growthCollectors({ ...(p.currency ? { currency: p.currency } : {}), page: p.page }).catch(failed),
     ctx.api.growthReleases().catch(failed),
     ctx.api.analytics({ days: 30 }).catch(failed),
     ctx.api.circleStats({ days: 30 }).catch(failed),
     ctx.api.bestTime({ days: 30 }).catch(failed),
+    ctx.api.margin({ months: p.months }).catch(failed),
   ]);
 
   const windowTabs = tabs(
@@ -390,6 +576,7 @@ export async function growthView(ctx: ViewContext): Promise<HTMLElement> {
     repeatSection(r),
     funnelSection(r),
     revenueSection(p, r),
+    marginSection(ctx, p, margin),
     elsewhere(analytics, circle, releases, best),
   );
 }

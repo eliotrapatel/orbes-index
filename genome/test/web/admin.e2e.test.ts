@@ -84,6 +84,9 @@ import { createTestDb, type TestDb } from '../support/db.js';
 import { giveSizes } from '../support/draws.js';
 import { countPiecesIn, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 import { seedGrowth } from '../support/growth.js';
+import { seedMargin } from '../support/margin.js';
+import { marginKpis, marginRows } from '../../src/web/admin/model/margin.js';
+import type { MarginReport as WebMarginReport } from '../../src/web/admin/types.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
 import { svgToGray } from '../support/raster.js';
@@ -3335,6 +3338,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       'Repeat buying',
       'From scan to PALLADIUM',
       'Revenue',
+      'Margin',
       'Elsewhere in the console',
       'Scans by country',
       'The circle by tier',
@@ -3938,6 +3942,156 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
+  }, STEP_TIMEOUT);
+
+  it('reads Growth\'s Margin and sets Margin settings (lot M4 plan §1.3, step M4.4; K43 N1 to N3, D61): a rate, a shipping band and the POUCH set by an ADMIN, the margin by model as the server counts it with THE VAULT\'s column and line, BY CHANNEL with FROM THE VAULT and ELSEWHERE, What is missing naming a category without an allowance, the CSV; the table fits 1 024 × 768, no Margin settings table scrolls sideways at 390 px; an AUDITOR reads without a button', async () => {
+    // The margin's house (test/support/margin.ts), less the three settings this case enters through the page.
+    const adminId = (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id;
+    await seedMargin(ctx.db, adminId);
+    await ctx.db.deleteFrom('currency_rates').where('currency', '=', 'GBP').execute();
+    await ctx.db.deleteFrom('shipping_cost_rates').where('country', '=', 'FR').where('max_weight_g', '=', 500).execute();
+    await ctx.db.deleteFrom('margin_unit_costs').where('key', '=', 'POUCH').execute();
+    const plain = (v: string | null) => (v ?? '').replace(/[   ]/g, ' ').trim();
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+
+    // Growth's Margin leads to Margin settings, Growth's page in the sidebar.
+    await go(p, '#/growth?months=24', 'Growth');
+    const margin = p.locator('#growth-margin');
+    expect(await margin.locator('[data-testid=margin-line]').textContent()).toBe('In euros, at the rates of Margin settings. Not by release.');
+    await margin.locator('[data-testid=margin-settings-link]').click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Margin settings');
+    expect(await p.evaluate(() => location.hash)).toBe('#/growth/margin-settings');
+    expect(await p.locator('.side__link.is-active').textContent()).toBe('Growth');
+    expect(await p.locator('.view--margin-settings .panel__title').allTextContents()).toEqual(['Currencies', 'Outbound shipping', 'Packaging', 'Returns and claims allowance', 'PRIVATE CARE and warranty']);
+    // Packaging: the POUCH and the CARD per piece, THE VAULT CARD per card packed.
+    expect((await p.locator('#margin-packaging [data-testid=margin-unit]').evaluateAll((els) => els.map((e) => e.getAttribute('data-key'))))).toEqual(['POUCH', 'CARD', 'VAULT_CARD']);
+
+    // A rate: GBP has none, then 1.2.
+    const gbp = p.locator('#margin-currencies tbody tr', { hasText: 'GBP' });
+    expect(plain(await gbp.locator('[data-testid=margin-rate]').textContent())).toBe('No rate: left out of the margin');
+    await gbp.locator('[data-testid=margin-rate-set]').click();
+    await p.fill('dialog input[name=rate]', '1,2');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Rate saved.")');
+    await expect.poll(async () => plain(await p.locator('#margin-currencies tbody tr', { hasText: 'GBP' }).locator('[data-testid=margin-rate]').textContent())).toBe('1 GBP = 1.200000 EUR');
+
+    // A band: France up to 500 g, € 6.90, under the 1 000 g one already there.
+    await p.click('[data-testid=margin-band-add]');
+    await p.selectOption('dialog select[name=country]', 'FR');
+    await p.fill('dialog input[name=maxWeightG]', '500');
+    await p.fill('dialog input[name=cost]', '6.90');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Band added.")');
+    const france = p.locator('#margin-shipping tbody tr', { hasText: 'France' });
+    await expect.poll(async () => (await france.locator('.margin-band__text').allTextContents()).map(plain)).toEqual(['up to 500 g · € 6.90', 'up to 1 000 g · € 9.90']);
+    expect(plain(await p.locator('#margin-shipping tbody tr').last().locator('[data-testid=margin-band-country]').textContent())).toBe('ALL OTHER COUNTRIES');
+
+    // The POUCH: not set, then € 3 a piece.
+    const pouch = p.locator('#margin-packaging tbody tr', { has: p.locator('[data-key=POUCH]') });
+    expect(await pouch.locator('[data-testid=margin-unit-cost]').textContent()).toBe('Not set');
+    await pouch.locator('[data-testid=margin-unit-set]').click();
+    await p.fill('dialog input[name=cost]', '3');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Cost saved.")');
+    await expect.poll(async () => plain(await p.locator('#margin-packaging tbody tr', { has: p.locator('[data-key=POUCH]') }).locator('[data-testid=margin-unit-cost]').textContent())).toBe('€ 3');
+    expect(await p.locator('[data-testid=margin-boxes-line] a').getAttribute('href')).toBe('#/settings');
+    expect(await p.locator('#margin-allowance tbody tr', { hasText: 'Leather goods' }).locator('[data-testid=margin-allowance]').allTextContents()).toContain('Not set');
+    const audited = (await ctx.db.selectFrom('audit_logs').select('action').where('action', 'like', 'margin.%').execute()).map((a) => a.action).sort();
+    expect(audited).toEqual(['margin.rate', 'margin.shipping_cost.create', 'margin.unit_cost']);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'margin-settings', { full: true, phone: true });
+
+    // Growth's Margin, as the server counts it: the four figures and BY MODEL.
+    const report = JSON.parse(JSON.stringify(await ctx.services.margin.report({ months: 24 }))) as WebMarginReport;
+    await go(p, '#/growth?months=24', 'Growth');
+    expect(await margin.locator('[data-testid=margin-kpis] .kpi__label').allTextContents()).toEqual(['Revenue', 'Costs', 'Margin', 'Margin %']);
+    expect((await margin.locator('[data-testid=margin-kpis] .kpi__value').allTextContents()).map(plain)).toEqual(marginKpis(report).map((k) => plain(k.value)));
+    expect(await margin.locator('[data-testid=growth-margin-model]').getAttribute('aria-current')).toBe('page');
+    expect(await margin.locator('[data-testid=margin-groups] thead th').allTextContents()).toEqual(['Model', 'Orders', 'Revenue', 'Piece', 'Inbound', 'Packaging', 'Outbound', 'Allowance', 'Perks', 'THE VAULT', 'Care and warranty', 'Margin', 'Margin %']);
+    const byModel = marginRows(report, 'model');
+    expect((await margin.locator('[data-testid=margin-groups] tbody [data-testid=margin-value]').allTextContents()).map(plain)).toEqual(byModel.map((x) => plain(x.margin)));
+    const halo = margin.locator('[data-testid=margin-groups] tbody tr', { hasText: 'HALO' }).filter({ has: p.locator('[data-part=credits]') });
+    expect(await halo.count()).toBeGreaterThan(0);
+    expect((await halo.first().locator('[data-testid=margin-perks] .cell-sub').allTextContents()).map((t) => plain(t).replace(/ € .*$/, ''))).toEqual(['Credits', 'Free shipping', 'Welcome gifts']);
+    expect(await margin.locator('[data-testid=margin-estimate]').count()).toBeGreaterThan(0);
+    // THE VAULT's line beside the tables, its guaranteed pieces a piece, never a place; its way to Club → THE VAULT's report.
+    const vaultLine = margin.locator('[data-testid=margin-vault-line]');
+    expect((await vaultLine.locator('[data-testid=margin-vault-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-key'))))).toEqual(['claimed', 'credits', 'creditsToGive', 'addons', 'cards', 'guaranteed']);
+    expect(plain(await vaultLine.locator('[data-testid=margin-vault-item][data-key=guaranteed] .margin__item-text').textContent())).toBe('Guaranteed pieces: each is bought at its price, so it costs nothing here.');
+    expect(await vaultLine.textContent()).not.toMatch(/place/i);
+    expect(await vaultLine.locator('[data-testid=margin-vault-unknown]').count()).toBe(report.vault.rewardsCost.costUnknown > 0 ? 1 : 0);
+    expect(await vaultLine.locator('[data-testid=margin-vault-link]').getAttribute('href')).toBe('#/club?tab=vault');
+    // Partner experiences: nothing until partners are recorded (step M4.6), never inside the tables.
+    expect(await margin.locator('[data-testid=margin-partner]').count()).toBe(0);
+    // What is missing names the category without an allowance and leads to Margin settings.
+    const leather = margin.locator('[data-testid=margin-missing-item]', { hasText: 'Leather goods (Q)' });
+    expect(plain(await leather.locator('.margin__item-text').textContent())).toMatch(/^Leather goods \(Q\) has no returns and claims allowance: \d+ orders?\.$/);
+    expect(await leather.locator('a').getAttribute('href')).toBe('#/growth/margin-settings');
+    // Never by release: no link of the section leads to a release (only Club → THE VAULT's report, Margin settings and the fixes).
+    const links = await margin.locator('a[href]').evaluateAll((els) => els.map((e) => e.getAttribute('href') ?? ''));
+    expect(links.filter((h) => /drops|live|release/.test(h))).toEqual([]);
+    expect(links.filter((h) => h.startsWith('#/club'))).toEqual(['#/club?tab=vault']);
+    await shot(p, 'growth-margin', { full: true, phone: true });
+
+    // On a 1 024 px computer, the sidebar shown: the twelve columns fit their frame, Margin and Margin % in sight.
+    await p.setViewportSize({ width: 1024, height: 768 });
+    try {
+      const fit = await margin.locator('[data-testid=margin-groups] .table-wrap').evaluate((w) => ({ scroll: w.scrollWidth, client: w.clientWidth }));
+      expect(fit.scroll).toBeLessThanOrEqual(fit.client);
+      // Margin and Margin % in sight, inside the frame.
+      const frame = (await margin.locator('[data-testid=margin-groups] .table-wrap').boundingBox())!;
+      for (const head of ['Margin', 'Margin %']) {
+        const th = (await margin.locator('[data-testid=margin-groups] thead th', { hasText: new RegExp(`^${head}$`) }).boundingBox())!;
+        expect(th.x + th.width, head).toBeLessThanOrEqual(frame.x + frame.width + 1);
+      }
+      if (SCREENSHOTS) await margin.locator('[data-testid=margin-groups]').screenshot({ path: join(OUT_DIR, 'admin-growth-margin-1024.png') });
+    } finally {
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+
+    // BY CHANNEL: its rows, ELSEWHERE carrying care and warranty only; the address keeps the tab.
+    await margin.locator('[data-testid=growth-margin-channel]').click();
+    await expect.poll(() => margin.locator('[data-testid=margin-groups] thead th').first().textContent()).toBe('Channel');
+    expect(await p.evaluate(() => location.hash)).toBe('#/growth?months=24&ltv=tier&rev=channel&mg=channel');
+    expect(await margin.locator('[data-testid=margin-groups] tbody .margin__name').allTextContents()).toEqual(['LIVE RELEASE', 'DRAW', 'THE PRIVATE SALON', 'FROM THE VAULT', 'ELSEWHERE']);
+
+    // The CSV, named by the Paris day.
+    const [csv] = await Promise.all([p.waitForEvent('download'), margin.locator('[data-testid=margin-csv]').click()]);
+    expect(csv.suggestedFilename()).toMatch(/^orbes-margin-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(readFileSync((await csv.path())!, 'utf8').split('\r\n')[0]).toMatch(/^"View","Group","Orders"/);
+
+    // On a phone: neither page scrolls sideways (the margin's table scrolls inside its frame, Margin settings' do not).
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      await go(p, '#/growth/margin-settings', 'Margin settings');
+      expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      // Each table's row actions wrap under one another rather than past its frame (.col--wrap).
+      expect(await p.evaluate(() => [...document.querySelectorAll('.view--margin-settings .table-wrap')].filter((w) => w.scrollWidth > w.clientWidth).length)).toBe(0);
+      await go(p, '#/growth?months=24', 'Growth');
+      expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    } finally {
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads Margin settings, without a button.
+    const auditor = { email: 'margin-audit@orbes.test', password: 'margin auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await go(ap, '#/growth/margin-settings', 'Margin settings');
+    expect(plain(await ap.locator('#margin-currencies tbody tr', { hasText: 'GBP' }).locator('[data-testid=margin-rate]').textContent())).toBe('1 GBP = 1.200000 EUR');
+    expect(await ap.locator('.view--margin-settings button').count()).toBe(0);
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
   }, STEP_TIMEOUT);
 
   it('raised no page error or CSP violation', () => {

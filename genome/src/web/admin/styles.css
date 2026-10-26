@@ -5681,6 +5681,202 @@ fieldset.cfield--checks > .cfield__label {
   }
 }
 
+/* ── Growth's Margin and Margin settings (lot M4 plan §1.3, K43, D61) ────────
+   Growth's paper and hairlines: four figures, a table per view whose cost columns stay on one line and scroll inside
+   their frame on a narrow screen, PERKS' three parts and THE VAULT's five under their totals, a loss in the critical
+   ink; THE VAULT's line and What is missing as hairline lists, each item with its figure or where it is fixed. Margin
+   settings: Orders → Settings' tables, a country's bands one under the other with their actions. */
+
+.margin__kpis {
+  margin-top: 18px;
+}
+
+.panel--growth-margin .table .col--wide {
+  width: auto;
+  min-width: 130px;
+}
+
+/* Thirteen columns on a computer's page: tighter gutters than the house's tables, and the heads allowed a second line
+   (CARE AND / WARRANTY) rather than pushing the table past its frame. That fits from 1 280 px; below (the rules after
+   .margin__perks), down to 1 024 px with its sidebar, a 712 px frame. */
+.panel--growth-margin .table th,
+.panel--growth-margin .table td {
+  padding-right: 14px;
+}
+
+.panel--growth-margin .table th {
+  white-space: normal;
+  letter-spacing: 0.2em;
+  vertical-align: bottom;
+}
+
+.panel--growth-margin .table th:last-child,
+.panel--growth-margin .table td:last-child {
+  padding-right: 0;
+}
+
+/* MARGIN % on one line, never its sign alone under it. */
+.panel--growth-margin .table th:last-child {
+  white-space: nowrap;
+}
+
+.margin__group {
+  display: block;
+}
+
+.margin__name {
+  display: block;
+}
+
+.margin__perks .cell-sub,
+.margin__vault .cell-sub {
+  white-space: nowrap;
+}
+
+/* Below 1 280 px, down to 1 024 px with the sidebar (a 712 px frame): the table a size smaller, gutters of 6 px, the
+   heads' tracking a third, the group's column narrower, each of PERKS' and THE VAULT's parts its amount under its
+   label and its label free to break between words (Credits / to give), so the thirteen columns keep Margin and
+   Margin % in the frame (the admin e2e's margin case holds it at 1 024 px). Far larger figures than the house's
+   today would scroll inside the frame again, as on a phone. */
+@media (max-width: 1279px) {
+  .panel--growth-margin .table {
+    font-size: var(--fs-label);
+    letter-spacing: 0.02em;
+  }
+
+  .panel--growth-margin .table th,
+  .panel--growth-margin .table td {
+    padding-right: 6px;
+  }
+
+  .panel--growth-margin .table th {
+    letter-spacing: 0.06em;
+  }
+
+  .panel--growth-margin .table .col--wide {
+    min-width: 96px;
+  }
+
+  .margin__part-amount {
+    display: block;
+  }
+
+  .margin__perks .cell-sub,
+  .margin__vault .cell-sub {
+    white-space: normal;
+  }
+}
+
+.margin__money--loss {
+  color: var(--critical);
+}
+
+.margin__partner {
+  margin-top: 22px;
+}
+
+.margin__list,
+.margin-bands {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.margin__list {
+  border-top: 1px solid var(--hairline);
+}
+
+.margin__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.margin__item-text {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.margin__figure {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The way to Club → THE VAULT's report: its sentence and its link, no hairline under. */
+.margin__item--link {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.margin__fix {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.margin-bands {
+  margin: 0;
+}
+
+.margin-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 18px;
+  padding: 4px 0;
+}
+
+.margin-band + .margin-band {
+  border-top: 1px solid var(--hairline);
+}
+
+.margin-band__text {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.margin-settings__line {
+  margin: 14px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.margin-settings__missing {
+  color: var(--ink-soft);
+}
+
+/* Its link to Boxes reads in the line's own size. */
+.margin-settings__line .idlink {
+  font-size: inherit;
+  letter-spacing: inherit;
+}
+
+/* On a phone, Margin's head and Margin settings' heads wrap as the Profile's: the note under the title, the tools on
+   their own line, so nothing runs past the screen's edge (390 px). */
+@media (max-width: 599px) {
+  #growth-margin > .panel__head,
+  .view--margin-settings .panel > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  #growth-margin > .panel__head .panel__tools,
+  .view--margin-settings .panel > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+}
+
 /* ── Links (plan CUSTOMER INTELLIGENCE §3.4 A.10) ─────────────────────────
    The first link and the last link side by side, a hairline between the groups; under 600 px one block per row,
    hairlines between, no cards, the period and the view as two selects. */

@@ -4632,6 +4632,164 @@ export interface GrowthRelease {
 /** The client sheet's Lifetime value: per currency. */
 export type LifetimeValue = { currency: string; valueMinor: number }[];
 
+// ── The margin on GROWTH and its settings (lot M4 plan §1.2, §1.3; macro scope K43 N1 to N3; D61 THE VAULT's cost) ──
+
+/** The channel view's rows (services/margin.ts MARGIN_CHANNELS): the orders' channels, VAULT among them, then ELSEWHERE (care and warranty only). */
+export const MARGIN_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'VAULT', 'ELSEWHERE'] as const;
+export type MarginChannel = (typeof MARGIN_CHANNELS)[number];
+/** The tier view's rows, the highest first (services/margin.ts MARGIN_TIERS); NONE: below TITANE when the order was paid. */
+export const MARGIN_TIERS = ['PALLADIUM', 'PLATINE', 'TITANE', 'NONE'] as const;
+export type MarginTier = (typeof MARGIN_TIERS)[number];
+
+/** THE VAULT's five parts of a group's costs (euro cents, D61): house credits won, credits to give, the free add-ons, the products won (a VAULT order at 0), THE VAULT CARDs. */
+export interface MarginVaultCosts {
+  credits: number;
+  creditsToGive: number;
+  addons: number;
+  productsWon: number;
+  cards: number;
+}
+
+/** A group's cost columns, in euro cents. */
+export interface MarginCosts {
+  piece: number;
+  inbound: number;
+  packaging: number;
+  outbound: number;
+  allowance: number;
+  perks: { credits: number; freeShipping: number; gifts: number };
+  vault: MarginVaultCosts;
+  careWarranty: number;
+}
+
+/** A row of a view, or the totals (GET /api/admin/margin). Never a release. */
+export interface MarginGroup {
+  /** A main model's id, a channel, a tier, or 'ALL' for the totals. */
+  key: string;
+  /** The model's name; null for a channel, a tier and the totals. */
+  label: string | null;
+  orders: number;
+  pieces: number;
+  revenueMinor: number;
+  costs: MarginCosts;
+  marginMinor: number;
+  /** MARGIN / REVENUE in hundredths of a percent; null when REVENUE is 0. */
+  marginBp: number | null;
+  /** How many of its orders hold an estimate. */
+  estimated: number;
+}
+
+/** What the margin counts as 0, and where it is fixed. */
+export interface MarginMissing {
+  piecePrices: number;
+  parcelWeights: number;
+  shippingRates: number;
+  boxCosts: number;
+  allowances: { categoryId: number; code: string; name: string; orders: number }[];
+  unitCosts: MarginUnitCostKey[];
+  currencies: { currency: string; amounts: number }[];
+}
+
+/** The report's cost of one reward kind won in the window (CLUB > THE VAULT's own reading). */
+export interface MarginRewardKindCost {
+  kind: VaultRewardKind;
+  /** By currency, before conversion. */
+  cost: VaultMoney[];
+  /** In euros at the owner's rates (an amount without a rate left out, and named in What is missing). */
+  costMinor: number;
+  /** Its rewards won without a supplier price. */
+  costUnknown: number;
+}
+
+/** THE VAULT's line (D61, OP-26, OP-22): beside the views, never inside them. No account, vault or release. */
+export interface MarginVaultLine {
+  claimed: { orders: number; costMinor: number };
+  credits: { orders: number; costMinor: number };
+  creditsToGive: { orders: number; costMinor: number };
+  addons: { units: number; costMinor: number };
+  cards: { cards: number; estimated: number; costMinor: number };
+  /** LIVE guarantees from a vault used in the window: a piece each, bought at its price. */
+  guaranteedPieces: number;
+  /** The report's cost of the rewards won in the window: every vault opened, as CLUB > THE VAULT reads it. */
+  rewardsCost: { byKind: MarginRewardKindCost[]; costMinor: number; costUnknown: number };
+}
+
+/** A partner's income beside the margin (K49, P1; filled from step M4.6), in euros: invoiced in the window, and paid. */
+export interface MarginPartnerIncome {
+  partnerId: string;
+  brand: string;
+  invoicedMinor: number;
+  paidMinor: number;
+}
+
+/** The margin of GROWTH's window, in euros (GET /api/admin/margin, AUDITOR). */
+export interface MarginReport {
+  window: { months: GrowthWindowMonths; from: string; to: string; list: string[]; currency: typeof MARGIN_CURRENCY; test: boolean; generatedAt: Iso };
+  currency: typeof MARGIN_CURRENCY;
+  totals: MarginGroup;
+  byModel: MarginGroup[];
+  byChannel: MarginGroup[];
+  byTier: MarginGroup[];
+  vault: MarginVaultLine;
+  /** Partner experiences (K49, P1), beside the margin and never inside it: empty until partners are recorded (M4.6). */
+  partnerIncome: MarginPartnerIncome[];
+  estimated: number;
+  missing: MarginMissing;
+}
+
+/** A currency's euro rate: one unit is worth `eurRate` euros ('1.150000'). */
+export interface CurrencyRateView {
+  currency: string;
+  eurRate: string;
+  updatedAt: Iso;
+}
+
+/** A band of the outbound shipping cost table; `country` null: ALL OTHER COUNTRIES. */
+export interface ShippingCostView {
+  id: string;
+  country: string | null;
+  maxWeightG: number;
+  costMinor: number;
+  currency: string;
+  updatedAt: Iso;
+}
+
+/** A band as POST /api/admin/margin/shipping-costs takes it (PATCH: any of its fields). */
+export interface ShippingCostInput {
+  country: string | null;
+  maxWeightG: number;
+  costMinor: number;
+  currency: string;
+}
+
+/** A unit cost; cost and currency null while it is not set. */
+export interface UnitCostView {
+  key: MarginUnitCostKey;
+  costMinor: number | null;
+  currency: string | null;
+  updatedAt: Iso | null;
+}
+
+/** A category's returns and claims allowance, in hundredths of a percent; null while it is not set. */
+export interface AllowanceView {
+  categoryId: number;
+  code: string;
+  name: string;
+  active: boolean;
+  allowanceBp: number | null;
+  updatedAt: Iso | null;
+}
+
+/** Margin settings (GET /api/admin/margin/settings, AUDITOR; every write answers it whole). */
+export interface MarginSettings {
+  currency: typeof MARGIN_CURRENCY;
+  rates: CurrencyRateView[];
+  currenciesWithoutRate: string[];
+  shippingCosts: ShippingCostView[];
+  unitCosts: UnitCostView[];
+  allowances: AllowanceView[];
+}
+
 // ── Test entrants and the server's status (plan TEST ENTRANTS, 2026-10-07) ──
 
 /** A test's release: a draw or a LIVE RELEASE (test_runs.mode). */

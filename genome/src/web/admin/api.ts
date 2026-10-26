@@ -103,6 +103,10 @@ import type {
   GrowthCollectors,
   GrowthRelease,
   GrowthReport,
+  MarginReport,
+  MarginSettings,
+  MarginUnitCostKey,
+  ShippingCostInput,
   StaffDocument,
   StaffDocumentSummary,
   AnomalyContext,
@@ -634,6 +638,69 @@ export class AdminApi {
   /** GROWTH's Latest releases: the 6 latest past their opening. */
   growthReleases(): Promise<Items<GrowthRelease>> {
     return this.get('/api/admin/growth/releases');
+  }
+
+  // ── The margin on GROWTH and Margin settings (lot M4 plan §1.3, K43) ────
+
+  /** AUDITOR: the margin of GROWTH's window (12 or 24 months), in euros, by model, channel and tier. */
+  margin(q: { months?: number } = {}): Promise<MarginReport> {
+    return this.get('/api/admin/margin', q);
+  }
+
+  /** AUDITOR: its totals and three views as a CSV (orbes-margin-<Paris day>.csv). */
+  async marginCsv(q: { months?: number } = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/margin.csv', { raw: true, query: q });
+    return toDownload(res, 'orbes-margin.csv');
+  }
+
+  /** AUDITOR: the rates (and the currencies without one), the shipping cost bands, the unit costs and the allowances. */
+  marginSettings(): Promise<MarginSettings> {
+    return this.get('/api/admin/margin/settings');
+  }
+
+  /** ADMIN: a currency's euro rate, as typed (422 MARGIN_RATE_EUR for the euro). */
+  setMarginRate(currency: string, rate: string): Promise<MarginSettings> {
+    return this.request('PUT', `/api/admin/margin/rates/${encodeURIComponent(currency)}`, { body: { rate } });
+  }
+
+  /** ADMIN: a rate cleared: the currency's amounts are left out again. */
+  clearMarginRate(currency: string): Promise<MarginSettings> {
+    return this.del(`/api/admin/margin/rates/${encodeURIComponent(currency)}`);
+  }
+
+  /** ADMIN: a band added (409 SHIPPING_COST_TAKEN). */
+  addShippingCost(input: ShippingCostInput): Promise<MarginSettings> {
+    return this.post('/api/admin/margin/shipping-costs', input);
+  }
+
+  /** ADMIN: a band changed, only what changed (404 SHIPPING_COST_NOT_FOUND, 409 SHIPPING_COST_TAKEN). */
+  updateShippingCost(id: string, change: Partial<ShippingCostInput>): Promise<MarginSettings> {
+    return this.patch(`/api/admin/margin/shipping-costs/${encodeURIComponent(id)}`, change);
+  }
+
+  /** ADMIN: a band removed. */
+  removeShippingCost(id: string): Promise<MarginSettings> {
+    return this.del(`/api/admin/margin/shipping-costs/${encodeURIComponent(id)}`);
+  }
+
+  /** ADMIN: the POUCH, the CARD, a PRIVATE CARE service or a claim outcome's cost. */
+  setUnitCost(key: MarginUnitCostKey, input: { costMinor: number; currency: string }): Promise<MarginSettings> {
+    return this.request('PUT', `/api/admin/margin/unit-costs/${encodeURIComponent(key)}`, { body: input });
+  }
+
+  /** ADMIN: a unit cost cleared. */
+  clearUnitCost(key: MarginUnitCostKey): Promise<MarginSettings> {
+    return this.del(`/api/admin/margin/unit-costs/${encodeURIComponent(key)}`);
+  }
+
+  /** ADMIN: a category's allowance, a percent as typed (12.5); 404 CATEGORY_NOT_FOUND. */
+  setAllowance(categoryId: number, percent: string): Promise<MarginSettings> {
+    return this.request('PUT', `/api/admin/margin/allowances/${categoryId}`, { body: { percent } });
+  }
+
+  /** ADMIN: a category's allowance cleared. */
+  clearAllowance(categoryId: number): Promise<MarginSettings> {
+    return this.del(`/api/admin/margin/allowances/${categoryId}`);
   }
 
   categories(): Promise<Items<Category>> {

@@ -19,6 +19,8 @@ export const ROUTES = [
   { name: 'analytics', path: '/analytics' },
   /** Growth (plan NEXT-NINE, BP-29): Analytics' sibling under Overview, after the Dashboard. */
   { name: 'growth', path: '/growth' },
+  /** Margin settings (lot M4 plan §1.3, K43): from Growth's Margin, no link of its own in the sidebar. */
+  { name: 'marginSettings', path: '/growth/margin-settings' },
   { name: 'owners', path: '/owners' },
   /** The Messages board (CS-01): one conversation per client; a conversation's page from its row. */
   { name: 'messages', path: '/messages' },

@@ -28,7 +28,7 @@ import {
   SECOND_PIECE_BUCKETS as SERVER_SECOND_PIECE_BUCKETS,
 } from '../../src/server/services/growth.js';
 import { CLUB_TIER_THRESHOLDS as CLUB_TIER_THRESHOLDS_FOR_GROWTH } from '../../src/server/services/club.js';
-import { parseHash } from '../../src/web/admin/router.js';
+import { href, parseHash } from '../../src/web/admin/router.js';
 import { PAIRS_FALLBACK_MAX } from '../../src/server/services/lookbook.js';
 import {
   canTick,
@@ -3605,9 +3605,9 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
   });
 
   it('reads its state from the query, the defaults for anything the server would refuse', () => {
-    expect(growthParams({})).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', page: 1 });
-    expect(growthParams({ months: '24', currency: 'GBP', ltv: 'model', rev: 'country', page: '3' })).toEqual({ months: 24, currency: 'GBP', ltv: 'model', rev: 'country', page: 3 });
-    expect(growthParams({ months: '6', currency: 'JPY', ltv: 'x', rev: 'tier', page: '-1' })).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', page: 1 });
+    expect(growthParams({})).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', mg: 'model', page: 1 });
+    expect(growthParams({ months: '24', currency: 'GBP', ltv: 'model', rev: 'country', mg: 'tier', page: '3' })).toEqual({ months: 24, currency: 'GBP', ltv: 'model', rev: 'country', mg: 'tier', page: 3 });
+    expect(growthParams({ months: '6', currency: 'JPY', ltv: 'x', rev: 'tier', mg: 'release', page: '-1' })).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', mg: 'model', page: 1 });
   });
 
   it('writes amounts in the house\'s money, a withheld one as —, and the four figures', () => {
@@ -3711,6 +3711,17 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
     expect(can('ADMIN', 'readGrowth')).toBe(true);
     expect(can('RETAIL', 'readGrowth')).toBe(false);
     expect(parseHash('#/growth?months=24').name).toBe('growth');
+  });
+
+  it('Margin settings (lot M4 plan §1.3, step M4.4): its route under Growth, read by every reader of Growth, written by an ADMIN (manageMargin, as the server); the Margin\'s tab `mg` in Growth\'s address, left out by default', () => {
+    expect(href('marginSettings')).toBe('#/growth/margin-settings');
+    expect(parseHash('#/growth/margin-settings').name).toBe('marginSettings');
+    expect(parseHash('#/growth?months=24&mg=channel')).toMatchObject({ name: 'growth', query: { months: '24', mg: 'channel' } });
+    expect(CAPABILITY_MIN_ROLE.manageMargin).toBe('ADMIN');
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'manageMargin'))).toEqual([false, false, false, false, true]);
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'readGrowth'))).toEqual([false, false, true, true, true]);
+    expect(growthParams({}).mg).toBe('model');
+    expect(['model', 'channel', 'tier', 'release', 'x'].map((mg) => growthParams({ mg }).mg)).toEqual(['model', 'channel', 'tier', 'model', 'model']);
   });
 });
 

@@ -66,6 +66,7 @@ import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { growthView } from './views/growth.js';
+import { marginSettingsView } from './views/margin-settings.js';
 import { collectorsListView } from './views/collectors-list.js';
 import { collectorsView } from './views/collectors.js';
 import { keysView } from './views/keys.js';
@@ -200,6 +201,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
   analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
   growth: { view: growthView, title: 'Growth', nav: 'growth' },
+  marginSettings: { view: marginSettingsView, title: 'Margin settings', nav: 'growth' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   messages: { view: messagesView, title: 'Messages', nav: 'messages' },
