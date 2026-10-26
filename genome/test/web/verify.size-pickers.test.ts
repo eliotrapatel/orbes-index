@@ -30,6 +30,9 @@ const PRESELECTION: Readonly<Record<string, readonly RegExp[]>> = Object.freeze(
   'lookbook.ts': [/\bsalonSizePick\(/],
   'releases.ts': [/\bdrawPick\(/, /\bsetPick\(/],
   'order-sheet.ts': [/\breturns\.savedSize\b/],
+  // THE VAULT in YOUR ORDERS (lot Q3, step Q3.11): a piece won free, its size the one the server reserved from YOUR SIZES
+  // (`s.size`); a right to buy, the size YOUR SIZES preselects (`r.savedSize`).
+  'vault-orders.ts': [/\bchosen = s\.size\b/, /\br\.savedSize\b/],
 });
 
 describe('the size preselected everywhere (plan CUSTOMER INTELLIGENCE §3.7)', () => {

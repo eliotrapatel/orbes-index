@@ -54,6 +54,7 @@ import { mediaUrl } from './media.js';
 import { deliverOnRegistration, type OrderMail, orderReference } from './orders.js';
 import { latestRenewalAt, withdrawWaiting } from './claim-renewals.js';
 import { ensureGrants } from './tier-grants.js';
+import { giveFirstRegistrationVaults, giveTierVaults } from './vault.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -573,8 +574,10 @@ export class OwnershipService {
     // its row locked before any audit entry of this transaction.
     const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now, this.mail);
     const withdrawn = await withdrawWaiting(tx, p.id, 'REGISTERED', actor, now);
-    // The tiers' grants this piece may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
+    // The tiers' grants this piece may open (plan NEXT-NINE, BP-19 T5), before any audit entry; then THE VAULT's: a tier
+    // first reached (TITANE at the first piece), the piece's own when it was bought, the inviter's at a first piece.
     const granted = await ensureGrants(tx, accountId, now);
+    const vaulted = [...(await giveTierVaults(tx, accountId, now)), ...(await giveFirstRegistrationVaults(tx, accountId, p.id, now))];
     const ownershipState = ownershipStateFor({ verified }, false);
     const statusChange = await this.lifecycle.applyForService(
       tx,
@@ -593,7 +596,7 @@ export class OwnershipService {
       },
       tx,
     );
-    for (const n of [...delivered, ...withdrawn, ...granted]) await this.audit.record(n, tx);
+    for (const n of [...delivered, ...withdrawn, ...granted, ...vaulted]) await this.audit.record(n, tx);
     return { productId: p.product_id, accountId, acquiredVia: 'FIRST_REGISTRATION', verified, ownershipState, since: now, statusChange };
   }
 
@@ -751,8 +754,9 @@ export class OwnershipService {
         .set({ status: 'ACCEPTED', to_account_id: accountId, completed_at: now })
         .where('id', '=', t.id)
         .execute();
-      // The tiers' grants the piece received may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
-      const granted = await ensureGrants(tx, accountId, now);
+      // The tiers' grants the piece received may open (plan NEXT-NINE, BP-19 T5), before any audit entry, and a tier
+      // first reached its vault (a transfer gives no PIECE vault: first registration only).
+      const granted = [...(await ensureGrants(tx, accountId, now)), ...(await giveTierVaults(tx, accountId, now))];
       const ownershipState = ownershipStateFor(current, false);
       const statusChange = await this.lifecycle.applyForService(
         tx,

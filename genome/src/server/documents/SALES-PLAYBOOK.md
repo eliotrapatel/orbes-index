@@ -103,6 +103,37 @@ Le propriétaire d'une pièce enregistrée peut envoyer, **depuis cette pièce**
 
 > Depuis votre pièce, onglet OWNERSHIP, touchez CHOOSE A PHOTOGRAPH dans WORN, vérifiez votre signature, acceptez, puis SEND. ORBES regarde chaque photo avant qu'elle n'apparaisse sur la fiche du modèle, avec votre prénom et votre pays. Vous pouvez la retirer quand vous voulez avec WITHDRAW : elle disparaît de la fiche et elle est effacée.
 
+### THE VAULT : les coffres des collectionneurs
+
+THE VAULT (lot Q3) donne aux collectionneurs des coffres (vaults) à certaines occasions, à la discrétion d'ORBES. Un coffre attend **30 jours** dans YOUR ACCOUNT, sous THE VAULT (sur un ordinateur, sa propre page) ; il arrive avec un message FROM ORBES (A VAULT IS WAITING FOR YOU), une ligne dans NOW et un petit nombre à côté de THE VAULT. Le client l'ouvre en maintenant sa porte (PRESS AND HOLD) ou en la tirant vers le bas : il contient **une récompense, tirée par le serveur au moment de l'ouverture**. Ouvrir un coffre est gratuit ; un coffre ne se vend jamais. Les comptes de test n'en reçoivent jamais.
+
+- **Les occasions**, chacune allumée ou éteinte avec ses limites dans `Club` → `THE VAULT` → `Sources` (un ADMIN) : une LIVE RELEASE dont la taille du client s'épuise pendant qu'il attend encore dans sa file, seulement quand la sortie a THE VAULT allumé (sur sa page, section `THE VAULT`, `Turn on`, un OPERATOR ; éteint par défaut), un seul par compte et par sortie, rien pour qui a quitté la file, rien quand la sortie ferme avec des pièces restantes, rien dans l'after-room ; chaque pièce achetée, une fois enregistrée par son acheteur, sur tous les canaux (jamais un cadeau de bienvenue, une pièce échangée, un transfert ni une pièce offerte par un coffre) ; un nouveau palier atteint depuis le lancement de THE VAULT (TITANE dès la première pièce) ; une photo WORN publiée ; la première pièce d'un ami venu par le lien d'invitation du client (INVITE A FRIEND) ; un profil complet, une fois ; un geste de la maison (`GIVE A VAULT`, plus bas).
+- **Ce qu'un coffre peut contenir** (WHAT A VAULT CAN HOLD) : un crédit maison (dans YOUR ACCOUNT, sous IN USE, 30 jours) ; un complément offert sur sa prochaine commande (30 jours) ; une place garantie à la prochaine LIVE RELEASE ; une pièce offerte (une commande à 0 dans YOUR ORDERS, à réclamer dans les 30 jours avec CLAIM IT) ou le droit de l'acheter à son prix pendant 24 heures (YOURS TO BUY, BUY) ; une VAULT EDITION, faite seulement pour le coffre et jamais vendue ; THE PIECE, la pièce manquée dans sa taille ; un crédit à offrir à un ami pour sa première pièce ; la carte I WAS THERE, une image à garder. Chaque récompense expire comme elle le dit, n'a aucune valeur en argent et ne se cède pas, sauf le crédit à offrir.
+- **Les chances.** À l'ouverture, le client lit les chances de ce qu'il a reçu (*1 IN 200*). La table des récompenses, ses chances et ses quantités restent dans la console : **ne les donnez jamais**, ni ce que contient un coffre avant son ouverture. Un coffre déjà ouvert redonne ce qu'il contenait : jamais un second tirage.
+- **Ce que vous voyez.** La fiche du client, bloc `THE VAULT` (après la garantie de la maison) : chaque coffre, pourquoi il a été donné, son état (`WAITING`, `OPENED`, `EXPIRED`, `RETURNED`) et ce qu'il contenait, avec ses chances et sa commande. Il se lit seulement : aucun bouton ne reprend un coffre.
+
+**« Je n'ai pas reçu de coffre. »** Regardez le bloc `THE VAULT` de sa fiche. Sans coffre, l'occasion n'en donne pas (ci-dessus), ou elle était éteinte. Un coffre non ouvert en 30 jours expire et quitte sa page. Ne promettez jamais un coffre : un geste de la maison reste à sa discrétion.
+
+> Les coffres sont donnés à certaines occasions, aux collectionneurs qui y ont droit, à la discrétion d'ORBES. Chaque coffre arrive dans YOUR ACCOUNT, sous THE VAULT, avec un message de notre part, et vous y attend 30 jours.
+
+**« Ma pièce est repartie. »** Une pièce retournée reprend son coffre s'il n'a pas été ouvert (`RETURNED` sur la fiche) ; ouvert, il garde ce qu'il contenait. Un échange de taille garde le coffre.
+
+> Votre coffre est lié à votre pièce : s'il n'a pas été ouvert, il repart avec elle. Ce que vous avez reçu en l'ouvrant vous reste.
+
+**« Je n'arrive pas à l'ouvrir. »** Il maintient la porte appuyée une seconde et demie, ou la tire vers le bas ; sur un ordinateur, il peut aussi maintenir la barre d'espace. Au plus 10 ouvertures par minute.
+
+> Gardez le doigt sur la porte du coffre jusqu'à ce qu'elle s'ouvre, ou tirez-la vers le bas. Ce qu'il contient est tiré au moment où il s'ouvre.
+
+**La pièce offerte.** Dans YOUR ORDERS, FROM THE VAULT : le client choisit sa taille (une autre seulement s'il en reste) et son adresse, puis CLAIM IT, dans les 30 jours ; sinon la commande est annulée et la pièce revient au stock. Elle part sans frais. Sur le tableau des commandes, son canal se lit `Vault` ; jusqu'à ce qu'elle soit réclamée, son entrepôt, sa taille et son prix ne changent pas.
+
+> Votre pièce offerte vous attend dans YOUR ORDERS : choisissez sa taille et votre adresse, puis CLAIM IT, avant la date indiquée. Nous vous l'envoyons sans frais.
+
+**Le crédit à offrir.** Le client l'envoie par son lien (GIVE IT, sous OPENED). Un seul ami l'accepte, une fois, dans les 30 jours, avec un compte ORBES qui n'a encore aucune pièce (A FRIEND SENT YOU A CREDIT, ACCEPT) ; le client ne peut pas l'accepter lui-même. Le lien ne dit jamais qui l'envoie : vous non plus. Il se garde comme un code : seul l'ami doit le recevoir.
+
+> Ce crédit est pour la première pièce d'un ami : envoyez-lui votre lien, il l'accepte avec son compte ORBES dans les 30 jours. Il ne peut être accepté qu'une fois.
+
+**GIVE A VAULT, le geste de la maison.** `Club` → `THE VAULT` → `Give a vault` (ou depuis la fiche du client, bloc `THE VAULT`) : un OPERATOR donne à un client, par son e-mail ; un ADMIN peut donner à un segment, un coffre par membre. Une note si besoin (`Note for Client Services`, jamais montrée au client), puis `Show the reach` : qui il atteint et qui est laissé de côté (les comptes de test, les comptes inactifs). Puis `Give`. THE HOUSE doit être allumé dans `Sources`. **Un coffre donné ne se reprend pas** : vérifiez le client avant de donner. Le client lit un message FROM ORBES, jamais la note.
+
 ---
 
 ## 1. Vente en boutique
@@ -179,6 +210,10 @@ Dans l'e-mail d'expédition, ou sur la notice glissée dans le colis :
 Les boîtes de la maison se listent dans `Orders` → `Settings` → `Boxes` (un ADMIN, lot M3) : leur nom, leurs dimensions intérieures, leur poids à vide et leur coût. Une boîte qui ne peut pas recevoir à plat la carte certificat de 95 × 62 mm est refusée. Chaque modèle reçoit sa boîte et son poids emballé (la pièce avec sa pochette et sa carte, sans la boîte) sur sa page, section `Packing` (un OPERATOR) ; une variante prend ceux de son modèle principal tant qu'elle n'a pas les siens.
 
 Pendant l'emballage, la page du colis dit quelle boîte prendre (celle de la pièce, celle de toutes les pièces, ou la plus grande de leurs boîtes quand elles diffèrent : vérifiez que tout tient) et le poids du colis. `Change box` en choisit une autre tant que le colis n'est pas emballé. Un poids manquant ne bloque jamais l'emballage : la page dit ce qui manque. À `Packed`, la boîte et le poids sont inscrits sur le colis et imprimés sur le bordereau ; le prestataire ne voit jamais le coût d'une boîte.
+
+### THE VAULT CARD dans le colis
+
+Depuis le lot Q3, la liste d'emballage porte la ligne `THE VAULT CARD` juste après la carte certificat de chaque commande dont la pièce ouvre un coffre : une commande d'une LIVE RELEASE, d'un tirage ou du salon privé (plus tard aussi une commande de la boutique Shopify), et une commande `Vault` achetée avec son droit d'achat. Jamais un cadeau de bienvenue, une pièce offerte par un coffre (une commande à 0) ni un échange, et aucune tant que l'occasion de la pièce achetée est éteinte dans `Sources`. Glissez une carte THE VAULT CARD dans la boîte, avec la carte certificat, puis cochez la ligne à la main : `Packed` attend qu'elle soit cochée. Le bordereau la rappelle (`Vault card` · `THE VAULT CARD`). Un colis garde les lignes avec lesquelles il a été emballé. La carte s'imprime depuis `Documents`, THE VAULT CARD : une feuille A4 de huit, recto verso sur le bord long, à 100 %, coupée sur les repères à 95 × 62 mm, comme la carte certificat ([la carte et son impression](VAULT-CARD.md)).
 
 ### Recevoir une livraison et la confirmer
 

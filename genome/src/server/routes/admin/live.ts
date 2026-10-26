@@ -8,6 +8,8 @@
  *   GET    /api/admin/live/:id                               AUDITOR   one, every setting
  *   PATCH  /api/admin/live/:id                               OPERATOR  any setting, until its announcement (409 LIVE_ANNOUNCED)
  *   PUT    /api/admin/live/:id/addons                        OPERATOR  ADD-ONS OFFERED (or its after-room's), until it ends (409 LIVE_ENDED)
+ *   PUT    /api/admin/live/:id/vault                         OPERATOR  THE VAULT on or off (lot Q3, D4), until it ends (409 LIVE_ENDED),
+ *                                                                     never an after-room's (409 LIVE_AFTER_ROOM)
  *   POST   /api/admin/live/:id/publish                       OPERATOR  announced at its time; `circlePost`: a post of the circle
  *   POST   /api/admin/live/:id/circle-post                   OPERATOR  its post of the circle, published, until its announcement
  *   DELETE /api/admin/live/:id/circle-post                   OPERATOR  that post withdrawn, until its announcement
@@ -78,6 +80,7 @@ import {
   liveMessageBody,
   livePaceBody,
   liveStockBody,
+  liveVaultBody,
   createLiveBody,
   liveBestTimeQuery,
   liveSizeMixQuery,
@@ -148,6 +151,13 @@ export const adminLiveRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { id } = parse(liveAdminParams, request.params);
     const b = parse(liveAddonPickBody, request.body);
     return liveConsole.setAddonPick(id, { addonIds: b.addonIds, afterRoom: b.afterRoom === true }, adminActor(request));
+  });
+
+  // THE VAULT (lot Q3, step Q3.9; D4 "staff switch per LIVE release, off by default"): `drop.live.vault`.
+  app.put('/api/admin/live/:id/vault', async (request) => {
+    const { id } = parse(liveAdminParams, request.params);
+    const b = parse(liveVaultBody, request.body);
+    return liveConsole.setVault(id, b.on, adminActor(request));
   });
 
   app.post('/api/admin/live/:id/publish', async (request) => {

@@ -115,7 +115,10 @@ export type SeenScreen =
   | 'order'
   // The emails' pages (lot M1, step M1.19): SET A NEW PASSWORD (a password screen) and STOP THESE EMAILS, never recorded.
   | 'reset'
-  | 'unsubscribe';
+  | 'unsubscribe'
+  // THE VAULT page and a credit to give's page (lot Q3, step Q3.11): never recorded (no page name of their own).
+  | 'vault'
+  | 'gift';
 
 /** What the app holds beside its screen, for the subject. */
 export interface SeenAppState {

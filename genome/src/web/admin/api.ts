@@ -251,6 +251,13 @@ import type {
   TestRunInput,
   TestRunSummary,
   TestRunView,
+  AdminVault,
+  VaultGiveInput,
+  VaultGiven,
+  VaultReport,
+  VaultRewardInput,
+  VaultSettings,
+  VaultSource,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -2273,6 +2280,69 @@ export class AdminApi {
   /** The order and alternative texts of a post's photographs: every one once, in the new order ('' alt: the post's default). */
   arrangeCirclePhotos(id: string, images: { sha256: string; alt: string }[]): Promise<CirclePost> {
     return this.patch(`/api/admin/circle/posts/${encodeURIComponent(id)}/photos`, { images });
+  }
+
+  // ── The Club: THE VAULT (lot Q3, step Q3.12; routes/admin/vault.ts) ─────
+
+  /** CLUB > THE VAULT: the sources, the house table in its order, the parts given and the floor's published odds. */
+  vaultSettings(): Promise<VaultSettings> {
+    return this.get('/api/admin/vault/settings');
+  }
+
+  /** ADMIN: a source's switch, vaults per occasion and cap (null: none, THE HOUSE always). */
+  setVaultSource(source: VaultSource, input: { enabled: boolean; perOccasion: number; cap: number | null }): Promise<VaultSettings> {
+    return this.request('PUT', `/api/admin/vault/sources/${encodeURIComponent(source)}`, { body: input });
+  }
+
+  /** A new row of the table (409 VAULT_ODDS_OVER, VAULT_REWARD_SERVICE, VAULT_EDITION_MODEL, VAULT_ONLY_PRODUCT). */
+  createVaultReward(input: VaultRewardInput): Promise<VaultSettings> {
+    return this.post('/api/admin/vault/rewards', input);
+  }
+
+  /** A row whole for its kind, active or not. */
+  updateVaultReward(id: string, input: VaultRewardInput): Promise<VaultSettings> {
+    return this.request('PUT', `/api/admin/vault/rewards/${encodeURIComponent(id)}`, { body: input });
+  }
+
+  /** A row set aside (never deleted once given). */
+  deactivateVaultReward(id: string): Promise<VaultSettings> {
+    return this.post(`/api/admin/vault/rewards/${encodeURIComponent(id)}/deactivate`, {});
+  }
+
+  /** Every row of the table once, in its new order. */
+  orderVaultRewards(ids: string[]): Promise<VaultSettings> {
+    return this.post('/api/admin/vault/rewards/order', { ids });
+  }
+
+  /** GIVE A VAULT: one collector (OPERATOR) or a segment (ADMIN); `dryRun` reads the reach alone. */
+  giveVault(input: VaultGiveInput): Promise<VaultGiven> {
+    return this.post('/api/admin/vault/give', input);
+  }
+
+  /** The report for a period of Paris days (both or neither: the last 30 days). */
+  vaultReport(q: { from?: string; to?: string } = {}): Promise<VaultReport> {
+    return this.get('/api/admin/vault/report', { from: q.from, to: q.to });
+  }
+
+  /** The report as a CSV named by its Paris days. */
+  async vaultReportCsv(q: { from?: string; to?: string } = {}): Promise<Download> {
+    const res = await this.request<Response>('GET', '/api/admin/vault/report.csv', { raw: true, query: { from: q.from, to: q.to } });
+    return toDownload(res, 'orbes-vault-report.csv');
+  }
+
+  /** A client's vaults, read-only (the client sheet's THE VAULT block). */
+  async clientVaults(accountId: string): Promise<AdminVault[]> {
+    return (await this.get<{ items: AdminVault[] }>('/api/admin/vault/vaults', { account: accountId })).items;
+  }
+
+  /** THE VAULT on or off for a LIVE release, until its end; never an after-room's. */
+  setLiveVault(id: string, on: boolean): Promise<LiveRelease> {
+    return this.request('PUT', `/api/admin/live/${encodeURIComponent(id)}/vault`, { body: { on } });
+  }
+
+  /** A model's VAULT ONLY on or off. */
+  setModelVaultOnly(id: string, vaultOnly: boolean): Promise<{ modelId: string; vaultOnly: boolean }> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/vault-only`, { body: { vaultOnly } });
   }
 
   // ── The Club: the tiers (P-X04) ──────────────────────────────────────────

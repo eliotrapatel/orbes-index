@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 25 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 26 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -242,13 +242,15 @@ Une LIVE RELEASE est une sortie qui se vit en direct, sans tirage : ORBES l'anno
 
 **La question d'après.** Une fois une LIVE RELEASE terminée, fin de sa salle d'après comprise, ORBES peut poser, pendant 7 jours, une question à 2 à 6 réponses (sauf si la sortie en fixe une autre, WHAT WOULD YOU HAVE WANTED?) : sur sa page, aux comptes qui y ont pris part sans obtenir de pièce, et dans MY PIECES, à ceux qui ont dit I'LL BE THERE sans prendre place dans sa file. Répondre se fait d'un geste, est facultatif et ne vous oblige à rien ; vous pouvez changer votre réponse tant que la question est ouverte.
 
+**THE VAULT.** ORBES peut donner un coffre (vault) lors des occasions que montre THE VAULT dans YOUR ACCOUNT, aux collectionneurs éligibles, à sa discrétion. Un coffre est gardé 30 jours dans votre compte. L'ouvrir est gratuit : un coffre n'est jamais vendu, et en ouvrir un ne demande aucun achat. Il contient une récompense, tirée au hasard à son ouverture et montrée avec ses chances ; quand une récompense est épuisée, sa chance va à la carte I WAS THERE. Une récompense expire comme elle l'indique, n'a aucune valeur monétaire et ne se transfère pas avant d'être utilisée, sauf un crédit à offrir, que vous offrez une fois, par son lien, à un ami pour sa première pièce. Le nombre de coffres que chaque occasion donne à un compte est limité : une LIVE RELEASE en donne au plus un par compte. Une pièce retournée reprend son coffre s'il n'a pas été ouvert.
+
 **Ce qui est enregistré.** Pour chaque entrée, le service enregistre le compte, la taille et la quantité, le palier, la place dans la file, l'heure de chaque étape, la durée de l'appui, les options choisies, l'issue de la réservation, la place d'un invité dans une salle d'après et la réponse à la question d'après ; et, de la connexion, son pays et une empreinte à clé de son réseau, jamais son adresse. Cette empreinte est effacée 30 jours après la fin de la sortie. Ces données servent à faire vivre la sortie et à repérer les entrées automatisées ; la politique de confidentialité en dit plus (article 17).
 
-*Code : R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, R165, N8, N9.*
+*Code : R93, R94, R95, R96, R97, R98, R99, R100, R101, R102, R103, R104, R105, R106, R107, R108, R109, R110, R111, R112, R113, R114, R115, R118, R134, R135, R136, R137, R138, R140, R141, R142, R143, R165, R193, R194, R195, R196, R197, R198, R199, R200, R201, N8, N9, N13, N14.*
 
 ## Article 14 — Commandes
 
-Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE RELEASE confirmée avec PAY (une commande par pièce), une place d'une sortie dont ORBES Client Services confirme la vente, ou une demande du salon privé qu'il accepte (article 12). MY PIECES montre chacune de vos commandes avec sa référence, le modèle, la taille, les options et le prix, et ses étapes avec leurs dates. La taille et le prix d'une commande d'une sortie ou du salon privé se lisent TO BE CONFIRMED tant qu'ORBES Client Services ne les a pas saisis.
+Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE RELEASE confirmée avec PAY (une commande par pièce), une place d'une sortie dont ORBES Client Services confirme la vente, une demande du salon privé qu'il accepte (article 12), ou une pièce de THE VAULT (article 13) : une pièce gagnée gratuitement, que vous réclamez dans YOUR ORDERS dans les 30 jours (elle est alors PAID, sans frais, et annulée si elle n'est pas réclamée), ou une pièce achetée à son prix habituel dans les 24 heures de son droit d'achat. MY PIECES montre chacune de vos commandes avec sa référence, le modèle, la taille, les options et le prix, et ses étapes avec leurs dates. La taille et le prix d'une commande d'une sortie ou du salon privé se lisent TO BE CONFIRMED tant qu'ORBES Client Services ne les a pas saisis.
 
 **Ses étapes.** Une commande est RESERVED, puis PAID, SHIPPED et DELIVERED. Elle peut être CANCELLED tant qu'elle est RESERVED ou PAID, et RETURNED une fois SHIPPED ou DELIVERED ; aucune autre étape n'est possible. ORBES Client Services enregistre chaque étape ; rien n'est payé sur le service. Une commande n'est PAID qu'une fois son prix saisi.
 
@@ -266,7 +268,7 @@ Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE R
 
 **Ce qui est enregistré.** Pour chaque commande, le service enregistre le compte, sa provenance, le modèle, la taille, le prix, les options, la surprise de sa sortie, le texte de la gravure, le nom et l'adresse de l'acheteur, l'heure de chaque étape avec la note qu'ORBES Client Services peut y ajouter, le transporteur, le numéro de suivi et la valeur déclarée pour son assurance, le lieu où sa pièce est gardée, et ses factures ; la politique de confidentialité en dit plus (article 17).
 
-*Code : R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146, R152, R153, R154, R180, R181, R182, R183, R184, R186, R187, R188, R189, R190, R191, R192.*
+*Code : R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146, R152, R153, R154, R180, R181, R182, R183, R184, R186, R187, R188, R189, R190, R191, R192, R203.*
 
 ## Article 15 — Le cercle des propriétaires
 
@@ -300,7 +302,7 @@ Le verrouillage ferme toutes les sessions du compte, révoque son code de récup
 
 ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses aux questions d'après, commandes et leurs factures, réponses et votes du cercle, demandes du salon privé) comme le décrit sa politique de confidentialité, qui dit aussi comment ORBES regroupe les collectionneurs et compte leur activité par heure. Le service ne transmet vos commandes à aucune boutique en ligne. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos demandes au salon privé, avec vos notes, figurent dans cette copie. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie. Vos commandes, avec le nom et l'adresse de l'acheteur, leurs étapes et leurs factures, et vos réponses aux questions d'après figurent dans cette copie.
 
-*Code : R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, R171, R172, R173, R185, N10, N12.*
+*Code : R21, R90, R117, R133, R139, R144, R145, R151, R162, R168, R169, R170, R171, R172, R173, R185, R202, N10, N12.*
 
 ## Article 18 — Responsabilité
 

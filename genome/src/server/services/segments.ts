@@ -901,6 +901,8 @@ export class SegmentService {
         .where('audience_segment_id', '=', sid)
         .where('status', 'in', ['SENT', 'CANCELLED'])
         .execute();
+      // THE VAULT's gifts to it (GIVE A VAULT) lose its id (migration 0061: a vault's segment may only be cleared).
+      await tx.updateTable('vaults').set({ segment_id: null }).where('segment_id', '=', sid).execute();
       await tx.deleteFrom('segments').where('id', '=', sid).execute();
       await this.audit.record({ actor, action: 'segment.delete', targetType: 'segment', targetId: sid, details: { name: s.name, criteria: s.criteria } }, tx);
     });

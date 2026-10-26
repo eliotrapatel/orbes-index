@@ -41,6 +41,8 @@ OUT = GENOME / 'src/server/render/card-type.ts'
 # The plan's set (A-Z, 0-9, '-', '·', '.', '/', space; the claim code's Crockford alphabet is inside it), and the
 # two other characters toLabelText keeps (':' and '#'), so every character a label text holds has its outline.
 CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-·./ :#'
+# Helvetica Neue Regular also sets THE VAULT CARD's sentences (plan OQ Q3 §5): its lower case and the comma.
+REGULAR_EXTRA = 'abcdefghijklmnopqrstuvwxyz,'
 
 
 def num(v):
@@ -128,13 +130,13 @@ def kern_table(font, names):
     return pairs
 
 
-def face(font, kerning, title):
+def face(font, kerning, title, extra=''):
     cmap = font.getBestCmap()
     gs = font.getGlyphSet()
     hmtx = font['hmtx']
     glyph_of = {}
     lines = []
-    for ch in CHARSET:
+    for ch in CHARSET + extra:
         if ord(ch) not in cmap:
             continue  # a character with no outline is dropped when drawn
         g = cmap[ord(ch)]
@@ -195,7 +197,7 @@ def main():
  * Sources (SHA-256):
  *   gravesend-sans-500.woff2   {sha256(GRAVESEND)}
  *   HelveticaNeue.ttc          {sha256(HELVETICA)} (faces 0, Regular, and 7, Light)
- * Characters: {CHARSET!r}.
+ * Characters: {CHARSET!r}; Helvetica Neue Regular also {REGULAR_EXTRA!r}.
  * Kerning: Gravesend's GPOS 'kern' feature; Helvetica Neue's 'kern' table.
  */
 
@@ -228,9 +230,9 @@ export const GRAVESEND_SANS: CardFace = {{
 {face(g, gpos_kerning, 'Gravesend Sans 500')}
 }};
 
-/** Helvetica Neue Regular: the step numbers, the GENOME fingerprint, the digits of the piece's lines. */
+/** Helvetica Neue Regular: the step numbers, the GENOME fingerprint, the digits of the piece's lines; THE VAULT CARD's sentences. */
 export const HELVETICA_NEUE_REGULAR: CardFace = {{
-{face(regular, kern_table, 'Helvetica Neue Regular')}
+{face(regular, kern_table, 'Helvetica Neue Regular', REGULAR_EXTRA)}
 }};
 
 /** Helvetica Neue Light: the serial and the claim code. */

@@ -32,6 +32,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES } from './club.js';
 import { productPayload, writeJournal } from './journal.js';
 import { ensureGrants } from './tier-grants.js';
+import { giveTierVaults } from './vault.js';
 
 // ── The state machine (data) ───────────────────────────────────────────────
 
@@ -476,7 +477,7 @@ export class LifecycleService {
     const granted: AuditRecordInput[] = [];
     if (CLUB_EXCLUDED_STATUSES.includes(product.status) && !CLUB_EXCLUDED_STATUSES.includes(to)) {
       const owner = await tx.selectFrom('ownership').select('account_id').where('product_id', '=', product.id).where('ended_at', 'is', null).executeTakeFirst();
-      if (owner) granted.push(...(await ensureGrants(tx, owner.account_id, now)));
+      if (owner) granted.push(...(await ensureGrants(tx, owner.account_id, now)), ...(await giveTierVaults(tx, owner.account_id, now)));
     }
 
     await this.audit.record(

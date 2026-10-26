@@ -398,7 +398,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Packing started.")');
     await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent(), POLL).toBe('PACKING');
-    expect((await g.locator('#parcel-checklist .ccheck__label, [data-testid=parcel-checklist] .ccheck__label').allTextContents())).toEqual(['The right piece: its card scanned', 'The card, its claim code visible', 'The box and the pouch']);
+    expect((await g.locator('#parcel-checklist .ccheck__label, [data-testid=parcel-checklist] .ccheck__label').allTextContents())).toEqual(['The right piece: its card scanned', 'The card, its claim code visible', 'THE VAULT CARD', 'The box and the pouch']);
     expect(await g.locator('[data-testid=parcel-check-scan] input').isDisabled()).toBe(true);
     expect(await g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(true);
     expect(await g.locator('[data-testid=parcel-photo-note]').textContent()).toBe('No photo yet. Seen by ORBES only, never by the collector. Deleted 14 days after delivery.');
@@ -449,7 +449,10 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const sent = jpegPixels(new Uint8Array(stored.photo!));
     expect(Math.max(sent.width, sent.height)).toBeLessThan(1600);
     expect(Math.max(sent.width, sent.height)).toBeGreaterThanOrEqual(1024);
+    // Lot Q3 (§2.8): THE VAULT CARD is ticked by hand like the card; Packed waits for it.
     for (const label of ['The card, its claim code visible', 'The box and the pouch']) await g.locator('[data-testid=parcel-check]', { hasText: label }).click();
+    expect(await g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(true);
+    await g.locator('[data-testid=parcel-check]', { hasText: 'THE VAULT CARD' }).click();
     await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled(), POLL).toBe(false);
     await shot(g, 'packing');
     await shot(g, 'packing-phone', { phone: true });
@@ -468,7 +471,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
       }),
       links: [...document.querySelectorAll('.view--shipping .cbtn--ghost')].map((el) => Math.round(el.getBoundingClientRect().height)),
     }));
-    expect(targets.lines.length).toBe(3);
+    expect(targets.lines.length).toBe(4);
     for (const [height, short] of targets.lines) expect([height! >= 44, short]).toEqual([true, 0]);
     expect(targets.links.length).toBeGreaterThan(0);
     expect(targets.links.every((x) => x >= 44)).toBe(true);
@@ -500,6 +503,8 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await expect.poll(() => g.locator('[data-testid=slip-reference]').textContent(), POLL).toBe(reference);
     expect(await g.locator('[data-testid=slip-model]').textContent()).toBe('MONOLITHE');
     expect(await g.locator('[data-testid=slip-piece]').textContent()).toBe(right!.productId);
+    // Lot Q3 (§2.8): THE VAULT CARD listed under its piece, as its checklist line.
+    expect(await g.locator('[data-testid=slip-vault-card]').textContent()).toBe('THE VAULT CARD');
     expect(await g.locator('.printdoc__foot').textContent()).toBe('ORBES Client Services');
     expect(await g.locator('[data-testid=packing-slip]').textContent()).not.toMatch(/PRIVATE SALON|€|EUR|4200/);
     // Plan NEXT LOT §3.6.B: where it goes, its country by its English name and its phone (the first address: no change).

@@ -20,6 +20,10 @@ import { DomainError } from '../../src/server/errors.js';
 import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LiveEngine } from '../../src/server/services/live-engine.js';
 import { LiveService } from '../../src/server/services/live.js';
+import { LifecycleService } from '../../src/server/services/lifecycle.js';
+import { OwnershipService } from '../../src/server/services/ownership.js';
+import { OwnerService } from '../../src/server/services/owners.js';
+import { SessionService } from '../../src/server/services/sessions.js';
 import { createTestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, createSet, createSetLiveRelease, entriesOf, liveAddon, liveFixture, pieceSize, sizedModel, type LiveFixture, type LiveRelease } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
@@ -166,6 +170,36 @@ for (const backend of BACKENDS) {
       expect(await statusOf(r, line[2]!.id)).toBe('ENDED');
       expect(await auditCount(r, 'drop.live.end')).toBe(1);
       expect(await auditCount(r, 'drop.live.confirm')).toBe(2);
+    });
+
+    it('a sell-out PAY with THE VAULT on racing the lock of an account still waiting in its line (lot Q3): both succeed, never a deadlock\'s 500; the waiting account removed, or given its vault first', async () => {
+      const sessions = new SessionService({ db: handle.db, clock: f.clock.now, ttlHours: { account: 24, admin: 8 } });
+      const lifecycle = new LifecycleService({ db: handle.db, audit: f.audit, clock: f.clock.now });
+      const ownership = new OwnershipService({ db: handle.db, audit: f.audit, lifecycle, clock: f.clock.now, transferKey: new Uint8Array(32).fill(9), requireScannedPiece: false });
+      const owners = new OwnerService({ db: handle.db, audit: f.audit, sessions, ownership, clock: f.clock.now });
+      for (let round = 0; round < 4; round++) {
+        const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+        await f.liveConsole.setVault(r.id, true, f.admin);
+        const [buyer, waiting, other] = await lineOf(r, [3, 1, 0]);
+        await f.live.press(buyer!.id, r.id, await token(r, buyer!.id));
+        f.clock.set(at(1500));
+        await f.live.secure(buyer!.id, r.id, await token(r, buyer!.id), buyer!.actor);
+        f.clock.set(at(5 * SECOND));
+        const pay = () => f.live.confirm(buyer!.id, r.id, buyer!.actor);
+        const lock = () => owners.lock(waiting!.id, f.admin);
+        expect(await together(round % 2 === 0 ? [pay, lock] : [lock, pay])).toEqual(['ok', 'ok']);
+        expect(await statusOf(r, buyer!.id)).toBe('CONFIRMED');
+        const d = await handle.db.selectFrom('drops').select('ended_reason').where('id', '=', r.id).executeTakeFirstOrThrow();
+        expect(d.ended_reason).toBe('SOLD_OUT');
+        const vaults = async (accountId: string) =>
+          Number((await handle.db.selectFrom('vaults').select((eb) => eb.fn.countAll<number>().as('n')).where('account_id', '=', accountId).where('drop_id', '=', r.id).executeTakeFirstOrThrow()).n);
+        // Locked first: removed from the line, no vault; paid first: its vault given while it waited, its entry ended.
+        const s = await statusOf(r, waiting!.id);
+        expect(s === 'REMOVED' ? 0 : 1).toBe(await vaults(waiting!.id));
+        expect(['REMOVED', 'ENDED']).toContain(s);
+        expect(await vaults(other!.id)).toBe(1);
+        expect(await auditCount(r, 'drop.live.confirm')).toBe(1);
+      }
     });
 
     it('the engine racing a SECURE at a deadline: before it, secured and never missed; at it, refused and MISSED, never both', async () => {

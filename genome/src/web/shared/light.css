@@ -5,7 +5,8 @@
  * NOCTURNE's, unchanged: this sheet turns the vault's colour tokens, then redraws five things for a light ground.
  *
  * It applies under `<html data-mode="light">` to every NOCTURNE screen (`body.nocturne`, the legal pages' too) but the
- * camera (`data-screen="scan"`, as views/shell.ts LIGHT_EXCEPT says). The LIVE RELEASE's room and the shared ownership
+ * camera (`data-screen="scan"`) and THE VAULT page (`data-screen="vault"`, lot Q3 §3.5, D41: dark in both modes), as
+ * views/shell.ts LIGHT_EXCEPT says. The LIVE RELEASE's room and the shared ownership
  * certificate are not NOCTURNE screens: they keep their own look. Photographs do not change with the mode (dark
  * studio shots), nor does the ground a photograph waits on (--n-photo).
  *
@@ -13,11 +14,11 @@
  * plate #f6f6f6 (AA); faint #949494 3.0 : 1, decoration only.
  */
 
-html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"])) {
+html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"], [data-screen="vault"])) {
   background: #ffffff;
 }
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) {
   --vault-ground: #ffffff;
   --vault-ink: #0a0a0a;
   --vault-soft: #5e5e5e;
@@ -42,18 +43,18 @@ html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"])) {
 
 /* ── 1. Photographs: a clean edge under the rail or their title, an eased dissolve into the white at their foot ── */
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-fade::before {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-fade::before {
   display: none;
 }
 
 /* Two pixels of the ground under the rail: its current chapter's mark stays on white above a photograph. */
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-rail {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-rail {
   z-index: 2;
   box-shadow: 0 2px 0 var(--vault-ground);
 }
 
 /* The photograph stays itself longer, the grey middle is short, and the block lifted onto it stands on white. */
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-fade::after {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-fade::after {
   background: linear-gradient(
     rgba(255, 255, 255, 0) 0%,
     rgba(255, 255, 255, 0) 10%,
@@ -71,28 +72,28 @@ html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"])) {
 
 /* ── 2. Plates: no fill, one fine line at the edge; NOCTURNE's inner frame gone ── */
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-card {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-card {
   background: none;
   box-shadow: inset 0 0 0 1px var(--n-card-line);
 }
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-card::before {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-card::before {
   box-shadow: none;
 }
 
 /* ── 3. Outlined buttons: a firmer line ── */
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-btn--ol {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-btn--ol {
   box-shadow: inset 0 0 0 1px rgba(10, 10, 10, 0.78);
 }
 
 /* ── 4. The SCAN ring: a white disc, its line and a soft shadow in place of the glow; its bar fades to white ── */
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-scan {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-scan {
   background: linear-gradient(rgba(255, 255, 255, 0) 30%, var(--vault-ground) 62%);
 }
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-scan__ring {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-scan__ring {
   background: #ffffff;
   box-shadow: inset 0 0 0 1px var(--n-scan-ring), 0 10px 24px -8px rgba(10, 10, 10, 0.24);
 }
@@ -100,6 +101,6 @@ html[data-mode="light"]:has(> body.nocturne:not([data-screen="scan"])) {
 /* ── 5. The GENOME: drawn in ivory for the night (verify/genome-view.ts GENOME_SCREEN_INK); on white it takes the ink.
    A filter, so the figure follows the switch at once and keeps its tones; it also takes the glow's place. ── */
 
-[data-mode="light"] body.nocturne:not([data-screen="scan"]) .n-gen__figure .genome-svg {
+[data-mode="light"] body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-gen__figure .genome-svg {
   filter: invert(1) grayscale(1);
 }

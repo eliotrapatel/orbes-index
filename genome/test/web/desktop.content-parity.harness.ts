@@ -263,6 +263,44 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
     now: 'On the sign-in page’s CREATE ACCOUNT, the two apart.',
     shownAs: ['Creating an ORBES account means accepting the ORBES terms of use.', 'TERMS OF USE · PRIVACY POLICY'],
   },
+  {
+    // Lot Q3, step Q3.10: an opening writes (the vault opened once), so a computer opens its own collector's vault, in
+    // the same line of size 17 as the phone's: its place is its own.
+    states: ['vault-open'],
+    values: ['YOUR PLACE 3'],
+    twins: ['desk-vault-open'],
+    reason: 'THE VAULT opened writes: the computer\'s opening is another collector\'s vault of the same release, in the same line of size 17, its place its own.',
+    now: 'YOUR PLACE in the Cinema room\'s corner, with its own collector\'s figure.',
+    shownAs: ['YOUR PLACE'],
+  },
+  {
+    // Lot Q3, step Q3.10: an opening writes (the vault opened once), so a computer opens its own collector's vault, in
+    // the same line of size 17 as the phone's: its place is its own.
+    states: ['vault-open-rare'],
+    values: ['YOUR PLACE 5'],
+    twins: ['desk-vault-open-rare'],
+    reason: 'THE VAULT opened writes: the computer\'s opening is another collector\'s vault of the same release, in the same line of size 17, its place its own.',
+    now: 'YOUR PLACE in the Cinema room\'s corner, with its own collector\'s figure.',
+    shownAs: ['YOUR PLACE'],
+  },
+  {
+    // Lot Q3, step Q3.11 (§3.8): a piece won free is CLAIMED on its order's page on a computer (decision 5), not on MY
+    // PIECES' ORDERS tab with its tabs over it.
+    states: ['orders-vault-claim'],
+    values: ['PIECES1', 'ORDERS1'],
+    reason: 'Decision 5: on a computer an order is its own page, CLAIM IT on it; MY PIECES and its tabs are the page under it.',
+    now: 'The tabs on MY PIECES itself, under the order\'s page (its crumb ‹ MY PIECES).',
+    removed: true,
+  },
+  {
+    // Lot Q3, step Q3.11 (§3.10, N10): a friend's invitation opens the sign-in page of a computer (decision 6), its line
+    // in the page's lead, on CREATE ACCOUNT; the phone's is MY PIECES' sign-in under the banner of the LIVE RELEASES.
+    states: ['vault-join'],
+    values: ['MY PIECES', 'LIVE RELEASE · MONOLITHE IN BLUE · LIVE NOW'],
+    reason: 'Decision 6: a computer signs in on its own page, without MY PIECES\' title nor the banner of the LIVE RELEASES over it.',
+    now: 'The sign-in page: YOUR ACCOUNT, A friend invited you to ORBES., CREATE ACCOUNT; the LIVE RELEASE on NOW and THE RELEASES.',
+    removed: true,
+  },
 ];
 
 /**

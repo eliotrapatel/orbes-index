@@ -1234,6 +1234,11 @@ export interface ReleaseReport {
    * and the people who left the queue (LEFT with a place).
    */
   queue: { longestWaitMs: number | null; turnsByPace: number; leftQueue: number };
+  /**
+   * THE VAULT (lot Q3, §4.2, added rows): the release's switch and the vaults given and opened from it (YOUR SIZE SOLD
+   * OUT); null on an after-room, which gives none of its own (N18, N20).
+   */
+  vaults: { on: boolean; given: number; opened: number } | null;
   reasoning: string[];
 }
 
@@ -1247,6 +1252,8 @@ export function releaseReport(input: {
   over: boolean;
   /** When it is read (the queue's longest wait counts one still waiting until then); now by default. */
   now?: Date;
+  /** THE VAULT's figures of the release (null or absent: an after-room's, none). */
+  vaults?: ReleaseReport['vaults'];
 }): ReleaseReport {
   const r = input.release;
   const sum = summarize(r, input.entries, input.interest);
@@ -1364,6 +1371,7 @@ export function releaseReport(input: {
     conversion: sum.conversion,
     next,
     queue: queueFigures(input.entries, r.endedAt, input.now),
+    vaults: input.vaults ?? null,
     reasoning: why,
   };
 }
@@ -1438,6 +1446,11 @@ export function releaseReportCsv(rep: ReleaseReport): string {
   for (const a of rep.additions) add('pieces added', `${a.at.toISOString()} size ${a.size}`, `${a.pieces} (${a.before} to ${a.after})`);
   add('next time', 'quantity', rep.next.quantity);
   for (const s of rep.next.sizes) add('next time', `size ${s.label}`, s.pieces);
+  if (rep.vaults) {
+    add('the vault', 'switch', rep.vaults.on ? 'on' : 'off');
+    add('the vault', 'vaults given', rep.vaults.given);
+    add('the vault', 'vaults opened', rep.vaults.opened);
+  }
   for (const [i, line] of rep.reasoning.entries()) add('reasoning', String(i + 1), line);
   return csvDocument(rows);
 }
@@ -1877,7 +1890,19 @@ export class LiveInsightsService {
     const { d, release } = await this.release(dropId);
     const [entries, interest, addons, additions] = await Promise.all([this.entries([d.id]), this.interest(d.id), this.addonFacts(d.id), this.additions(d.id)]);
     const holding = entries.some((e) => e.status === 'TURN' || e.status === 'SECURED');
-    return releaseReport({ release, entries, interest: interest.length, addons: addons.addons, entryAddons: addons.chosen, additions, over: livePhase(d, now) === 'ENDED' && !holding, now });
+    const vaults = d.parent_drop_id ? null : await this.vaultFigures(d);
+    return releaseReport({ release, entries, interest: interest.length, addons: addons.addons, entryAddons: addons.chosen, additions, over: livePhase(d, now) === 'ENDED' && !holding, now, vaults });
+  }
+
+  /** THE VAULT's figures of a release (lot Q3, §4.2): its switch, the vaults it gave (YOUR SIZE SOLD OUT) and those opened. */
+  private async vaultFigures(d: DropRow): Promise<NonNullable<ReleaseReport['vaults']>> {
+    const r = await this.db
+      .selectFrom('vaults')
+      .select([(eb) => eb.fn.countAll<string | number>().as('given'), (eb) => eb.fn.count<string | number>('opened_at').as('opened')])
+      .where('drop_id', '=', d.id)
+      .where('source', '=', 'LIVE')
+      .executeTakeFirstOrThrow();
+    return { on: d.vault_on, given: Number(r.given), opened: Number(r.opened) };
   }
 
   /** The report as a CSV download. */

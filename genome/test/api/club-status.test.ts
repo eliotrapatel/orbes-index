@@ -113,6 +113,8 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
       birthdayCredit: null,
       // No warranty credit given (plan ORBES CARE, step 1.5): none.
       warrantyCredit: null,
+      // No vault's credit (THE VAULT, lot Q3): none.
+      vaultCredit: null,
       care: { year: 2026, used: 0, allowance: 'ALL' },
       // No gift model in THE PROGRAM: no WELCOME GIFT row, never a gift that would not come.
       gifts: [],
@@ -155,7 +157,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     await setProgram({ carePiecesPlatine: null });
     // Below its tier, the credit waits: no row; TITANE has no care row either.
     const titane = await holding(1);
-    expect((await status(titane.client)).inUse).toEqual({ credit: null, birthdayCredit: null, warrantyCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    expect((await status(titane.client)).inUse).toEqual({ credit: null, birthdayCredit: null, warrantyCredit: null, vaultCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     await h.t.db.updateTable('ownership').set({ ended_at: h.clock.now() }).where('account_id', '=', a.id).where('product_id', 'in', (eb) => eb.selectFrom('products').select('id').where('product_id', '!=', serial)).execute();
     expect((await status(a.client)).inUse.credit).toBeNull();
   });
@@ -171,7 +173,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     };
     const none = await holding(0);
     const until = await birthday(none.id, 2000);
-    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: { balanceMinor: 2000, currency: 'EUR', expiresAt: until }, warrantyCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: { balanceMinor: 2000, currency: 'EUR', expiresAt: until }, warrantyCredit: null, vaultCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     const platine = await holding(5);
     const at = await birthday(platine.id, 1500);
     const inUse = (await status(platine.client)).inUse;
@@ -187,7 +189,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     };
     const none = await holding(0);
     const until = await warranty(none.id, 45_000);
-    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: null, warrantyCredit: { balanceMinor: 45_000, currency: 'EUR', expiresAt: until }, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
+    expect((await status(none.client)).inUse).toEqual({ credit: null, birthdayCredit: null, warrantyCredit: { balanceMinor: 45_000, currency: 'EUR', expiresAt: until }, vaultCredit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     const platine = await holding(5);
     const at = await warranty(platine.id, 13_500);
     const inUse = (await status(platine.client)).inUse;

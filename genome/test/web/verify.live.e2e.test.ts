@@ -765,7 +765,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('SOLD OUT for your size from the queue (ONE QUEUE §3.6, MK S): its quieter passage from the band\'s horizon with sold-out.mp3, then SOLD OUT, SIZE 52 · 1 PIECE, YOUR PLACE 1, the one sentence, LEAVE THE LINE under it (no vault in Q1)', async () => {
+  it('SOLD OUT for your size from the queue (ONE QUEUE §3.6, MK S): its quieter passage from the band\'s horizon with sold-out.mp3, then SOLD OUT, SIZE 52 · 1 PIECE, YOUR PLACE 1, the one sentence, LEAVE THE LINE under it (no vault: THE VAULT off for the release)', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 3_000), sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 2 }], pace: { batch: 1, minutes: 60 }, turnSeconds: 120 });
     const buyer = await account(5);
     await srv.ctx.services.live.enter(buyer.id, r.id, { sizeId: r.sizes[0]!.id }, buyer.actor);
@@ -789,7 +789,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('.live__sold > .live__choice'), 'SIZE 52 · 1 PIECE');
     await textOf(page.locator('.live__sold > .live__ahead'), /^YOUR PLACE 1\s*Your place in size 52: 1$/);
     await textOf(page.locator('.live__sold > .live__note'), LIVE.edge.soldOut.text);
-    expect(await page.locator('.live__vault-slot').count()).toBe(0);
+    // No vault given (THE VAULT off for this release, lot Q3): its slot hidden, nothing shown.
+    expect(await page.locator('.live__vault-slot:not([hidden])').count()).toBe(0);
     // The passage lands (3.65 s on the phone): nothing of it stays.
     await expect.poll(() => page.locator('.view--live').evaluate((el) => el.classList.contains('live--tx-sold')), { timeout: 8_000, interval: 200 }).toBe(false);
     expect(await page.locator('.live-tx-shz').count()).toBe(0);
@@ -981,11 +982,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       if (c.name === 'past') await textOf(page.locator('.live__past-status'), RELEASES.over);
       if (c.name === 'sold-out') {
         // ONE QUEUE (MK S, lot Q1 §3.6): the variant over SOLD OUT, SIZE 52 · 1 PIECE, YOUR PLACE in one small line (its
-        // size said to a reader); no vault given (Q1): no slot, LEAVE THE LINE straight under the sentence.
+        // size said to a reader); no vault given (THE VAULT off, lot Q3): its slot hidden, LEAVE THE LINE straight under
+        // the sentence.
         await textOf(page.locator('.live__sold > .live__overline'), /^MONOLITHE/);
         await textOf(page.locator('.live__sold > .live__choice'), 'SIZE 52 · 1 PIECE');
         await textOf(page.locator('.live__sold > .live__ahead'), /^YOUR PLACE \d+\s*Your place in size 52: \d+$/);
-        expect(await page.locator('.live__vault-slot').count()).toBe(0);
+        expect(await page.locator('.live__vault-slot:not([hidden])').count()).toBe(0);
         expect(await page.locator('.live__sold > .live__note').evaluate((n) => {
           let next = n.nextElementSibling;
           while (next && (next as HTMLElement).hidden) next = next.nextElementSibling;

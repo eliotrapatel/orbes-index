@@ -2306,6 +2306,34 @@
   }
 }
 
+/* THE VAULT in the centre column (lot Q3 §3.3, §3.4; MK S and 11, desk: `.fx .vlt { margin-top: 34px; }`): 34 px under
+   the sentence, then its own room for the open lid (78 px, vault.css; D69). */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) .d-room .d-room__body > .live__vault-slot.has-vault {
+    margin-top: 34px;
+  }
+}
+
+/* The room dims while THE VAULT opens (lot Q3 §3.2; MK S, desk: vo-pagedim; N35): its photograph, the heads, the corners,
+   every line of the centre column but the vault, and the foot, from 1.8 s over 1.25 s to 16 %, held while the box is
+   open; a rare reward's from 2.52 s over 1.75 s (the phone's, read for the computer too: D15 "a slower opening"); at
+   once under reduced motion. OPEN ANOTHER, inside the vault, stays bright. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) .d-room:has(.live__vault-slot .vlt.is-open) :is(.d-room__photo, .live__head, .d-room__head, .d-room__bl, .d-room__br, .d-room__body > :not(.live__vault-slot), .live__foot) {
+    opacity: 0.16;
+  }
+}
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  html:not(.d-touch) .d-room:has(.live__vault-slot .vlt.is-playing) :is(.d-room__photo, .live__head, .d-room__head, .d-room__bl, .d-room__br, .d-room__body > :not(.live__vault-slot), .live__foot) {
+    animation: vlt-pagedim 1.25s cubic-bezier(0.16, 1, 0.3, 1) 1.8s backwards;
+  }
+
+  html:not(.d-touch) .d-room:has(.live__vault-slot .vlt.is-playing.is-rare) :is(.d-room__photo, .live__head, .d-room__head, .d-room__bl, .d-room__br, .d-room__body > :not(.live__vault-slot), .live__foot) {
+    animation: vlt-pagedim 1.75s cubic-bezier(0.16, 1, 0.3, 1) 2.52s backwards;
+  }
+}
+
 /* Reduced motion (§10.15): the room keeps its own path (house.css: cross-fades, no sweep, no reveal); its controls'
    states change at once. */
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {

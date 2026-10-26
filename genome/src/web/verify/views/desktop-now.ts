@@ -21,6 +21,7 @@ import { DESKTOP, NOW } from '../copy.js';
 
 const HERO = ':scope > .now__hero:first-child';
 const MESSAGES = ':scope > .now__messages';
+const VAULT = ':scope > .now__vault';
 const DRAW = ':scope > .n-sec:has(> .now__card:not(.now__invitation, .d-scan__card))';
 const CIRCLE = ':scope > .n-sec:has(.now__invitation)';
 const SCAN = ':scope > .n-sec:has(.landing__scan)';
@@ -131,6 +132,10 @@ export const nowArrangement: Arrangement = {
     const circle = now.querySelector<HTMLElement>(CIRCLE);
     const scan = now.querySelector<HTMLElement>(SCAN);
     if (hero && messages) moveAfter(messages, hero);
+    // THE VAULT's line (lot Q3 §3.7) follows MESSAGES' (or the frame, without it), as on the phone.
+    const vault = now.querySelector<HTMLElement>(VAULT);
+    const vaultAfter = messages ?? hero;
+    if (vault && vaultAfter) moveAfter(vault, vaultAfter);
     // The draw's pair: THE CIRCLE's invitation, else the scan; without a draw, the invitation's: the scan.
     const lead = draw ?? (circle && scan ? circle : null);
     const pair = draw ? (circle ?? scan) : lead ? scan : null;

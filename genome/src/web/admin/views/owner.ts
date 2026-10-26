@@ -33,6 +33,8 @@
  * OPERATOR; Tags and private notes (views/client-notes.ts), never shown to the client; Intelligence
  * (views/owner-intelligence.ts), read after the sheet: origin, wishlist, what they look at, devices and places. A team
  * account (its email a console login's) says so under Status.
+ *
+ * THE VAULT (lot Q3, step Q3.12), after House guarantee: the client's vaults, read-only, with GIVE A VAULT; no REVOKE.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
@@ -67,17 +69,19 @@ import { INTEREST_OUTCOME_LABELS, NOTE_ABOUT_LABELS, orderSteps, participationLi
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import type { ClientRelease, Guarantee, OwnerSheet } from '../types.js';
+import type { AdminVault, ClientRelease, Guarantee, OwnerSheet } from '../types.js';
 import { button, busy, defList, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 import { issueRecoveryCode, ownerStatus } from './owners.js';
+import { giveVaultDialog } from './vault.js';
+import { clientVaultsNote, VAULT_COPY, VAULT_STATE_LABELS, VAULT_STATE_TONES, vaultHeldText, vaultSourceText, vaultStateNote } from '../model/vault.js';
 import { profileSection } from './client-profile.js';
 import { tagsNotesSection } from './client-notes.js';
 import { intelligenceSection } from './owner-intelligence.js';
-import { OWNER_LEAD, OWNER_LEAD_MASKED, TEAM_ACCOUNT_LINE } from '../model/client-profile.js';
+import { OWNER_LEAD, OWNER_LEAD_MASKED, parisDayText, TEAM_ACCOUNT_LINE } from '../model/client-profile.js';
 
 /** Under Status: a lock's consequence, and the team account's line (§3.0 (d)). */
 function statusNote(status: string, teamAccount: boolean): string | undefined {
@@ -87,7 +91,8 @@ function statusNote(status: string, teamAccount: boolean): string | undefined {
 
 export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.accountId;
-  const sheet = await ctx.api.owner(id);
+  // THE VAULT (lot Q3, step Q3.12): the client's vaults beside the sheet, read-only.
+  const [sheet, vaults] = await Promise.all([ctx.api.owner(id), ctx.api.clientVaults(id)]);
   const o = sheet.owner;
   const role = ctx.session.admin.role;
   // The one place a recovery code appears, once.
@@ -232,6 +237,7 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
     ordersPanel(sheet),
     releasesPanel(sheet),
     guaranteesPanel(ctx, sheet),
+    vaultsPanel(ctx, sheet, vaults),
     answersPanel(sheet),
     interestPanel(sheet),
     segmentsPanel(sheet),
@@ -251,6 +257,49 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
       { id: 'transfers' },
     ),
     scansPanel(sheet),
+  );
+}
+
+/**
+ * THE VAULT (lot Q3, step Q3.12; §4.4, add only), after House guarantee: the client's vaults, the latest first, read-only
+ * (what each was given for, when, its state and what it held, its order, the staff member and the note of a house's
+ * gift); GIVE A VAULT (OPERATOR, the account ACTIVE). No REVOKE (N36): only a returned piece takes an unopened vault back.
+ */
+function vaultsPanel(ctx: ViewContext, sheet: OwnerSheet, vaults: readonly AdminVault[]): HTMLElement {
+  const o = sheet.owner;
+  const give = () => void giveVaultDialog(ctx, { accountId: o.id, email: o.email }).then((ok) => ok && ctx.reload(), notifyError);
+  const tools = can(ctx.session.admin.role, 'giveVault') && o.status === 'ACTIVE' ? [button(VAULT_COPY.give, { kind: 'ghost', testId: 'client-vault-give', onClick: give })] : [];
+  return section(
+    'THE VAULT',
+    h(
+      'div',
+      { data: { testid: 'client-vaults' } },
+      table(
+        [
+          { label: 'Source', cell: (v) => h('span', { data: { testid: 'client-vault-source' } }, vaultSourceText(v)) },
+          { label: 'Given', cell: (v) => h('span', null, parisDayText(v.givenAt), v.givenBy ? h('span', { class: 'cell-sub' }, v.givenBy.email) : null), kind: ['nowrap'] },
+          {
+            label: 'State',
+            cell: (v) => h('span', null, h('span', { data: { testid: 'client-vault-state' } }, statusMark(VAULT_STATE_LABELS[v.state], VAULT_STATE_TONES[v.state])), h('span', { class: 'cell-sub' }, vaultStateNote(v))),
+            kind: ['nowrap'],
+          },
+          {
+            label: 'What it held',
+            cell: (v) =>
+              h(
+                'span',
+                null,
+                h('span', { data: { testid: 'client-vault-held' } }, vaultHeldText(v)),
+                v.orderId ? h('span', { class: 'cell-sub' }, h('a', { class: 'idlink', attrs: { href: href('order', { orderId: v.orderId }) } }, 'Its order')) : null,
+              ),
+          },
+          { label: 'Note', cell: (v) => (v.note ? h('span', { class: 'cell-details' }, v.note) : '—'), kind: ['wide'] },
+        ],
+        [...vaults],
+        { empty: VAULT_COPY.noVault, caption: 'THE VAULT' },
+      ),
+    ),
+    { id: 'vaults', note: vaults.length ? clientVaultsNote(vaults) : VAULT_COPY.clientNote, tools },
   );
 }
 

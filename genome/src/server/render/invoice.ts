@@ -114,13 +114,14 @@ export const INVOICE_LAYOUT = Object.freeze({
 /**
  * The most lines of each kind an invoice carries (services/invoices.ts issueInvoice): the piece; its add-ons, six at most
  * as a LIVE RELEASE's (services/live.ts LIVE_ADDONS_MAX); its shipping; a CREDIT line per tier whose grant it takes from
- * (PLATINE and PALLADIUM), one for the birthday credit (CREDIT · BIRTHDAY, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3)
- * and one for the warranty credit (CREDIT · WARRANTY, plan ORBES CARE); a welcome gift per tier (an account reaching
- * PALLADIUM at once holds both) (plan NEXT-NINE, BP-19 T4 and T5), written out here, the renderer importing no service.
+ * (PLATINE and PALLADIUM), one for the birthday credit (CREDIT · BIRTHDAY, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3),
+ * one for a vault's credits (CREDIT · VAULT, THE VAULT) and one for the warranty credit (CREDIT · WARRANTY, plan ORBES
+ * CARE); a welcome gift per tier (an account reaching PALLADIUM at once holds both) (plan NEXT-NINE, BP-19 T4 and T5),
+ * written out here, the renderer importing no service.
  */
-export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, engraving: 1, shipping: 1, credit: 4, gift: 2 });
+export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, engraving: 1, shipping: 1, credit: 5, gift: 2 });
 /**
- * Lines a page holds: the sum of the budget, 15. Up to seven keep the table's pitch; more share its height; from the
+ * Lines a page holds: the sum of the budget, 16. Up to seven keep the table's pitch; more share its height; from the
  * fourteenth a line's detail sits closer under it, clear of the next line's lettering.
  */
 export const INVOICE_MAX_LINES = Object.values(INVOICE_LINE_BUDGET).reduce((n, k) => n + k, 0);

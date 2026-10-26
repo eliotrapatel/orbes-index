@@ -36,6 +36,7 @@ import type { SessionStore } from '../session.js';
 import type { AccountOrder } from '../types.js';
 import { listLine, orderPagePath, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
+import { vaultClaimBlock } from './vault-orders.js';
 import { appAnchor, button, definitionList, failedState, icon, loadingState, orderSteps, textLink } from './nocturne.js';
 import { OrderSheet, type OrderSheetRequest } from './order-sheet.js';
 import { orderAddonsBlock } from './order-addons.js';
@@ -240,6 +241,8 @@ class OrderPage {
         h('p', { class: 'n-g n-lb d-order__ref' }, `${ORDERS.reference('')}`.trim(), ' ', h('span', { class: 'n-num d-order__ref-value' }, ...withNumerals(reference))),
         steps,
         h('p', { class: 'n-tx d-order__sentence', text: m.sentence }),
+        // THE VAULT (lot Q3 §3.8): a piece won free, CLAIM IT with its size (its address in DELIVERY ADDRESS).
+        m.vaultClaim ? vaultClaimBlock(m.vaultClaim, { api: this.deps.api, session: this.deps.session, onOrder: (order) => void this.changed(order, 'claim') }) : null,
         claim,
         rows.length > 0 ? h('div', { class: 'd-order__terms' }, definitionList(rows, { kind: 'kv' })) : null,
         h(

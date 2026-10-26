@@ -19,7 +19,8 @@
  *                 by their role only) and the active carriers for Ship; since plan MACRO M3 §1.1 (B1, B2) the box to use
  *                 and the parcel's weight (`packing`: ParcelPacking, never a cost), the checklist's box line naming the
  *                 box. No price, no email, no account, no release: what the agent may read, which also prints its packing
- *                 slip (with the box and the weight).
+ *                 slip (with the box and the weight). Since lot Q3 (§2.8; D49, N9) THE VAULT CARD: a line after an order's card
+ *                 line when its piece would open a vault (`vaultCardOrders`), ticked by hand at packing, and the slip's row.
  *   housekeeping  `purgePackingPhotos`: a parcel's photo erased 14 days after its delivery (RETURN_WINDOW_DAYS), unless a
  *                 return or an exchange of its orders is still open (it is erased once that case is closed or
  *                 cancelled); a parcel never delivered, 14 days after its parcel problem was decided or cancelled, or
@@ -34,6 +35,7 @@ import { writeJournal } from './journal.js';
 import { parcelAddonItems, type ParcelAddonItem } from './order-addons.js';
 import { orderReference, trackingLink } from './orders.js';
 import type { LocationScope } from './receptions.js';
+import { orderOfABoughtPiece } from './vault.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -91,6 +93,8 @@ export interface ParcelPiece {
   surprise: string | null;
   /** The piece bound to the order (by its packing scan), and whether it is scanned in the current shipment. */
   piece: { productId: string; scanned: boolean } | null;
+  /** THE VAULT CARD goes in the box with this piece (lot Q3, §2.8: its checklist line `vault-card:<order>`). */
+  vaultCard: boolean;
 }
 
 /** A line of the packing checklist: ticked by hand, or (`byScan`) only by the card's scan. */
@@ -262,10 +266,36 @@ export async function parcelTiming(db: Db, open: readonly OrderRow[], now: Date,
   return { readySince: readySinceAt, late: now.getTime() > readySinceAt.getTime() + delay * DAY_MS };
 }
 
+/** THE VAULT CARD's checklist line (lot Q3, §2.8; vault/SCOPE.md H "SHIPPING CHECKLIST line 'THE VAULT CARD'"). */
+export const VAULT_CARD_LINE = 'THE VAULT CARD';
+
+/**
+ * The orders of a parcel whose box holds THE VAULT CARD (lot Q3, §2.8; D49, N9): each order whose piece would open a
+ * vault at its first registration (`orderOfABoughtPiece`, N8: every LIVE, DRAW and SALON order, later a Shopify one, a
+ * VAULT order bought under its RIGHT TO BUY; never a welcome GIFT, a VAULT order at 0 nor an EXCHANGE's replacement, as
+ * the card says "we have added a vault"), while THE VAULT's PIECE source is on. A parcel packed keeps the lines it was
+ * packed with (`shipment`'s stored checklist): one packed before lot Q3, or while the source was off, has none.
+ */
+export async function vaultCardOrders(
+  db: Db,
+  orders: readonly Pick<OrderRow, 'id' | 'channel' | 'price_minor'>[],
+  shipment: Pick<ShipmentRow, 'packed_at' | 'checklist'> | null = null,
+): Promise<Set<string>> {
+  if (shipment?.packed_at) {
+    const stored = new Set((shipment.checklist ?? []).map((l) => l.key));
+    return new Set(orders.filter((o) => stored.has(`vault-card:${o.id}`)).map((o) => o.id));
+  }
+  if (orders.length === 0) return new Set();
+  const piece = await db.selectFrom('vault_sources').select('enabled').where('source', '=', 'PIECE').executeTakeFirst();
+  if (!piece?.enabled) return new Set();
+  return new Set(orders.filter(orderOfABoughtPiece).map((o) => o.id));
+}
+
 /**
  * The checklist a parcel's orders expect (question 12 as built: one card line per piece). Its box line names the box to
  * use (plan MACRO M3 §1.1: « The box: CUBE 80, and the pouch »), « The box and the pouch » without one; its key stays
- * `box`, so a parcel packed before keeps its stored line.
+ * `box`, so a parcel packed before keeps its stored line. Lot Q3 (§2.8): THE VAULT CARD after the card line of each
+ * order in `vaultCards` (`vaultCardOrders`), key `vault-card:<order>`, ticked by hand.
  */
 export function checklistOf(
   orders: readonly Pick<OrderRow, 'id' | 'addons' | 'engraving_text'>[],
@@ -273,6 +303,7 @@ export function checklistOf(
   scanned: ReadonlySet<string>,
   box: { name: string } | null = null,
   addonItems: ReadonlyMap<string, readonly { addonId: string; name: string; units: number; engraving?: boolean }[]> = new Map(),
+  vaultCards: ReadonlySet<string> = new Set(),
 ): ChecklistLine[] {
   const many = orders.length > 1;
   const lines: ChecklistLine[] = [];
@@ -280,6 +311,7 @@ export function checklistOf(
     const which = many ? ` (${i + 1} of ${orders.length})` : '';
     lines.push({ key: `piece:${o.id}`, label: `The right piece: its card scanned${which}`, byScan: true, ticked: scanned.has(o.id) });
     lines.push({ key: `card:${o.id}`, label: `The card, its claim code visible${which}`, byScan: false, ticked: ticked.has(`card:${o.id}`) });
+    if (vaultCards.has(o.id)) lines.push({ key: `vault-card:${o.id}`, label: `${VAULT_CARD_LINE}${which}`, byScan: false, ticked: ticked.has(`vault-card:${o.id}`) });
   });
   lines.push({ key: 'box', label: box ? `The box: ${box.name}, and the pouch` : 'The box and the pouch', byScan: false, ticked: ticked.has('box') });
   for (const o of orders) {
@@ -474,7 +506,8 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
   // A parcel packed keeps the box line it was packed with (a parcel packed before boxes existed: « The box and the pouch »).
   const stored = shipment?.packed_at ? (shipment.checklist ?? []).find((l) => l.key === 'box') : undefined;
   const addonItems = await parcelAddonItems(db, members.map((o) => o.id));
-  const checklist = checklistOf(members, ticked, scanned, packing.box, addonItems).map((l) => (stored && l.key === 'box' ? { ...l, label: stored.label } : l));
+  const vaultCards = await vaultCardOrders(db, members, shipment);
+  const checklist = checklistOf(members, ticked, scanned, packing.box, addonItems, vaultCards).map((l) => (stored && l.key === 'box' ? { ...l, label: stored.label } : l));
   return {
     id: key,
     reference: orderReference(key),
@@ -497,6 +530,7 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
         engraving: o.engraving_text,
         surprise: o.surprise,
         piece: o.product_id ? { productId: pieceRef.get(o.product_id)!, scanned: scanned.has(o.id) } : null,
+        vaultCard: vaultCards.has(o.id),
       };
     }),
     shipTo: { name: first.buyer_name, address: first.buyer_address, country: first.buyer_country, phone: first.buyer_phone },

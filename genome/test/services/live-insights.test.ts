@@ -533,6 +533,18 @@ describe('the release report', () => {
     }
   });
 
+  it('THE VAULT (lot Q3, §4.2): the report carries the release\'s switch and its vaults given and opened, in its CSV too; none on an after-room', () => {
+    const r = release({ sizes: [{ id: 's52', label: '52', stock: 2 }], endedAt: at(3 * MINUTE), endedReason: 'SOLD_OUT' });
+    const base = { release: r, entries: [confirmed(0, 10 * SECOND, MINUTE)], interest: 0, addons: [], entryAddons: [], additions: [], over: true };
+    const rep = releaseReport({ ...base, vaults: { on: true, given: 7, opened: 3 } });
+    expect(rep.vaults).toEqual({ on: true, given: 7, opened: 3 });
+    const csv = releaseReportCsv(rep);
+    for (const row of ['"the vault","switch","on"', '"the vault","vaults given","7"', '"the vault","vaults opened","3"']) expect(csv, row).toContain(row);
+    const none = releaseReport(base);
+    expect(none.vaults).toBeNull();
+    expect(releaseReportCsv(none)).not.toContain('the vault');
+  });
+
   it('a sold-out release gives its time to sell out overall', () => {
     const r = release({ sizes: [{ id: 's52', label: '52', stock: 2 }], endedAt: at(3 * MINUTE), endedReason: 'SOLD_OUT' });
     const rep = releaseReport({ release: r, entries: [confirmed(0, 10 * SECOND, MINUTE), confirmed(0, 20 * SECOND, 3 * MINUTE)], interest: 0, addons: [], entryAddons: [], additions: [], over: true });

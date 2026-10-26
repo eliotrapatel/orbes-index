@@ -28,8 +28,9 @@
  */
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
-import { CIRCLE, LIVE, LOOKBOOK, MESSAGES, NOW, PIECES, RELEASES } from '../copy.js';
+import { CIRCLE, LIVE, LOOKBOOK, MESSAGES, NOW, PIECES, RELEASES, VAULT } from '../copy.js';
 import { nowMessagesLine } from '../messages-model.js';
+import { nowVaultLine, VAULT_PAGE_PATH } from '../vault-model.js';
 import { measureClock } from '../live-model.js';
 import {
   collectionHero,
@@ -57,7 +58,7 @@ import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle,
 import { openMessages, type MessagesPart } from './write.js';
 
 export interface NowDeps {
-  api: Pick<ApiClient, 'liveReleases' | 'drops' | 'lookbook' | 'products' | 'clubStatus' | 'circle' | 'circleAnswer' | 'liveClock' | 'messagesUnread'>;
+  api: Pick<ApiClient, 'liveReleases' | 'drops' | 'lookbook' | 'products' | 'clubStatus' | 'circle' | 'circleAnswer' | 'liveClock' | 'messagesUnread' | 'vaultsWaiting'>;
   session: SessionStore;
   /** This phone's time zone: a LIVE RELEASE says its time in Paris, then here when it differs. */
   localZone: string;
@@ -70,6 +71,8 @@ export interface NowDeps {
   onModel(slug: string): void;
   onCircle(): void;
   onPost(id: string): void;
+  /** THE VAULT page (lot Q3 §3.7): NOW's line while a vault waits, OPEN. */
+  onVault(): void;
   /**
    * NOW opens as a screen change (not the page's first load): focus, left on <body> by the screen that went, comes to
    * its title, or to SCAN ORBES CODE without one, the way the landing's did.
@@ -104,6 +107,8 @@ interface NowData {
   unread: boolean;
   /** Lot M2 (M4): a house message is unread (FROM ORBES; false signed out, or unreadable). */
   house: boolean;
+  /** Lot Q3 (D18): how many vaults wait (0 signed out, none, or unreadable: no line). */
+  vaults: number;
 }
 
 /** The countdown is drawn again this often (its seconds within the last day). */
@@ -168,7 +173,7 @@ class Now implements NowView {
             return fallback;
           })
         : Promise.resolve(fallback);
-    const [live, drops, collection, pieces, club, circle, clock, unread] = await Promise.all([
+    const [live, drops, collection, pieces, club, circle, clock, unread, vaults] = await Promise.all([
       api.liveReleases().catch((): LiveCard[] => []),
       api.drops().catch((): DropCard[] => []),
       api.lookbook().catch((): LookbookCard[] => []),
@@ -178,11 +183,12 @@ class Now implements NowView {
       owner<CircleCard[] | null>(async () => (await api.circle(1, 50, { visit: false })).items, null),
       measureClock(() => api.liveClock(), 1).catch(() => null),
       owner<MessagesUnread>(() => api.messagesUnread(), { unread: false, house: false }),
+      owner<number>(() => api.vaultsWaiting(), 0),
     ]);
     if (this.disposed || reading !== this.reading) return;
     if (clock) this.offset = clock.offset;
     this.signedIn = signedIn;
-    this.data = { signedIn, sessionKnown, top: nowTop(live, drops, collection), collection, pieces, club, circle, unread: unread.unread, house: unread.house };
+    this.data = { signedIn, sessionKnown, top: nowTop(live, drops, collection), collection, pieces, club, circle, unread: unread.unread, house: unread.house, vaults };
     this.render();
   }
 
@@ -221,6 +227,7 @@ class Now implements NowView {
     const lead = sections.length === 0;
     if (d.signedIn) {
       sections.push(this.messagesLine(d));
+      sections.push(this.vaultLine(d));
       sections.push(this.piecesSection(d, lead));
       sections.push(this.circleSection(d));
     }
@@ -283,6 +290,22 @@ class Now implements NowView {
       { class: 'n-px n-sb now__messages', attrs: { 'aria-label': MESSAGES.title } },
       h('div', { class: 'now__messages-text' }, h('p', { class: 'n-g n-lb', text: m.label }), h('p', { class: 'n-sm now__messages-sentence', text: m.sentence })),
       textLink(m.action, { onOpen: () => openMessages(this.root.querySelector<HTMLElement>('.now__messages .n-tl'), m.house ? 'house' : 'conversation'), extraClass: 'now__messages-read' }),
+    );
+  }
+
+  /**
+   * THE VAULT (lot Q3 §3.7, D18): while a vault waits, one line under the hero in the messages line's pattern (after it
+   * when both show): A VAULT IS WAITING FOR YOU, and OPEN, THE VAULT page. Nothing signed out, when none waits, or when
+   * the count cannot be read.
+   */
+  private vaultLine(d: NowData): HTMLElement | null {
+    const m = nowVaultLine(d.vaults);
+    if (!m) return null;
+    return h(
+      'section',
+      { class: 'n-px n-sb now__vault', attrs: { 'aria-label': VAULT.name } },
+      h('div', { class: 'now__messages-text' }, h('p', { class: 'n-g n-lb', text: m.label })),
+      textLink(m.action, { href: VAULT_PAGE_PATH, onOpen: () => this.deps.onVault(), extraClass: 'now__vault-open' }),
     );
   }
 

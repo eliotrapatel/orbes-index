@@ -56,7 +56,7 @@ describe.skipIf(!HAS_CHROMIUM)('desktop pages (Chromium, a computer)', () => {
           // ── YOUR ACCOUNT, its cards, each a link to its page ──
           await check('YOUR ACCOUNT', '/verify/account', '.view--account .d-acct__cards', 'you', async (page) => {
             const cards = await page.locator('.view--account a.d-acct__card').evaluateAll((els) => els.map((a) => [(a as HTMLElement).querySelector('.d-acct__card-title, .n-g')?.textContent?.trim() ?? '', a.getAttribute('href')]));
-            expect(cards.map(([, href]) => href)).toEqual(['/verify/account/profile', '/verify/account/sizes', '/verify/account/addresses', '/verify/account/wishlist', '/verify/messages', '/verify/account/password']);
+            expect(cards.map(([, href]) => href)).toEqual(['/verify/account/profile', '/verify/account/sizes', '/verify/account/addresses', '/verify/account/wishlist', '/verify/account/vault', '/verify/messages', '/verify/account/password']);
             expect(await words(page, '.view--account h1')).toEqual(['YOUR ACCOUNT']);
             expect(await page.getByRole('button', { name: 'SIGN OUT', exact: true }).count()).toBe(1);
           });

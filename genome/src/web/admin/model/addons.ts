@@ -346,6 +346,36 @@ export function addonChange(a: AddonView, v: AddonForm): { fields: AddonInput; p
   return { fields, prices };
 }
 
+/**
+ * The amendment of 25 Oct (lot Q3, step Q3.12; ANSWERS.md "Q2 BUILD QUESTIONS — DECIDED"): the ENGRAVING's prices and its
+ * YOUR ORDERS switch are an ADMIN's; an OPERATOR keeps every other field and every other add-on. The server refuses the
+ * rest (routes/admin/addons.ts `engravingAdminOnly`), in these words.
+ */
+export const ENGRAVING_ADMIN_ONLY = Object.freeze({
+  refused: 'Only an ADMIN changes the ENGRAVING’s prices and its YOUR ORDERS switch.',
+  note: 'Its prices and its YOUR ORDERS switch are an ADMIN’s: an OPERATOR changes every other field.',
+});
+
+/**
+ * What the server would refuse an OPERATOR on the ENGRAVING (null for an ADMIN, or when nothing of it is touched): a new
+ * engraving with a price or YOUR ORDERS on; an add-on made the engraving with a price, YOUR ORDERS on after it, or its
+ * prices changed; the engraving's prices or YOUR ORDERS switch changed.
+ */
+export function engravingAdminProblem(a: AddonView | null, v: AddonForm, admin: boolean): string | null {
+  if (admin) return null;
+  if (!a) {
+    if (!isEngravingForm(v)) return null;
+    return Object.values(pricesOf(v)).some((p) => p !== null && p !== undefined) || offeredOf(v).orders ? ENGRAVING_ADMIN_ONLY.refused : null;
+  }
+  const c = addonChange(a, v);
+  const pricesChanged = Object.keys(c.prices).length > 0;
+  const ordersChanged = c.fields.offeredAt?.orders !== undefined;
+  if (a.engraving) return pricesChanged || ordersChanged ? ENGRAVING_ADMIN_ONLY.refused : null;
+  if (c.fields.engraving !== true) return null;
+  const ordersAfter = c.fields.offeredAt?.orders ?? a.offeredAt.orders;
+  return a.prices.length > 0 || ordersAfter || pricesChanged ? ENGRAVING_ADMIN_ONLY.refused : null;
+}
+
 /** Whether an edit changes nothing. */
 export function addonUnchanged(c: ReturnType<typeof addonChange>): boolean {
   return Object.keys(c.fields).length === 0 && Object.keys(c.prices).length === 0;

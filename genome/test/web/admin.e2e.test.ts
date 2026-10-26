@@ -1419,7 +1419,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   it('reads the staff documents in the console: the playbook with its contents and tables, the kit with its card', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await go(page, '#/documents', 'Documents');
-    await expect.poll(() => page.locator('[data-testid=documents] .docs__card').count(), POLL).toBe(2);
+    await expect.poll(() => page.locator('[data-testid=documents] .docs__card').count(), POLL).toBe(3);
     await page.click('[data-testid=document-sales-playbook]');
     await expect.poll(async () => (await title(page).textContent())?.trim(), POLL).toBe('Sales and shipping playbook');
     const article = page.locator('.doc__article');
@@ -1441,6 +1441,20 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await img.scrollIntoViewIfNeeded();
     await expect.poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0);
     await page.screenshot({ path: join(OUT_DIR, 'admin-documents-kit.png') });
+    // THE VAULT CARD (lot Q3, §5): its specimen, and its two print files to download.
+    await go(page, '#/documents/vault-card', 'THE VAULT CARD');
+    const specimen = page.locator('.doc__article img.md__img').first();
+    await specimen.scrollIntoViewIfNeeded();
+    await expect.poll(() => specimen.evaluate((el) => (el as HTMLImageElement).naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0);
+    const files = page.locator('.doc__article a.md__link[download]');
+    expect(await files.evaluateAll((links) => links.map((a) => [a.getAttribute('download'), a.getAttribute('href')]))).toEqual([
+      ['vault-card-sheet.pdf', '/api/admin/documents/assets/vault-card-sheet.pdf'],
+      ['vault-card-single.pdf', '/api/admin/documents/assets/vault-card-single.pdf'],
+    ]);
+    const [sheet] = await Promise.all([page.waitForEvent('download'), files.first().click()]);
+    expect(sheet.suggestedFilename()).toBe('vault-card-sheet.pdf');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: join(OUT_DIR, 'admin-documents-vault-card.png') });
     await go(page, '#/documents', 'Documents');
     await page.screenshot({ path: join(OUT_DIR, 'admin-documents.png') });
     await page.setViewportSize({ width: 1280, height: 900 });

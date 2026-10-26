@@ -255,6 +255,15 @@ export class LiveChanges {
     this.marks.set(dropId, this.gate.changed(dropId));
   }
 
+  /**
+   * The transaction is run again from the start (a deadlock's retry, inRetriedTransaction): its marks are taken afresh
+   * when the try marks again, under that try's row lock. The earlier try's marks need no settling of their own: a later
+   * mark of the same release settles them (`settle` reaches every mark up to it).
+   */
+  anew(): void {
+    this.marks.clear();
+  }
+
   /** The transaction has ended: each mark settled, a frame asked for. */
   settle(): void {
     const gate = this.gate;

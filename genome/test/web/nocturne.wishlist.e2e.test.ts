@@ -137,7 +137,8 @@ const CASES: { state: UiState; check: Check }[] = [
       await page.locator('.n-hd button.n-acct').click();
       await accountSheet(page).locator('.n-account__wishlist-line').waitFor({ timeout: 20_000 });
       const rows = (await accountSheet(page).locator('.n-account__rows .n-row__label').allInnerTexts()).map(norm);
-      expect(rows.slice(rows.indexOf('YOUR ADDRESSES'), rows.indexOf('YOUR ADDRESSES') + 3)).toEqual(['YOUR ADDRESSES', 'YOUR WISHLIST', 'SOUND']);
+      // THE VAULT's row follows it (lot Q3, step Q3.11: after YOUR WISHLIST, D41), then SOUND.
+      expect(rows.slice(rows.indexOf('YOUR ADDRESSES'), rows.indexOf('YOUR ADDRESSES') + 4)).toEqual(['YOUR ADDRESSES', 'YOUR WISHLIST', 'THE VAULT', 'SOUND']);
       expect(norm(await accountSheet(page).locator('.n-account__wishlist-line').innerText())).toBe('NONE YET');
       await page.keyboard.press('Escape');
       // Three wishes: MONOLITHE in blue now, in gold two days before (discontinued since), ZENITH five days before (hidden since).

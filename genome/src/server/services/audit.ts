@@ -185,6 +185,53 @@ function optionalText(v: string | null | undefined, field: string, max = MAX_FIE
   return s;
 }
 
+/** An entry checked and normalised, as it is hashed and stored (its id, time and links aside). */
+function prepareEntry(entry: AuditRecordInput) {
+  const actor = entry.actor;
+  if (!actor || !ACTOR_TYPES.includes(actor.type)) throw validationError('Audit actor is invalid.');
+  if (typeof entry.action !== 'string' || entry.action.length > MAX_ACTION || !ACTION_RE.test(entry.action)) {
+    throw validationError('Audit action is invalid.');
+  }
+  if (entry.details !== undefined && (entry.details === null || typeof entry.details !== 'object' || Array.isArray(entry.details))) {
+    throw validationError('Audit details must be an object.');
+  }
+  const details = (normaliseJson(entry.details ?? {}) ?? {}) as JsonObject;
+  const row = {
+    actorType: actor.type,
+    actorId: optionalText(actor.id, 'actor id'),
+    action: entry.action,
+    targetType: optionalText(entry.targetType, 'target type', MAX_ACTION),
+    targetId: optionalText(entry.targetId, 'target id'),
+    details,
+    ipHash: optionalText(actor.ipHash, 'ip hash'),
+  };
+  const detailsText = jsonText(details);
+  if (Buffer.byteLength(detailsText, 'utf8') > MAX_DETAILS_BYTES) throw validationError('Audit details are too large.');
+  return { row, detailsText };
+}
+
+type PreparedRow = ReturnType<typeof prepareEntry>['row'];
+
+/** The `audit_logs` row of a prepared entry. */
+function auditRow(id: number, occurredAt: Date, row: PreparedRow, detailsText: string, prevHash: Uint8Array, hash: Uint8Array) {
+  return {
+    id,
+    occurred_at: occurredAt,
+    actor_type: row.actorType,
+    actor_id: row.actorId,
+    action: row.action,
+    target_type: row.targetType,
+    target_id: row.targetId,
+    details: detailsText,
+    ip_hash: row.ipHash,
+    prev_hash: prevHash,
+    hash,
+  };
+}
+
+/** The rows `recordAll` inserts per statement (11 parameters each, far under PostgreSQL's 65 535). */
+const AUDIT_BATCH_ROWS = 500;
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export class AuditService {
@@ -202,26 +249,7 @@ export class AuditService {
    * chain lock is then held until that transaction ends.
    */
   async record(entry: AuditRecordInput, trx?: Db): Promise<AuditEntry> {
-    const actor = entry.actor;
-    if (!actor || !ACTOR_TYPES.includes(actor.type)) throw validationError('Audit actor is invalid.');
-    if (typeof entry.action !== 'string' || entry.action.length > MAX_ACTION || !ACTION_RE.test(entry.action)) {
-      throw validationError('Audit action is invalid.');
-    }
-    if (entry.details !== undefined && (entry.details === null || typeof entry.details !== 'object' || Array.isArray(entry.details))) {
-      throw validationError('Audit details must be an object.');
-    }
-    const details = (normaliseJson(entry.details ?? {}) ?? {}) as JsonObject;
-    const row = {
-      actorType: actor.type,
-      actorId: optionalText(actor.id, 'actor id'),
-      action: entry.action,
-      targetType: optionalText(entry.targetType, 'target type', MAX_ACTION),
-      targetId: optionalText(entry.targetId, 'target id'),
-      details,
-      ipHash: optionalText(actor.ipHash, 'ip hash'),
-    };
-    const detailsText = jsonText(details);
-    if (Buffer.byteLength(detailsText, 'utf8') > MAX_DETAILS_BYTES) throw validationError('Audit details are too large.');
+    const { row, detailsText } = prepareEntry(entry);
 
     return inTransaction(trx ?? this.db, async (tx) => {
       await advisoryXactLock(tx, ADVISORY_LOCK.AUDIT_CHAIN);
@@ -233,24 +261,42 @@ export class AuditService {
       const occurredAt = new Date(this.clock().getTime());
       const hash = computeAuditHash(prevHash, { id, occurredAt, ...row });
 
-      await tx
-        .insertInto('audit_logs')
-        .values({
-          id,
-          occurred_at: occurredAt,
-          actor_type: row.actorType,
-          actor_id: row.actorId,
-          action: row.action,
-          target_type: row.targetType,
-          target_id: row.targetId,
-          details: detailsText,
-          ip_hash: row.ipHash,
-          prev_hash: prevHash,
-          hash,
-        })
-        .execute();
+      await tx.insertInto('audit_logs').values(auditRow(id, occurredAt, row, detailsText, prevHash, hash)).execute();
 
       return { id, occurredAt, ...row, prevHash: toHex(prevHash), hash: toHex(hash) };
+    });
+  }
+
+  /**
+   * Append several entries, in their order, under one hold of the chain's lock: the head read once, their ids
+   * allocated together (in chain order), the rows inserted AUDIT_BATCH_ROWS a statement. The same entries, links and
+   * hashes as `record` called for each in turn, for a caller with many to write in one transaction (a LIVE sell-out's
+   * `vault.give`, one per collector in the line): a few statements instead of four per entry. Every entry is checked
+   * before anything is written.
+   */
+  async recordAll(entries: readonly AuditRecordInput[], trx?: Db): Promise<void> {
+    if (entries.length === 0) return;
+    if (entries.length === 1) {
+      await this.record(entries[0]!, trx);
+      return;
+    }
+    const prepared = entries.map((e) => prepareEntry(e));
+
+    await inTransaction(trx ?? this.db, async (tx) => {
+      await advisoryXactLock(tx, ADVISORY_LOCK.AUDIT_CHAIN);
+      const last = await tx.selectFrom('audit_logs').select('hash').orderBy('id', 'desc').limit(1).executeTakeFirst();
+      let prevHash = last ? toBytes(last.hash) : AUDIT_GENESIS_HASH;
+      const seq = await sql<{ id: number | string }>`SELECT nextval(pg_get_serial_sequence('audit_logs', 'id')) AS id FROM generate_series(1, ${prepared.length}::int)`.execute(tx);
+      const ids = seq.rows.map((r) => Number(r.id)).sort((a, b) => a - b);
+      const rows = prepared.map(({ row, detailsText }, i) => {
+        const id = ids[i]!;
+        const occurredAt = new Date(this.clock().getTime());
+        const hash = computeAuditHash(prevHash, { id, occurredAt, ...row });
+        const out = auditRow(id, occurredAt, row, detailsText, prevHash, hash);
+        prevHash = hash;
+        return out;
+      });
+      for (let i = 0; i < rows.length; i += AUDIT_BATCH_ROWS) await tx.insertInto('audit_logs').values(rows.slice(i, i + AUDIT_BATCH_ROWS)).execute();
     });
   }
 

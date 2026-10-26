@@ -634,7 +634,7 @@ export class OrderCaseService {
         tx,
         o,
         // Plan MACRO M3 §4.2: a size exchange leaves the add-ons with the collector; a refund takes them back.
-        { outcome: d.pieceTo, locationId: location, note: d.note, caseId: c.id, keepAddons: d.decision === 'EXCHANGE', addonsOut: d.addonsOut },
+        { outcome: d.pieceTo, locationId: location, note: d.note, caseId: c.id, keepAddons: d.decision === 'EXCHANGE', addonsOut: d.addonsOut, keepVault: d.decision === 'EXCHANGE' },
         { productId: peek.product_id, reclaim: peek.ownership_id !== null, claimHash },
         actor,
         now,

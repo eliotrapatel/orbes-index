@@ -10,7 +10,7 @@
  * writes its own label; the one here is what the collector reads before sending.
  */
 import { HOUSE_MOMENT_LINKS, type HouseLinkKind, type HouseMomentName } from '../../shared/house-words.js';
-import { FROM_ORBES, HOUSE, MESSAGES } from './copy.js';
+import { FROM_ORBES, HOUSE, MESSAGES, VAULT } from './copy.js';
 import type { AccountHouseMessage, AccountMessage, AccountThread, MessageContextInput, MessageContextKind } from './types.js';
 import { formatDateTime } from './view-model.js';
 
@@ -177,10 +177,11 @@ export function nowMessagesLine(unread: boolean, houseUnread = false): { label: 
  * Where a house message's link leads in the app: a piece (on its ORBES CARE tab for CARING FOR YOUR PIECE), MY PIECES,
  * YOUR SIZES, the tier's IN USE (the account), THE COLLECTION.
  */
-export type HouseTarget = { to: 'piece'; id: string; tab?: 'care' } | { to: 'my-pieces' } | { to: 'sizes' } | { to: 'in-use' } | { to: 'collection' };
+export type HouseTarget = { to: 'piece'; id: string; tab?: 'care' } | { to: 'my-pieces' } | { to: 'sizes' } | { to: 'in-use' } | { to: 'collection' } | { to: 'vault' };
 
 export interface HouseLink {
-  kind: HouseLinkKind;
+  /** A moment's kind of link; VAULT: THE VAULT page, a vault's arrival and receipt (lot Q3 §2.7). */
+  kind: HouseLinkKind | 'VAULT';
   label: string;
   target: HouseTarget;
 }
@@ -232,7 +233,8 @@ export function houseItem(m: AccountHouseMessage, offsetMinutes: number): HouseI
     author: `${HOUSE.author} · ${formatDateTime(m.at, offsetMinutes)}`,
     title: m.title,
     body: m.body,
-    links: houseLinks(m.moment, m.pieceRef, m.pieceHeld),
+    // A vault's arrival and its receipt (lot Q3 §2.7): the link THE VAULT, its page.
+    links: m.source === 'VAULT' ? [{ kind: 'VAULT', label: VAULT.name, target: { to: 'vault' } }] : houseLinks(m.moment, m.pieceRef, m.pieceHeld),
     unread: m.unread,
     at: m.at,
   };

@@ -890,6 +890,100 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('says THE VAULT in one paragraph of article 13, its orders in article 14\'s first paragraph and the invitation link, the vaults and a credit to give accepted in one block of the privacy policy (lot Q3, D22, D23, D59, N22, L2, the review): every rule of round 1, no clause on taking a vault back for error or abuse, nothing else changed', () => {
+    // The code (services/vault.ts, routes/account.ts, services/auth.ts; TERMS-FACTS R193 to R202, N13, N14): the source and
+    // release switches, the limit per occasion, 30 days, an opening without a body, the server's draw, the card in a run-out
+    // reward's place, a credit to give for a friend without a piece, the returned piece's vault the only taking-back.
+    const vault = readDoc('genome/src/server/services/vault.ts');
+    for (const x of [
+      "if (!source?.enabled) return none('SOURCE_OFF');",
+      'const most = source.cap === null ? VAULT_OCCASION_INDEX_MAX : Math.min(VAULT_OCCASION_INDEX_MAX, source.cap * source.per_occasion);',
+      'const drawn = drawRow(others, this.random(VAULT_DRAW_PARTS));',
+      'pick = await rewardPick(tx, floor, v);',
+      'if ((await tierOf(tx, me, now)).pieces > 0) throw vaultGiftNotForYou(false);',
+      "revoked_reason: 'RETURNED'",
+    ])
+      expect(vault).toContain(x);
+    expect(readDoc('genome/src/server/services/auth.ts')).toContain('invited_by: invitedBy,');
+    // Article 14 (the review of lot Q3; TERMS-FACTS R203): a piece won free claimed, then PAID at 0; cancelled unclaimed by
+    // the housekeeping; a right to buy within its 24 hours at the usual price.
+    for (const x of [
+      "const paid = await step(tx, o, { to: 'PAID', note: null }, actor, at, notes, this.mail);",
+      "await step(tx, o, { to: 'CANCELLED', note: VAULT_NOT_CLAIMED }, SYSTEM_ACTOR, now, notes, this.mail);",
+      'throw vaultOfferEnded(VAULT_BUY_ENDED);',
+      'const price = await usualPrice(tx, r.model_id);',
+    ])
+      expect(vault).toContain(x);
+    const orders = {
+      en: 'a request of the private salon it accepts (article 12), or a piece from THE VAULT (article 13): one won free, which you claim in YOUR ORDERS within 30 days (it is then PAID, at no cost, and cancelled if it is not claimed), or one bought at its usual price within the 24 hours of its right to buy.',
+      fr: "une demande du salon privé qu'il accepte (article 12), ou une pièce de THE VAULT (article 13) : une pièce gagnée gratuitement, que vous réclamez dans YOUR ORDERS dans les 30 jours (elle est alors PAID, sans frais, et annulée si elle n'est pas réclamée), ou une pièce achetée à son prix habituel dans les 24 heures de son droit d'achat.",
+    } as const;
+    const paragraph = {
+      en: "**THE VAULT.** ORBES may give a vault on the occasions THE VAULT shows in YOUR ACCOUNT, to eligible collectors, at its discretion. A vault is kept 30 days in your account. Opening it is free: a vault is never sold, and opening one requires no purchase. It holds one reward, drawn by chance when it is opened and shown with its odds; when a reward runs out, its chance goes to the I WAS THERE card. A reward expires as it states, has no cash value and cannot be transferred until it is used, except a credit to give, which you give once, by its link, to a friend for their first piece. The number of vaults each occasion gives an account is limited: a LIVE RELEASE gives at most one per account. A returned piece takes back its vault if it has not been opened.",
+      fr: "**THE VAULT.** ORBES peut donner un coffre (vault) lors des occasions que montre THE VAULT dans YOUR ACCOUNT, aux collectionneurs éligibles, à sa discrétion. Un coffre est gardé 30 jours dans votre compte. L'ouvrir est gratuit : un coffre n'est jamais vendu, et en ouvrir un ne demande aucun achat. Il contient une récompense, tirée au hasard à son ouverture et montrée avec ses chances ; quand une récompense est épuisée, sa chance va à la carte I WAS THERE. Une récompense expire comme elle l'indique, n'a aucune valeur monétaire et ne se transfère pas avant d'être utilisée, sauf un crédit à offrir, que vous offrez une fois, par son lien, à un ami pour sa première pièce. Le nombre de coffres que chaque occasion donne à un compte est limité : une LIVE RELEASE en donne au plus un par compte. Une pièce retournée reprend son coffre s'il n'a pas été ouvert.",
+    } as const;
+    // Round 1's rules, each a clause of the paragraph: who, kept, free, no purchase (worded true for the PIECE source,
+    // whose vault comes with a bought piece: never "without a purchase"), the odds, the limit per occasion, D22's limits, D5.
+    const clauses = {
+      en: [
+        'on the occasions THE VAULT shows in YOUR ACCOUNT, to eligible collectors, at its discretion',
+        'A vault is kept 30 days in your account.',
+        'Opening it is free',
+        'a vault is never sold, and opening one requires no purchase',
+        'drawn by chance when it is opened and shown with its odds',
+        'when a reward runs out, its chance goes to the I WAS THERE card',
+        'A reward expires as it states, has no cash value and cannot be transferred',
+        'The number of vaults each occasion gives an account is limited: a LIVE RELEASE gives at most one per account.',
+        'A returned piece takes back its vault if it has not been opened.',
+      ],
+      fr: [
+        'lors des occasions que montre THE VAULT dans YOUR ACCOUNT, aux collectionneurs éligibles, à sa discrétion',
+        'Un coffre est gardé 30 jours dans votre compte.',
+        "L'ouvrir est gratuit",
+        'un coffre n\'est jamais vendu, et en ouvrir un ne demande aucun achat',
+        'tirée au hasard à son ouverture et montrée avec ses chances',
+        'quand une récompense est épuisée, sa chance va à la carte I WAS THERE',
+        "Une récompense expire comme elle l'indique, n'a aucune valeur monétaire et ne se transfère pas",
+        'Le nombre de coffres que chaque occasion donne à un compte est limité : une LIVE RELEASE en donne au plus un par compte.',
+        "Une pièce retournée reprend son coffre s'il n'a pas été ouvert.",
+      ],
+    } as const;
+    // Q3.14's sentence, then the review's (the vaults and a credit to give accepted, kept and exported), in one block.
+    const invitation = {
+      en: "If you create your account with a collector's personal invitation link, ORBES keeps with your account which account invited you, to give that collector a vault (article 13 of the [terms of use](/legal/terms)) when your first piece is registered to you; the service shows neither of you the other's name. ORBES also keeps with your account your vaults (the occasion of each, when it was opened and what it held) and, for a credit to give you accepted, the vault it came from, without showing you the name of the collector who gave it; all of this is kept while your account exists and is in the copy of your data.",
+      fr: "Si vous créez votre compte avec le lien d'invitation personnel d'un collectionneur, ORBES garde avec votre compte le compte qui vous a invité, pour donner à ce collectionneur un coffre (article 13 des [conditions générales d'utilisation](/legal/terms)) quand votre première pièce vous est enregistrée ; le service ne montre à aucun de vous deux le nom de l'autre. ORBES garde aussi avec votre compte vos coffres (l'occasion de chacun, quand il a été ouvert et ce qu'il contenait) et, pour un crédit à offrir que vous avez accepté, le coffre dont il vient, sans vous montrer le nom du collectionneur qui l'a offert ; tout cela est conservé tant que votre compte existe et figure dans la copie de vos données.",
+    } as const;
+    for (const lang of LANGS) {
+      const blocks = DOCUMENTS.terms[lang].sections.find((x) => x.id === 'article-13')!.blocks;
+      // One paragraph, in article 13 with the LIVE release rules, just before what a LIVE RELEASE records.
+      expect(blocks, lang).toContain(paragraph[lang]);
+      const at = blocks.indexOf(paragraph[lang]);
+      expect(String(blocks[at + 1]), lang).toMatch(/^\*\*(?:What is recorded|Ce qui est enregistré)\.\*\*/);
+      for (const c of clauses[lang]) expect(paragraph[lang], `${lang}: ${c}`).toContain(c);
+      // Never "a vault can be obtained without a purchase": the PIECE source gives one with a bought piece.
+      expect(paragraph[lang], lang).not.toMatch(/without (?:a |any )?purchase|sans (?:aucun )?achat/i);
+      // No clause on taking a vault back for error or abuse (N36): the returned piece's alone; no odds table, no figure but
+      // the 30 days and the one per LIVE release, nothing of SOLD OUT.
+      const all = readText(DOCUMENTS.terms[lang], lang);
+      expect(all, lang).not.toMatch(/\b(?:revoke|revoked|revocation|révoqu\w*|révocation)\b[^.]*\b(?:vault|coffre)|(?:vault|coffre)[^.]*\b(?:error|abuse|erreur|abus)\b/i);
+      expect(paragraph[lang], lang).not.toMatch(/SOLD OUT|1 IN \d|\d+ ?%|\b(?:odds table|table des chances)\b/i);
+      expect(paragraph[lang].match(/\d+/g), lang).toEqual(['30']);
+      // Said once: the paragraph is the terms' only THE VAULT.
+      expect(all.split('THE VAULT.').length - 1, lang).toBe(1);
+      // Article 14's first paragraph names THE VAULT's orders; its other paragraphs unchanged.
+      const article14 = DOCUMENTS.terms[lang].sections.find((x) => x.id === 'article-14')!.blocks;
+      expect(String(article14[0]), lang).toContain(orders[lang]);
+      expect(article14.slice(1).some((b) => /THE VAULT/.test(String(b))), lang).toBe(false);
+      // The privacy policy: the one block, in the account section, after YOUR SIZES'; no other vault sentence (its three
+      // vaults: the inviter's, yours, a credit's).
+      const account = DOCUMENTS.privacy[lang].sections.find((x) => x.id === 'account')!.blocks;
+      expect(account, lang).toContain(invitation[lang]);
+      expect(String(account[account.indexOf(invitation[lang]) - 1]), lang).toContain('YOUR SIZES');
+      const privacy = readText(DOCUMENTS.privacy[lang], lang);
+      expect(privacy.split(lang === 'en' ? 'vault' : 'coffre').length - 1, lang).toBe(3);
+    }
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
     expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails', 'house-messages', 'worn']));
@@ -1102,6 +1196,17 @@ describe('legal pages: both languages, links, lexicon', () => {
       // The lot's review, the same day: "Delivery" says an engraving chosen with the purchase keeps its place on the order,
       // its words alone changing, and only any other has its own invoice and a credit note.
       '2026-10-25': '744c5db1bae6d393',
+      // Lot Q3, THE VAULT (D22, D23, D59, L2; step Q3.14): the terms' article 13 gains THE VAULT, one paragraph (the occasions
+      // THE VAULT shows, eligible collectors, ORBES's discretion; kept 30 days; opening free, never sold, no purchase to open
+      // one; one reward drawn by chance, shown with its odds, a run-out reward's chance to the I WAS THERE card; rewards
+      // expiring as they state, no cash value, not transferable until used but a credit to give; limited per occasion, one
+      // per account for a LIVE RELEASE; a returned piece's unopened vault taken back), no clause for error or abuse (N36);
+      // the privacy policy's one sentence for the invitation link (N22, read with D70). The date of the lot's final legal
+      // commit, never Q2's published 2026-10-25 (the day after it); HOW RELEASES WORK and article 11 unchanged.
+      // The lot's review, the same day (still unpublished): article 14's first paragraph names THE VAULT's orders (a piece
+      // won free claimed within 30 days, PAID at no cost, cancelled unclaimed; one bought under its 24-hour right to buy),
+      // and the privacy policy's invitation block adds the vaults and the vault a credit to give accepted came from.
+      '2026-10-26': '6d4d2397d714e97a',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

@@ -6,7 +6,8 @@
  * ambient audio session set before the context exists, the context suspended
  * between chords, and a storage that refuses every access. A LIVE RELEASE's
  * designed sounds (lot Q1 §3.10, src/web/verify/live-sound.ts): the eleven
- * files shipped, their cues (SFX_AT) on a recording context through a gain of
+ * files shipped (sixteen with THE VAULT's five, lot Q3, step Q3.10: their cues
+ * from the opening's answer, × 1.4 for a rare reward), their cues (SFX_AT) on a recording context through a gain of
  * 0.9, the context made in the room's gesture and its files loaded then, the
  * SOUND preference shared with the chord, stopAll at a screen change, the
  * welcome voice once per entry, and the room's synthesized tick and chord
@@ -23,6 +24,7 @@ import { deviceStorage, readPref, setSoundPref, SOUND_OFF, SOUND_PREF_KEY, sound
 import { SOUND } from '../../src/web/verify/copy.js';
 import { browserSoundEnvironment, scheduleSignature, SIGNATURE, SoundSignature, SUSPEND_AFTER_MS, type SoundContext, type SoundEnvironment, type SoundNode, type SoundParam } from '../../src/web/verify/sound.js';
 import {
+  ALL_SOUNDS,
   LATE_S,
   LIVE_GAIN,
   LIVE_SOUND_FILES,
@@ -31,6 +33,7 @@ import {
   rememberWelcome,
   REST_MARGIN_MS,
   SFX_AT,
+  VAULT_SOUNDS,
   WELCOME_KEEP,
   WELCOME_KEY,
   welcomed,
@@ -565,9 +568,12 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
   const SOUNDS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/sounds');
   const LIVE_VIEW = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views/live.ts');
 
-  it('ships the eleven LIVE files of the sixteen chosen, byte for byte as sound/final (picks.json): no vault-*, never welcome.prev-confident', () => {
+  it('ships the sixteen chosen, byte for byte as sound/final (picks.json): the LIVE flow\'s eleven and THE VAULT\'s five, never welcome.prev-confident', () => {
     expect([...LIVE_SOUNDS]).toEqual(['room-tick', 'draw', 'opening', 'welcome', 'place', 'turn', 'hold', 'secured', 'confirmed', 'sold-out', 'after-room']);
-    expect(readdirSync(SOUNDS_DIR).sort()).toEqual(LIVE_SOUNDS.map((n) => `${n}.mp3`).sort());
+    // Lot Q3, step Q3.10 (D58; picks.json: vault-unlock 1, vault-halves 2, vault-lid 2, vault-reveal 3, vault-rare 3).
+    expect([...VAULT_SOUNDS]).toEqual(['vault-unlock', 'vault-halves', 'vault-lid', 'vault-reveal', 'vault-rare']);
+    expect([...ALL_SOUNDS]).toHaveLength(16);
+    expect(readdirSync(SOUNDS_DIR).sort()).toEqual(ALL_SOUNDS.map((n) => `${n}.mp3`).sort());
     // sha256 of each file of .claude/orbes-run/sound/final/ as chosen (welcome.mp3: WARM, tightened; N6).
     const SHA256: Record<LiveSoundName, string> = {
       'after-room': '297556383e9dffb4bbdebe3789a15b0a4433008f23bd374459edab622b6f43c5',
@@ -581,8 +587,14 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
       'sold-out': '7cfeb65cf8a519c764b7a864a4f39ec494a6c4c465c2ead3d40f06ccf04f1767',
       turn: '5de32883c7c6514f02087b73eca164e36ad7c191f0839ab61355b3b1209c7010',
       welcome: '36c954837c7d081dd0ce9a55557369c62aa405e89ada26f664601233ed124c95',
+      // The vault reference's own embedded sounds, the same bytes (vault/the-vault.html __SFX_DATA).
+      'vault-unlock': 'ef08b193017fc51dda6af2b50982e38ee4e3e85f7597aefeed6c395ffd4d7f5b',
+      'vault-halves': '73b1bba6b4d5af5a6a030a59b587dcc6c337b94a8884d14846a1d78ccc0f3d47',
+      'vault-lid': '8cac67d812b061336cfd02ea183b0dd6f8f90b62976523672ba203b5e92695d4',
+      'vault-reveal': 'ff5bd9c8b106c83bbb12b8a6578a2a6717784c2bf0b78c7054b92175d3ca521c',
+      'vault-rare': 'fbee4031f32566d1acf26eb73fe988df6a6268e0996a56753d32432262c9d6fe',
     };
-    for (const name of LIVE_SOUNDS) {
+    for (const name of ALL_SOUNDS) {
       const bytes = readFileSync(join(SOUNDS_DIR, `${name}.mp3`));
       expect(createHash('sha256').update(bytes).digest('hex'), name).toBe(SHA256[name]);
       expect(bytes.subarray(0, 3).toString('latin1'), name).toBe('ID3');
@@ -607,9 +619,23 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
       sold: [['sold-out', 0.25]],
       confirmed: [['confirmed', 0.6]],
       after: [['after-room', 1.15]],
+      vault: [
+        ['vault-unlock', 0],
+        ['vault-halves', 0.1],
+        ['vault-lid', 2],
+        ['vault-reveal', 3.4],
+      ],
+      vaultRare: [
+        ['vault-unlock', 0],
+        ['vault-halves', 0.1 * 1.4],
+        ['vault-lid', 2 * 1.4],
+        ['vault-rare', 3.4 * 1.4],
+      ],
+      vaultStill: [['vault-reveal', 0.05]],
+      vaultStillRare: [['vault-rare', 0.05]],
     });
-    // Every LIVE file has its passage (the welcome THE OPENING's).
-    expect(new Set(Object.values(SFX_AT).flatMap((cues) => cues.map(([name]) => name)))).toEqual(new Set(LIVE_SOUNDS));
+    // Every file has its passage (the welcome THE OPENING's, the vault's five the opening's).
+    expect(new Set(Object.values(SFX_AT).flatMap((cues) => cues.map(([name]) => name)))).toEqual(new Set(ALL_SOUNDS));
   });
 
   it('makes its context in the room\'s gesture, the session ambient first, then loads every file once, off the gesture\'s task', async () => {
@@ -655,6 +681,50 @@ describe('a LIVE RELEASE\'s designed sounds (lot Q1 §3.10, live-sound.ts)', () 
     sound.cue('tick');
     expect(ctx.played[2]).toMatchObject({ start: 5, gain: 0.9 });
     expect(soundName(ctx.played[2]!.buffer!.url)).toBe('room-tick');
+  });
+
+  it('THE VAULT\'s opening (lot Q3, step Q3.10; N2, D15, D35): its press loads its five too; its cues counted from the server\'s answer, the unlock at once, the halves 0.1 s, the lid 2 s, the reveal 3.40 s; × 1.4 and the rarer tone for a rare reward; under reduced motion the tone alone; silent with SOUND OFF', async () => {
+    const { env, contexts, timers, loads, advance } = liveEnvironment();
+    const sound = new LiveSound(switchOn(env.storage), env);
+    sound.prime('vault');
+    for (const t of timers.splice(0)) t.fn();
+    await advance(0);
+    expect(loads.map(soundName)).toEqual([...ALL_SOUNDS]);
+    const ctx = contexts[0]!;
+    const played = (from: number) => ctx.played.slice(from).map((p) => [soundName(p.buffer!.url), Number(((p.start ?? 0) - 5).toFixed(3))]);
+    // The answer arrived 0.2 s ago: everything counts from it.
+    sound.cue('vault', { base: env.now() - 200 });
+    expect(played(0)).toEqual([
+      ['vault-unlock', 0],
+      ['vault-halves', 0],
+      ['vault-lid', 1.8],
+      ['vault-reveal', 3.2],
+    ]);
+    sound.cue('vaultRare', { base: env.now() });
+    expect(played(4)).toEqual([
+      ['vault-unlock', 0],
+      ['vault-halves', 0.14],
+      ['vault-lid', 2.8],
+      ['vault-rare', 4.76],
+    ]);
+    sound.cue('vaultStill', { base: env.now() });
+    sound.cue('vaultStillRare', { base: env.now() });
+    expect(played(8)).toEqual([
+      ['vault-reveal', 0.05],
+      ['vault-rare', 0.05],
+    ]);
+    expect(ctx.played.every((p) => p.gain === 0.9)).toBe(true);
+    // SOUND OFF: nothing scheduled.
+    sound.set(false);
+    sound.cue('vault');
+    expect(ctx.played).toHaveLength(10);
+    // A room's gesture (prime()) loads the LIVE flow's eleven only.
+    const room = liveEnvironment();
+    const other = new LiveSound(switchOn(room.env.storage), room.env);
+    other.prime();
+    for (const t of room.timers.splice(0)) t.fn();
+    await room.advance(0);
+    expect(room.loads.map(soundName)).toEqual([...LIVE_SOUNDS]);
   });
 
   it('waits for a file still loading and plays it at its time, or not at all once more than half a second late', async () => {
