@@ -93,11 +93,14 @@ describe.skipIf(!HAS_CHROMIUM)('THE VAULT\'s box and its opening (lot Q3, step Q
     await browser?.close();
   });
 
-  /** A page with the box mounted at `place` (`reduced`: prefers-reduced-motion), its clock Playwright's. */
+  /** A page with the box mounted at `place` (`reduced`: prefers-reduced-motion), its clock Playwright's, paused. */
   async function boxAt(place: 'soldOut' | 'end' | 'page', opts: { phone?: boolean; reduced?: boolean } = {}): Promise<Page> {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: opts.reduced ? 'reduce' : 'no-preference' });
     const page = await context.newPage();
-    await page.clock.install({ time: new Date('2026-10-05T16:49:00Z') });
+    // Paused at once: its timers fire only as the test runs the clock, never with the real time a slow machine spends
+    // between two steps (FOR YOU's second or the hold's end would otherwise come early).
+    await page.clock.install({ time: new Date('2026-10-05T16:48:59Z') });
+    await page.clock.pauseAt(new Date('2026-10-05T16:49:00Z'));
     await page.setContent('<!doctype html><html><body></body></html>');
     await page.addStyleTag({ content: `${VAULT_CSS}\nbody { margin: 0; background: #0a0a0a; color: #f6f2ea; } .frame { width: 326px; margin: 0 auto; }` });
     await page.addScriptTag({ content: bundle });

@@ -151,12 +151,14 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
   }
 
   /** A phone, signed in as `token` when given (its session cookie, as the sign-in sets it). */
-  async function phone(token: string | null, opts: { reducedMotion?: 'reduce' | 'no-preference'; skewMs?: number; noStream?: boolean } = {}): Promise<Watched> {
+  async function phone(token: string | null, opts: { reducedMotion?: 'reduce' | 'no-preference'; skewMs?: number; noStream?: boolean; random?: number } = {}): Promise<Watched> {
     const context = await mobileContext(browser, { reducedMotion: opts.reducedMotion });
     if (token) await context.addCookies([{ name: sessionCookieName(srv.ctx.config, 'account'), value: token, url: srv.origin }]);
     await context.addInitScript(STAND_INS);
     // A phone whose own clock is wrong: the page counts on the server's.
     if (opts.skewMs) await context.addInitScript(`{ const now = Date.now.bind(Date); Date.now = () => now() + ${opts.skewMs}; }`);
+    // The page's chance fixed (Math.random): a moment of its own within LIVE_QUEUE_SPREAD_MS is then a known one.
+    if (opts.random !== undefined) await context.addInitScript(`Math.random = () => ${opts.random};`);
     // A browser (or a network) where no stream reaches the page: it polls the state.
     if (opts.noStream) await context.addInitScript('delete window.EventSource;');
     const page = await context.newPage();
@@ -229,8 +231,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const me = await account(1);
     await srv.ctx.services.live.setInterest(me.id, r.id, s52!.id, me.actor);
     await srv.ctx.services.live.message(r.id, 'Welcome to the vault.', f.admin);
-    // This phone's clock runs 37 minutes ahead: the countdown, the ticks and the door keep to the server's time.
-    const { page, problems } = await phone(me.token, { skewMs: 37 * 60_000 });
+    // This phone's clock runs 37 minutes ahead: the countdown, the ticks and the door keep to the server's time. Its chance
+    // is 0.75: behind the next ones at T0, it reads its state 45 s after its stream ended (B3 below).
+    const { page, problems } = await phone(me.token, { skewMs: 37 * 60_000, random: 0.75 });
 
     // THE RELEASES: the LIVE RELEASES first, each at the column's full width (NOCTURNE, C7).
     await page.goto(`${srv.origin}/verify/releases`);
@@ -354,7 +357,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // B3: the one queue (ONE QUEUE). The rival has the turn in size 52: the collector is first in its size, its time left
     // said, the pieces left; never a held piece nor anyone ahead. At the line's own frame (T0, before the batch) its size's
     // one piece could not reach it (second in its size): its stream ended there, its state read from a moment of its own
-    // within a minute (D9), then its place.
+    // within a minute (D9; 45 s here, its chance fixed), then its place. The rival's piece returns at T0 + 90 s, for the
+    // batch at T0 + 2 min: about 75 s left at that reading, never 2 MINUTES (as an early moment, under T0 + 30 s, reads).
     await textOf(page.locator('.live__queue > .live__overline:not(.live__place-label)'), 'LIVE NOW');
     await expect.poll(async () => norm(await page.locator('.live__place-figure').innerText()), { timeout: 75_000, interval: 250 }).toBe('1');
     await textOf(page.locator('.live__queue-time'), /^ESTIMATED (LESS THAN A MINUTE|1 MINUTE) LEFT$/);
