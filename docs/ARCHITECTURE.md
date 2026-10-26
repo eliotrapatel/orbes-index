@@ -156,6 +156,18 @@ ADD-ONS, ONE SYSTEM (lot Q2 of 2026-10-25, B.20)
              (a product under its SKU's lock or left out; a service always, held nowhere) ─► invoice ADD_ON_ITEM
   YOUR ORDERS ─► ADD AN ADD-ON (never the engraving) · ENGRAVING: its words add / remove its unit (setEngraving)
   0060 ─► live_addons + engraving_prices converted into catalogue add-ons (addon_conversions), picks given, tables dropped
+
+THE VAULT (lot Q3 of 2026-10-26, B.21; one vault, one house table for every source)
+  an occasion's own transaction ─► giveVault (source on, ACTIVE, never a test entrant, the cap) ─► vaults + FROM ORBES
+     LIVE: the PAY that sells a size out (drops.vault_on) · PIECE + FRIEND: a first registration · TIER: after ensureGrants
+     WORN: a publication · PROFILE: the save that completes it · HOUSE: GIVE A VAULT (a collector, a segment by 500)
+  THE VAULT page · SOLD OUT for your size · the end page ─► the door ─► press and hold ─► POST …/open (10 a minute)
+  open: the vault FOR UPDATE ─► opened already? its outcome again ─► vault_rewards FOR UPDATE ─► crypto.randomInt(1 000 000)
+     ─► the row drawn, or I WAS THERE at its odds ─► the outcome written once ─► delivered + FROM ORBES receipt
+  CREDIT ─► tier_grants VAULT · ADDON ─► a unit at 0 on the next order · GUARANTEED ─► house_guarantees LIVE
+  PRODUCT FREE · VAULT EDITION · THE PIECE ─► a VAULT order at 0, its unit reserved, CLAIM IT in 30 days (housekeeping)
+  RIGHT TO BUY ─► BUY in 24 h at its usual price · CREDIT TO GIVE ─► vault_gifts (a one-time link, HMAC only)
+  a bought piece's parcel ─► the checklist's THE VAULT CARD · a returned piece ─► its unopened PIECE vault RETURNED
 ```
 
 ### B.3 Components
@@ -231,7 +243,10 @@ genome/
                          release-offer (what a release sells, and every reader of it); lot Q2 (B.20): addons gains the
                          kinds, the switches, the engraving and the releases' picks (defaultPick, checkPick, writePick),
                          order-addons the ONE OFFER RULE (addonOffer) and the engraving's unit, sku-owner the service's
-                         refusal (addonServiceSku)
+                         refusal (addonServiceSku); lot Q3 (B.21): vault (VaultService: giveVault and the sources' hooks,
+                         the opening's draw and its deliveries, THE VAULT page's data, CLUB > THE VAULT's sources, table,
+                         GIVE A VAULT and report), vault-orders (a VAULT order: the winner's unit, the claim, the right to
+                         buy, a vault-only model refused by every sales path)
     email/               the emails (lot M1): smtp.ts (the SMTP client on node:net and node:tls, the only outbound
                          connection the app makes), render.ts (the house's look, text and HTML), copy.ts (their
                          default words)
@@ -244,11 +259,13 @@ genome/
                          (GET /go/:code, a console link's short address), founding (theorbes.com's form, lot M1),
                          email (the monogram, STOP THESE EMAILS), admin (lot M2: admin/house.ts, admin/worn.ts;
                          FROM ORBES in messages.ts, WORN's collector routes in ownership.ts, its public ones in
-                         public.ts and club.ts; lot M3: admin/boxes.ts, admin/addons.ts, admin/sets.ts)
+                         public.ts and club.ts; lot M3: admin/boxes.ts, admin/addons.ts, admin/sets.ts; lot Q3: THE VAULT's
+                         collector routes in account.ts, admin/vault.ts)
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine; the connection's
                          country and city (place.ts)
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
-                         the ownership certificate's PDF, the invoices' and credit notes' PDFs (invoice.ts), CSV
+                         the ownership certificate's PDF, the invoices' and credit notes' PDFs (invoice.ts), CSV;
+                         lot Q3: THE VAULT CARD (vault-card.ts, K only: a single card with its bleed, an A4 sheet of eight)
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
     verify/              mobile scanner: camera capture, decoder worker, result views; NOW (/verify, B.10); MY PIECES (/verify/pieces,
                          its tabs PIECES · ORDERS · RELEASES, and each piece's page /verify/pieces/<id>; YOUR TIER is in the
@@ -272,7 +289,11 @@ genome/
                          lot Q1 (B.19): ONE QUEUE's screens of a LIVE RELEASE (views/live.ts, views/desktop-room.ts), the
                          Horizon band and the figures' morph (live-horizon.ts), seal C and the monogram alone on its horizon
                          (live-seal.ts), the designed sounds (live-sound.ts, sounds/*.mp3, served as /assets/*.mp3);
-                         lot Q2 (B.20): 5b, SECURED with add-ons (views/secured-addons.ts, live-model.ts securedAddons)
+                         lot Q2 (B.20): 5b, SECURED with add-ons (views/secured-addons.ts, live-model.ts securedAddons);
+                         lot Q3 (B.21): THE VAULT's box, float and opening (vault/vault-box.ts, vault/vault-float.ts,
+                         vault/vault-opening.ts, vault/live-vault.ts, vault/vault.css; its five sounds in live-sound.ts),
+                         THE VAULT page (views/vault-page.ts, vault-model.ts), the I WAS THERE image (vault/i-was-there.ts),
+                         the invitation and a credit to give (/verify/join/<code>, /verify/gift/<code>)
     admin/               admin console: catalogue (Discontinue and Reinstate), generator, keys, anomalies, analytics, audit, the Club
                          (Drops, Circle, Tiers, Requests; a LIVE RELEASE's page, #/club/live/:dropId); the sale mode (decoder worker of verify/);
                          Orders (#/orders, an order's page, the packing slip), Logistics (#/logistics, B.11; #/atelier leads
@@ -286,7 +307,9 @@ genome/
                          lot M3 (B.18): Boxes and SERVES in Settings, Orders → Returns (#/orders/returns), Order a
                          model, Catalogue → Add-ons and Sets, an order's Add-ons and its set (DECIDE THE SET); lot Q1 (B.19):
                          a LIVE RELEASE's pace and hold, SHORTEN THE HOLD, END THE HOLD NOW, the close guard, the queue's figures;
-                         lot Q2 (B.20): an add-on's type, switches and engraving, each release's Add-ons offered
+                         lot Q2 (B.20): an add-on's type, switches and engraving, each release's Add-ons offered;
+                         lot Q3 (B.21): CLUB > THE VAULT (views/vault.ts, model/vault.ts), a LIVE RELEASE's THE VAULT,
+                         the client sheet's THE VAULT block (read-only), VAULT ONLY on the model form, THE VAULT CARD in Documents
     legal/               the legal pages (J-06), the third app: privacy policy, terms of use, legal notice and FAQ, in French
                          and English (/legal, /legal/privacy, /legal/terms, /legal/notice, /legal/faq); content/*.ts with LEGAL_VERSION
     shared/              brand CSS, display font, monogram, DOM helpers; the photographs' canvas encoder (photo.ts,
@@ -511,6 +534,27 @@ One deployment after ONE QUEUE (or with it): migrations `0059_addons_one_system`
   - **S7** (perks at checkout): an add-on never counts toward the tier, and no perk changes.
   - S1 and S6 do not change (no theorbes.com change, no ownership change).
 - **The web side**: in `web/verify/`, screen 5b (`views/secured-addons.ts`; `live-model.ts` `securedAddons`, `securedChoice`, `engravingProblem`, `securedColumn`): the rows on hairlines, the ring lit into the point, YOUR TEXT, M3's note, PAY with its total; on a computer the rows above PAY, PAY first only when they would push it below the first screen (`views/desktop-room.ts`, `is-pay-first`); the draw's PLACE HELD, the salon and YOUR ORDERS keep M3's rows fed by each moment's offer (`addons-model.ts`), the engraving a row of at most 1 there and never in ADD AN ADD-ON; every word in `copy.ts` (`LIVE.addonText`), a computer's through `forDevice` ([BRAND-DESIGN-SYSTEM](BRAND-DESIGN-SYSTEM.md), lot Q2). In `web/admin/`, Catalogue → Add-ons' Type, Offered, Releases and the engraving's Most characters, each release's Add-ons offered with why one cannot be (`views/addons.ts` `pickField`, `model/addons.ts`), an order's service units and engraving unit, Orders → Settings' Engraving line.
+
+### B.21 Lot Q3: THE VAULT (vault/SCOPE.md rounds 1 to 5 and CURRENT STATE, decided 22 and 23 October 2026, lot Q3 of 2026-10-26)
+
+One deployment after ADD-ONS ONE SYSTEM (or with it): migrations `0061_the_vault` and `0062_vault_rewards` (DATABASE §5.141 to §5.146, and the columns of §5.3, §5.9, §5.29, §5.51, §5.66, §5.69, §5.127, §5.133), no new dependency, no new process, no change to the host (`deploy/vps` unchanged; the credits to give's key derives from `COOKIE_SECRET`). The owner's words: "A platform-wide concept. ONE vault, ONE house table for every source." (E1). It builds on the house's existing systems and adds no parallel one: a vault's reward is delivered as a credit, an order, a house guarantee, an add-on's unit (B.20) or a FROM ORBES message (B.17).
+
+- **One vault, one table, one opening** (`services/vault.ts`; D1, D2, D17, N15, N26): a vault is a row of `vaults`, given for one occasion of one of seven sources and waiting 30 days of 24 hours; opened, it gives **one reward drawn on the server** from the one house table, `vault_rewards`, whose floor is the I WAS THERE card. Every surface (SOLD OUT for your size, the end page of a release sold out whole, THE VAULT page) mounts the same box and calls the same `POST /api/v1/account/vaults/:id/open` (API §10.32). States are computed, never stored (`vaultState`: WAITING, OPENED, EXPIRED, REVOKED).
+- **The sources, each one hook in the transaction that makes its occasion** (D3 to D9, D27, D68; `giveVault`): LIVE at the PAY that sells a size out, to every entry of that size still WAITING or QUEUED, the whole line when the release sells out whole, before the end ends it (`giveLiveVaults`, `services/live.ts` `soldOutSizes`; `drops.vault_on`, off by default; never at a CLOSE, an after-room's or for an after-room piece); PIECE at a piece's first registration, every channel, a VAULT order at 0, a welcome gift and an exchange's replacement excepted (`giveFirstRegistrationVaults`, `orderOfABoughtPiece`), and FRIEND there too, to the inviter of a friend's first piece; TIER right after each `ensureGrants`, a tier first reached after the deployment only (`giveTierVaults`, `vault_occasions_before`); WORN at a photograph's publication; PROFILE at the save that completes the profile (`giveProfileVault`); HOUSE by GIVE A VAULT, to a collector or each member of a segment in batches of 500 (`giveFromHouse`). Each source has its switch, its vaults per occasion and its cap (`vault_sources`, OP-29); a test entrant never gets a vault (D9); the account's row `FOR KEY SHARE` and the unique key `vaults_occasion_key` make two passes give one vault. A returned piece takes back its unopened PIECE vault (`revokeReturnedPieceVaults`, D5); nothing else takes a vault back (N36).
+- **The draw** (D2, D15, D25; `VaultService.open`): in one transaction the vault `FOR UPDATE` (opened already: its outcome again, never a second draw), the table `FOR UPDATE` in the settings' own lock order, then `crypto.randomInt` over 1 000 000 parts, each active row holding round(1 000 000 / N) in the table's order (`drawRow`), the floor the rest. A row that cannot give (`rewardPick`: its quantity reached, its add-on or model unavailable, no unit to reserve, THE PIECE outside a LIVE vault) gives the card at the card's published odds. The outcome (prize, line, odds, rarity, value, cost) is written once, the row's `given` + 1, and the collector reads only that reward's own odds: the table never leaves the console (D22).
+- **The deliveries** (D19 to D21, D29; E9 "credits in YOUR ACCOUNT, products in YOUR ORDERS"): CREDIT a VAULT credit for 30 days (`tier_grants`, kind VAULT); ADDON a unit at 0 on the next order (`attachVaultAddons`, a product add-on only, never a service); GUARANTEED a house guarantee of scope LIVE for the next LIVE RELEASE (`grantFromVault`); a product won FREE, a VAULT EDITION and THE PIECE a **VAULT order at 0** holding the winner's unit from the opening, claimed within 30 days or cancelled by the housekeeping's `vaults` job, its unit back to stock (`services/vault-orders.ts`, `expireClaims`); a RIGHT TO BUY a 24-hour offer at its usual price (`buy`); CREDIT TO GIVE a one-time link, its code stored only as an HMAC (`vault_gifts`, `vaultGiftCode`, `hashVaultGiftCode`), accepted by a friend holding no piece; I WAS THERE the card alone, saved as an image on the device. Each opening writes a FROM ORBES receipt; each giving an arrival.
+- **Vault-only models** (D19 "never sold"): `models.vault_only`, refused by every sales path (`assertSellable`, `assertSetSellable`: `409 MODEL_VAULT_ONLY`), shown by the lookbook as any model.
+- **THE VAULT CARD** (D47 to D49): the packing checklist's line for each order whose piece opens a vault (`vaultCardOrders`, `checklistOf`), ticked by hand; the card itself a print file (`render/vault-card.ts`), in the console's Documents.
+- **The Shopify fit** (D60; macro scope S1 to S7, "No design may assume the platform is the only place people pay"):
+  - **S2** (payments): a right to buy is an order of the platform paid as every platform order, later through a Shopify checkout for that exact order; a VAULT order at 0 is a platform order with no checkout. The order export writes both with *Source* `orbes-vault`.
+  - **S3** (fulfilment): every VAULT order is packed and shipped by the platform; every parcel the platform packs with a bought piece, a future Shopify order's included, carries the checklist's THE VAULT CARD.
+  - **S4** (stock): the units won and the VAULT EDITION's come out of the platform's stock like any order's, reserved at the opening under the SKU's lock; a vault-only model is never pushed as sellable.
+  - **S5** (catalogue mapping): a vault-only model is left out of the product export and maps, by its pasted ids only, to a Shopify product kept unpublished; add-ons as lot Q2 (B.20).
+  - **S6** (ownership): a Shopify piece registered to its buyer, automatically or by its claim code, opens its PIECE vault at that first registration, as every channel's.
+  - **S7** (perks at checkout): a VAULT credit is a credit like the others, applied at checkout as the platform's credits will be; a vault changes no tier and no other perk.
+  - S1 does not change (no theorbes.com change).
+- **Lot M4** (paused; D61 "M4's margin counts the converted add-ons and the vault's cost"): GROWTH's margin is M4's and reads the vaults and the report's cost (each reward's, the VAULT orders at 0 and their shipping, the VAULT credits used) when it merges after this lot, renumbering its migrations after `0062` and moving `LEGAL_VERSION` after `2026-10-26`.
+- **The web side**: in `web/verify/`, the vault reference's box ported as published (`vault/vault-box.ts`, `vault/emblem.ts`, `vault/vault-float.ts`, `vault/vault-opening.ts`, `vault/vault.css`), mounted on SOLD OUT for your size and the end page (`vault/live-vault.ts`, `views/live.ts`) and on THE VAULT page (`views/vault-page.ts`, `vault-model.ts`, `vault/vault-page.css`; `/verify/vault`, a computer's `/verify/account/vault`); its five sounds in `live-sound.ts` (`VAULT_SOUNDS`); YOUR ACCOUNT's THE VAULT row and card, NOW's line, YOUR ORDERS' FROM THE VAULT, CLAIM IT and YOURS TO BUY, the I WAS THERE image (`vault/i-was-there.ts`), `/verify/join/<code>` and `/verify/gift/<code>` (`vault/invite.ts`); every word in `copy.ts` (`VAULT`), a computer's through `forDevice` ([BRAND-DESIGN-SYSTEM](BRAND-DESIGN-SYSTEM.md), lot Q3). In `web/admin/`, CLUB > THE VAULT (`views/vault.ts`, `model/vault.ts`), a LIVE RELEASE's THE VAULT section and its report's vaults, the client sheet's read-only THE VAULT block with GIVE A VAULT, VAULT ONLY on the model form, the Orders board's Vault, THE VAULT CARD in Documents.
 
 ---
 

@@ -25,6 +25,19 @@
  *  - docs/SECURITY-MODEL.md and docs/THREAT-MODEL.md: the switches and picks the server's, the words never logged,
  *    the sentinel that holds what a collector reads;
  *  - docs/BRAND-DESIGN-SYSTEM.md's 5b, the matrix's 5b states, COMPLIANCE §13's Q2 deployment.
+ *
+ * And the documents of THE VAULT (lot Q3, step Q3.15; plan §7, §8):
+ *
+ *  - docs/ARCHITECTURE.md B.21, THE VAULT, carries the Shopify fit (D60; macro scope S1 to S7) in its six lines, S2 to
+ *    S7, and names the code it describes by the names the code has (the sources' hooks, the draw, the deliveries);
+ *  - docs/API.md §10.32 and §16.50: every route of THE VAULT as the routes register it, the register's `invite`, the
+ *    opening's limit, the error codes in the code's own words, no revoke route;
+ *  - docs/DATABASE.md: 0061 and 0062 among the code's migrations, their six tables (§5.141 to §5.146) within the
+ *    code's bounds, the outcome written once, the down steps;
+ *  - docs/SECURITY-MODEL.md and docs/THREAT-MODEL.md: the server's draw, the idempotent opening, the codes, the caps,
+ *    the test entrants, the farming (row AP), the sentinel;
+ *  - docs/BRAND-DESIGN-SYSTEM.md's lot Q3 (the five sounds and their cues, the gesture's and the opening's figures),
+ *    the matrix's vault states and the desk-16 and desk-17 counts, SALES-PLAYBOOK's two copies, COMPLIANCE §13's Q3.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,6 +48,13 @@ import { READ_WAIT_MS } from '../../src/server/services/live-frames.js';
 import { LIVE_QUEUE_FAR_POLL_MS } from '../../src/server/services/live-queue.js';
 import { LIVE } from '../../src/web/verify/copy.js';
 import { LIVE_GAIN, LIVE_SOUNDS, SFX_AT } from '../../src/web/verify/live-sound.js';
+import { VAULT_OPEN_PER_MINUTE } from '../../src/server/http/rate-limit.js';
+import { INVITATION_CODE_PATTERN, VAULT_CAP, VAULT_NOTE_MAX, VAULT_ODDS_IN_MAX, VAULT_OCCASION_INDEX_MAX, VAULT_PER_OCCASION, VAULT_REWARD_KINDS, VAULT_SOURCES, VAULT_WAIT_DAYS } from '../../src/server/db/schema.js';
+import { VAULT_CARD_LINE } from '../../src/server/services/parcels.js';
+import { VAULT_SOUNDS } from '../../src/web/verify/live-sound.js';
+import { DRAW_PX, HOLD_MS, OPENING_MS, RARE_K, RESET_MS, VIBRATION } from '../../src/web/verify/vault/vault-opening.js';
+import { CALM_SHARE, FLOAT_AX, FLOAT_AY, HELD_MS, HELD_SHARE } from '../../src/web/verify/vault/vault-float.js';
+import { DESK_GROUPS, PHONE_STATES } from '../support/nocturne-states.js';
 import { REPO, readDoc, section } from './lexicon.js';
 
 const architecture = readDoc('docs/ARCHITECTURE.md');
@@ -294,5 +314,260 @@ describe('the other documents of ADD-ONS ONE SYSTEM (plan §6)', () => {
     expect(compliance).toContain('**Le déploiement ADD-ONS ONE SYSTEM**');
     expect(compliance).toContain('`0059_addons_one_system` et `0060_release_addons_converted`');
     expect(compliance).toContain('(launch/DEPLOY-OQ-Q2.md)');
+  });
+});
+
+const Q3 = section(architecture, '### B.21');
+
+describe('ARCHITECTURE B.21: THE VAULT and its Shopify fit (D60, plan §8)', () => {
+  it('states the six lines of the Shopify fit, S2 to S7, under the scope’s rule', () => {
+    expect(Q3).toContain('**The Shopify fit** (D60; macro scope S1 to S7, "No design may assume the platform is the only place people pay")');
+    expect(Q3).toContain('**S2** (payments): a right to buy is an order of the platform paid as every platform order, later through a Shopify checkout for that exact order; a VAULT order at 0 is a platform order with no checkout.');
+    expect(Q3).toContain('**S3** (fulfilment): every VAULT order is packed and shipped by the platform');
+    expect(Q3).toContain('**S4** (stock): the units won and the VAULT EDITION\'s come out of the platform\'s stock like any order\'s');
+    expect(Q3).toContain('**S5** (catalogue mapping): a vault-only model is left out of the product export and maps, by its pasted ids only, to a Shopify product kept unpublished');
+    expect(Q3).toContain('**S6** (ownership): a Shopify piece registered to its buyer, automatically or by its claim code, opens its PIECE vault at that first registration');
+    expect(Q3).toContain('**S7** (perks at checkout): a VAULT credit is a credit like the others, applied at checkout as the platform\'s credits will be');
+    expect(Q3).toContain('S1 does not change');
+    // The export's own words: a VAULT order's source, a vault-only model never a line.
+    const shopify = source('server/services/shopify.ts');
+    expect(Q3).toContain('*Source* `orbes-vault`');
+    expect(shopify).toContain('« orbes-vault »');
+    expect(shopify).toContain(".where('vault_only', '=', false)");
+    // M4's margin (D61).
+    expect(Q3).toContain('renumbering its migrations after `0062`');
+  });
+
+  it('names the sources, the draw and the deliveries by the names the code has', () => {
+    const named: [string, string[]][] = [
+      ['server/services/vault.ts', ['giveVault', 'giveLiveVaults', 'giveFirstRegistrationVaults', 'giveTierVaults', 'giveProfileVault', 'revokeReturnedPieceVaults', 'orderOfABoughtPiece', 'vaultState', 'drawRow', 'rewardPick', 'vaultGiftCode', 'hashVaultGiftCode']],
+      ['server/services/live.ts', ['soldOutSizes']],
+      ['server/services/order-addons.ts', ['attachVaultAddons']],
+      ['server/services/guarantees.ts', ['grantFromVault']],
+      ['server/services/parcels.ts', ['vaultCardOrders', 'checklistOf']],
+      ['server/services/vault-orders.ts', ['assertSellable', 'assertSetSellable']],
+    ];
+    for (const [file, names] of named) {
+      const code = source(file);
+      for (const name of names) {
+        expect(Q3, name).toContain(`\`${name}\``);
+        expect(code, `${file} ${name}`).toMatch(new RegExp(`export (async )?function ${name}\\b`));
+      }
+    }
+    const vault = source('server/services/vault.ts');
+    for (const method of ['open', 'buy', 'giveFromHouse', 'expireClaims']) {
+      expect(Q3, method).toContain(method === 'open' ? '`VaultService.open`' : `\`${method}\``);
+      expect(vault, method).toMatch(new RegExp(`\\n  async ${method}\\(`));
+    }
+    expect(vault).toContain("import { createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';");
+    expect(Q3).toContain('`crypto.randomInt` over 1 000 000 parts');
+    for (const name of ['0061_the_vault', '0062_vault_rewards']) {
+      expect(Q3).toContain(`\`${name}\``);
+      expect(Object.keys(MIGRATIONS)).toContain(name);
+    }
+    for (const file of ['web/verify/views/vault-page.ts', 'web/verify/vault-model.ts', 'web/verify/vault/vault-box.ts', 'web/verify/vault/live-vault.ts', 'web/verify/vault/i-was-there.ts', 'web/admin/views/vault.ts', 'server/render/vault-card.ts', 'server/routes/admin/vault.ts']) {
+      expect(existsSync(join(REPO, 'genome/src', file)), file).toBe(true);
+    }
+  });
+});
+
+describe('the other documents of THE VAULT (plan §7)', () => {
+  const api = readDoc('docs/API.md');
+  const collector = section(api, '### 10.32');
+  const console = section(api, '### 16.50');
+
+  it('API §10.32: every collector route as account.ts registers it, the opening’s limit, the register’s invite', () => {
+    const routes = source('server/routes/account.ts');
+    const paths: [string, string][] = [
+      ['GET', '/api/v1/account/vaults'],
+      ['GET', '/api/v1/account/vaults/summary'],
+      ['GET', '/api/v1/account/vaults/live/:dropId'],
+      ['POST', '/api/v1/account/vaults/:id/open'],
+      ['POST', '/api/v1/account/vaults/invite'],
+      ['GET', '/api/v1/account/vaults/gifts/:code'],
+      ['POST', '/api/v1/account/vaults/gifts/:code/accept'],
+      ['GET', '/api/v1/account/vaults/rights-to-buy'],
+      ['POST', '/api/v1/account/vaults/:id/buy'],
+      ['GET', '/api/v1/account/orders/:id/claim'],
+      ['POST', '/api/v1/account/orders/:id/claim'],
+    ];
+    for (const [method, path] of paths) {
+      expect(collector, path).toContain(`| ${method} | \`${path}\` |`);
+      expect(api, path).toContain(`| ${method} | \`${path}\` | Account |`);
+      expect(routes, path).toContain(`app.${method.toLowerCase()}('${path}'`);
+    }
+    expect(VAULT_OPEN_PER_MINUTE).toBe(10);
+    expect(collector).toContain(`**At most ${VAULT_OPEN_PER_MINUTE} openings a minute per account**`);
+    expect(collector).toContain('**a vault already opened answers its outcome again**');
+    expect(collector).toContain('**No answer carries THE VAULT\'s table, its odds or its quantities**');
+    // The gift's two routes share the `auth` budget, as the code says.
+    expect(routes).toContain("app.get('/api/v1/account/vaults/gifts/:code', { config: { rateGroup: 'auth' } }");
+    expect(routes).toContain("app.post('/api/v1/account/vaults/gifts/:code/accept', { config: { rateGroup: 'auth' } }");
+    // The register's invite: in the body's schema, documented as never a refusal.
+    expect(section(api, '### 10.1 ')).toContain('| `invite` | string \\| null | no |');
+    expect(section(api, '### 10.1 ')).toContain('**an unknown or malformed code is ignored, never a refusal**');
+    expect(source('server/http/schemas.ts')).toContain("invite: z.string().max(64, 'At most 64 characters').nullable().optional(),");
+  });
+
+  it('API §16.50: every console route as admin/vault.ts registers it, with its role, and no revoke route', () => {
+    const routes = source('server/routes/admin/vault.ts');
+    const paths: [string, string, string][] = [
+      ['GET', '/api/admin/vault/settings', 'AUDITOR'],
+      ['PUT', '/api/admin/vault/sources/:source', 'ADMIN'],
+      ['POST', '/api/admin/vault/rewards', 'OPERATOR'],
+      ['PUT', '/api/admin/vault/rewards/:id', 'OPERATOR'],
+      ['POST', '/api/admin/vault/rewards/:id/deactivate', 'OPERATOR'],
+      ['POST', '/api/admin/vault/rewards/order', 'OPERATOR'],
+      ['POST', '/api/admin/vault/give', 'OPERATOR (a segment: ADMIN)'],
+      ['GET', '/api/admin/vault/report', 'AUDITOR'],
+      ['GET', '/api/admin/vault/report.csv', 'AUDITOR'],
+      ['GET', '/api/admin/vault/vaults', 'AUDITOR'],
+    ];
+    for (const [method, path, role] of paths) {
+      expect(api, path).toContain(`| ${method} | \`${path}\` | ${role} |`);
+      expect(routes, path).toContain(`app.${method.toLowerCase()}('${path}'`);
+    }
+    expect(console).toContain('| GET | `/api/admin/vault/vaults?account=` | AUDITOR |');
+    expect(source('server/routes/admin/live.ts')).toContain("app.put('/api/admin/live/:id/vault'");
+    expect(source('server/routes/admin/catalog.ts')).toContain("app.put('/api/admin/models/:id/vault-only'");
+    expect(api).toContain('| PUT | `/api/admin/live/:id/vault` | OPERATOR | yes | admin |');
+    expect(api).toContain('| PUT | `/api/admin/models/:id/vault-only` | OPERATOR | yes | admin |');
+    // N36: no revoke route anywhere, in the code or the contract.
+    expect(routes).not.toMatch(/revoke'/);
+    expect(console).toContain('**Read-only: no route takes a vault back** (N36)');
+    expect(api).not.toMatch(/\| (POST|PUT|DELETE) \| `\/api\/admin\/vault\/vaults\/:id/);
+  });
+
+  it('API: the error codes in the code’s own words, and no VAULT_OPENED answered', () => {
+    const words: [string, number, string, string][] = [
+      ['VAULT_EXPIRED', 409, 'server/services/vault.ts', 'This vault was kept 30 days and can no longer be opened.'],
+      ['VAULT_REVOKED', 409, 'server/services/vault.ts', 'This vault went back with its piece.'],
+      ['VAULT_GIFT_ENDED', 409, 'server/services/vault.ts', 'This credit can no longer be accepted.'],
+      ['VAULT_GIFT_NOT_FOR_YOU', 409, 'server/services/vault.ts', 'This credit is yours to give to a friend.'],
+      ['VAULT_ODDS_OVER', 409, 'server/services/vault.ts', 'The odds of the active rewards add up to more than one in one. Lower one first.'],
+      ['VAULT_REWARD_SERVICE', 409, 'server/services/vault.ts', 'A service cannot be a vault’s reward.'],
+      ['VAULT_EDITION_MODEL', 409, 'server/services/vault.ts', 'A VAULT EDITION is a model marked vault-only. Mark the model first.'],
+      ['VAULT_ONLY_PRODUCT', 409, 'server/services/vault.ts', 'A vault-only model is never sold: give it as a VAULT EDITION.'],
+      ['VAULT_FLOOR_FIXED', 409, 'server/services/vault.ts', 'I WAS THERE is the floor: it is always there, its odds the rest.'],
+      ['VAULT_SOURCE_OFF', 409, 'server/services/vault.ts', 'THE HOUSE is switched off in CLUB > THE VAULT. Switch it on first.'],
+      ['VAULT_SIZE_NONE_LEFT', 409, 'server/services/vault-orders.ts', 'None is left in that size. Your piece stays in its size.'],
+      ['MODEL_VAULT_ONLY', 409, 'server/services/vault-orders.ts', 'This model is made only for the vault: it is never sold.'],
+      ['ORDER_VAULT_UNCLAIMED', 409, 'server/services/orders.ts', 'A piece won in a vault keeps the unit held for its winner until it is claimed: its location, size and price do not change before.'],
+      ['ORDER_VAULT_NO_UNIT', 409, 'server/services/orders.ts', 'A piece won in a vault never waits for stock: none is available there in its size.'],
+      ['ORDER_VAULT_PRICE', 409, 'server/services/orders.ts', 'A piece won in a vault stays free, and one bought from a vault keeps its price.'],
+    ];
+    for (const [code, status, file, sentence] of words) {
+      expect(api, code).toMatch(new RegExp(`^\\| \`${code}\` \\| ${status} \\|`, 'm'));
+      expect(api, code).toContain(sentence);
+      expect(source(file), code).toContain(sentence);
+    }
+    expect(source('server/services/vault-orders.ts')).toContain("conflict('VAULT_OFFER_ENDED', words)");
+    expect(source('server/services/vault.ts')).toContain("export const VAULT_BUY_ENDED = 'The 24 hours to buy it are over.';");
+    expect(source('server/services/vault.ts')).toContain("export const VAULT_CLAIM_ENDED = 'The 30 days to claim it are over.';");
+    for (const sentence of ['The 24 hours to buy it are over.', 'The 30 days to claim it are over.']) expect(collector).toContain(sentence);
+    for (const code of ['VAULT_NOT_FOUND', 'VAULT_GIFT_NOT_FOUND', 'VAULT_SOURCE_NOT_FOUND', 'VAULT_REWARD_NOT_FOUND']) expect(api, code).toMatch(new RegExp(`^\\| \`${code}\` \\| 404 \\|`, 'm'));
+    // Plan §2.9 named VAULT_OPENED; §2.9 itself makes an opened vault answer its outcome: no code throws it.
+    expect(source('server/services/vault.ts')).not.toContain("'VAULT_OPENED'");
+    expect(collector).toContain('No route answers `VAULT_OPENED`');
+  });
+
+  it('DATABASE: 0061 and 0062, the six tables within the code’s bounds, the outcome written once, the down steps', () => {
+    const db = readDoc('docs/DATABASE.md');
+    expect(db).toMatch(/The application now runs on `0001` to `00\d\d`/);
+    expect(db).toContain('`0061_the_vault` (lot Q3, THE VAULT:');
+    expect(db).toContain('`0062_vault_rewards` (lot Q3: the links into what delivers a reward');
+    expect(db).toContain('the paused lot M4 renumbers its own after `0062`');
+    for (const [n, table] of [['5.141', 'vault_sources'], ['5.142', 'vault_rewards'], ['5.143', 'vaults'], ['5.144', 'vault_occasions_before'], ['5.145', 'invitations'], ['5.146', 'vault_gifts']]) {
+      expect(db, table).toContain(`### ${n} \`${table}\``);
+    }
+    const sources = section(db, '### 5.141');
+    expect(sources).toContain(`\`${VAULT_SOURCES.join('`, `')}\``);
+    expect(sources).toContain(`${VAULT_PER_OCCASION.min}–${VAULT_PER_OCCASION.max}, \`VAULT_PER_OCCASION\``);
+    expect(sources).toContain(`${VAULT_CAP.min}–${VAULT_CAP.max}, \`VAULT_CAP\``);
+    const rewards = section(db, '### 5.142');
+    expect(rewards).toContain(`\`${VAULT_REWARD_KINDS.join('`, `')}\` (\`VAULT_REWARD_KINDS\`)`);
+    expect(VAULT_ODDS_IN_MAX).toBe(1_000_000);
+    expect(rewards).toContain('`vault_rewards_odds_in_check` 1–1 000 000 (`VAULT_ODDS_IN_MAX`)');
+    expect(rewards).toContain('`vault_rewards_addon_product`');
+    const vaults = section(db, '### 5.143');
+    expect(vaults).toContain(`\`waits_until = given_at + interval '${VAULT_WAIT_DAYS * 24} hours'\``);
+    expect(vaults).toContain(`1–1 000 (\`VAULT_OCCASION_INDEX_MAX\`, ${VAULT_PER_OCCASION.max} per occasion × a cap of ${VAULT_CAP.max})`);
+    expect(VAULT_OCCASION_INDEX_MAX).toBe(1000);
+    expect(vaults).toContain(`1–${VAULT_NOTE_MAX} characters`);
+    expect(vaults).toContain('*a vault\'s outcome is written once, at its opening*');
+    expect(vaults).toContain('*a vault is revoked, never deleted*');
+    expect(INVITATION_CODE_PATTERN.source).toBe('^[0-9A-HJKMNP-TV-Z]{12}$');
+    expect(section(db, '### 5.145')).toContain('12 characters of Crockford\'s base32, `INVITATION_CODE_PATTERN`');
+    expect(section(db, '### 5.146')).toContain('**the code itself never stored**');
+    // The words the doc quotes are the migrations' own.
+    const m61 = source('server/db/migrations/0061_the_vault.ts');
+    const m62 = source('server/db/migrations/0062_vault_rewards.ts');
+    for (const words of ["a vault''s outcome is written once, at its opening", 'a vault is revoked, never deleted', 'an invitation link is made once', "an account''s inviter is set once", 'a vault source is switched off, never deleted']) {
+      expect(m61, words).toContain(words);
+      expect(db, words).toContain(words.replace("''", "'"));
+    }
+    expect(m62).toContain("RAISE EXCEPTION 'a vault''s offer is used once'");
+    expect(db).toContain('`0062` refuses, naming the counts, while a VAULT credit, a VAULT order, a LIVE guarantee, a VAULT unit, a credit to give or a vault\'s offer exists');
+    expect(db).toContain('`0061` refuses, naming the counts, while a vault, an invitation, an invited account, a vault message, a reward other than the floor');
+    expect(db).toContain('| Vaults | Lot Q3 (`vaults`, `VaultService.expireClaims`');
+  });
+
+  it('SECURITY-MODEL and THREAT-MODEL: the server’s draw, the idempotent opening, the codes, the caps, the farming', () => {
+    const sentinel = 'test/security/collector-never-sees-staff-data.test.ts';
+    const security = readDoc('docs/SECURITY-MODEL.md');
+    expect(security).toContain('**THE VAULT: the draw the server\'s, each vault given once, nothing of the table sent**');
+    expect(security).toContain('**an opened vault answers its outcome again**');
+    expect(security).toContain('**a test entrant never gets one**');
+    expect(security).toContain('**no route takes a vault back** (N36)');
+    expect(security).toContain(`The sentinel \`${sentinel}\` gives the collector house vaults`);
+    const threat = readDoc('docs/THREAT-MODEL.md');
+    expect(threat).toContain('| THE VAULT (lot Q3) |');
+    expect(threat).toContain('| **AP. THE VAULT farmed, its draw steered or replayed, or a credit to give stolen**');
+    expect(threat).toContain(`The sentinel \`${sentinel}\` finds no house note, no giver and no row of the table`);
+    // The sentinel still reads THE VAULT's replies.
+    const test = readDoc(join('genome', sentinel));
+    for (const path of ["'/api/v1/account/vaults'", "'/api/v1/account/vaults/summary'", "'/api/v1/account/vaults/rights-to-buy'", "'POST /api/v1/account/vaults/:id/open'"]) expect(test, path).toContain(path);
+  });
+
+  it('BRAND lot Q3: the five sounds and their cues, the gesture and the opening as the code has them', () => {
+    const brand = section(readDoc('docs/BRAND-DESIGN-SYSTEM.md'), '### Lot Q3');
+    for (const name of VAULT_SOUNDS) expect(brand, name).toContain(`| \`${name}.mp3\` |`);
+    expect(SFX_AT.vault).toEqual([['vault-unlock', 0], ['vault-halves', 0.1], ['vault-lid', 2], ['vault-reveal', 3.4]]);
+    expect(SFX_AT.vaultRare.map(([n]) => n)).toEqual(['vault-unlock', 'vault-halves', 'vault-lid', 'vault-rare']);
+    expect(brand).toContain('| `vault-reveal.mp3` | 3.4 s, the warm tone at the prize (take 3) |');
+    expect(brand).toContain('| `vault-rare.mp3` | 3.4 s × 1.4');
+    expect([HOLD_MS, RESET_MS, DRAW_PX, OPENING_MS, RARE_K]).toEqual([1500, 380, 110, 6550, 1.4]);
+    expect([...VIBRATION]).toEqual([16, 40, 26]);
+    expect([FLOAT_AX, FLOAT_AY, HELD_SHARE, HELD_MS, CALM_SHARE]).toEqual([11, 14, 0.4, 250, 0.3]);
+    for (const said of ['**press and hold** (1.5 s, `HOLD_MS`)', '**draw it down** (110 px, `DRAW_PX`)', 'settles it back in 380 ms (`RESET_MS`)', '6.55 s (`OPENING_MS`)', '**× 1.4 for a rare reward** (`RARE_K`', 'up to 11° × 14° (`FLOAT_AX`, `FLOAT_AY`)', 'the vibration `[16, 40, 26]`', 'a slow float at 30 % (`CALM_SHARE`)']) {
+      expect(brand, said).toContain(said);
+    }
+    expect(brand).toContain('**every vault screen stays dark in light mode**');
+    expect(brand).toContain('from 1.8 s over 1.25 s to 16 %');
+    expect(source('web/verify/house.css')).toContain('animation: vlt-pagedim 1.25s cubic-bezier(0.16, 1, 0.3, 1) 1.8s backwards;');
+  });
+
+  it('the matrix, the playbook and COMPLIANCE: the vault states, THE VAULT CARD at packing, the Q3 deployment', () => {
+    const matrix = readDoc('docs/launch/NOCTURNE-MATRIX.md');
+    const vaultStates = PHONE_STATES.filter((s) => s.variant === 'vault').map((s) => s.id);
+    expect(vaultStates).toHaveLength(20);
+    for (const id of vaultStates) expect(matrix, id).toMatch(new RegExp(`^\\| \`${id}\` \\|`, 'm'));
+    for (const shard of ['desk-16', 'desk-17']) expect(matrix, shard).toContain(`| \`${shard}\` | ${DESK_GROUPS[shard]!.length} |`);
+    const desk = Object.values(DESK_GROUPS).flat().length;
+    expect(matrix).toContain(`${desk} states beside the phone's ${PHONE_STATES.length} (since lot Q3)`);
+    // Both copies of the playbook, identical, with THE VAULT CARD's line as the checklist writes it.
+    const playbook = readDoc('docs/launch/SALES-PLAYBOOK.md');
+    expect(readDoc('genome/src/server/documents/SALES-PLAYBOOK.md')).toBe(playbook);
+    expect(VAULT_CARD_LINE).toBe('THE VAULT CARD');
+    expect(playbook).toContain('### THE VAULT CARD dans le colis');
+    expect(playbook).toContain(`la liste d'emballage porte la ligne \`${VAULT_CARD_LINE}\``);
+    expect(playbook).toContain('### THE VAULT : les coffres des collectionneurs');
+    for (const answer of ['**« Je n\'ai pas reçu de coffre. »**', '**« Ma pièce est repartie. »**', '**La pièce offerte.**', '**Le crédit à offrir.**', '**GIVE A VAULT, le geste de la maison.**']) expect(playbook, answer).toContain(answer);
+    const compliance = section(readDoc('docs/COMPLIANCE.md'), '## 13.');
+    expect(compliance).toContain('**Le déploiement THE VAULT**');
+    expect(compliance).toContain('`0061_the_vault` et `0062_vault_rewards`');
+    expect(compliance).toContain('**Les règles du tirage promotionnel sont dans les conditions**');
+    expect(compliance).toContain('`2026-10-26`');
+    expect(compliance).toContain('(launch/DEPLOY-OQ-Q3.md)');
   });
 });
