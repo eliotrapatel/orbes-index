@@ -772,7 +772,7 @@ On the stage `ads` (lot M4, step M4.13; K27 A4): the full story, then conversion
 | `ads-account-on-light` | the same in light mode | LIGHT MODE | M4 A4 |
 | `ads-account-off` | ADVERTISING MEASUREMENT (off) | switch on, the choice DECLINED | M4 A4 |
 | `ads-account-error` | switched on, refused: the switch back off, *Your choice could not be saved just now.* | refused (a route) | M4 A4 |
-| `legal-privacy-ads` | PRIVACY drawn again (lot M4, step M4.14): under the version line *Advertising measurement: since 5 October 2026*; *Advertising measurement* after WORN (the purpose, consent in the banner and YOUR PROFILE, which platform hears, what is sent and never sent, the click ids, the record, the platforms' own policies, how long each is kept); the cookies' and the recipients' sentences in their 'on' words, each leading to `#ads` | switch on | M4 A4 |
+| `legal-privacy-ads` | PRIVACY drawn again (lot M4, step M4.14): under the version line *Advertising measurement: since 5 October 2026*; *Advertising measurement* after WORN (the purpose, consent in the banner and YOUR PROFILE, which platform hears, what is sent and never sent, the online store's own policy for its orders, the click ids, the record, the platforms' own policies, how long each is kept); the cookies' and the recipients' sentences in their 'on' words, each leading to `#ads` | switch on | M4 A4 |
 | `legal-privacy-ads-fr` | the same in French: *Mesure publicitaire : depuis le 5 octobre 2026*, *Mesure publicitaire* | switch on | M4 A4 |
 | `legal-privacy-ads-light` | the same in light mode | LIGHT MODE | M4 A4 |
 

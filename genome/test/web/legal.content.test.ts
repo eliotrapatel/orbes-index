@@ -1105,6 +1105,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
         'Nothing you did before ORBES switched this measurement on is ever sent.',
         'ORBES never sends your name, your phone, your address, your IP address, a piece, a model, a size or a release.',
         `older than ${AD_MAX_AGE_DAYS.META} days for Meta and TikTok, or ${AD_MAX_AGE_DAYS.GOOGLE} days for Google`,
+        'for an account that is locked or deleted',
+        'An online store of ORBES, once it opens, measures its own orders under its own privacy policy and the consent it asks for itself, not under this section.',
         `(${Object.values(CLICK_PARAMS).slice(0, -1).join(', ')} or ${Object.values(CLICK_PARAMS).at(-1)})`,
         'independent controllers',
         'outside the European Union',
@@ -1121,6 +1123,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
         "Rien de ce que vous avez fait avant qu'ORBES active cette mesure n'est jamais envoyé.",
         "ORBES n'envoie jamais votre nom, votre téléphone, votre adresse, votre adresse IP, une pièce, un modèle, une taille ni une sortie.",
         `de plus de ${AD_MAX_AGE_DAYS.META} jours pour Meta et TikTok, ou de ${AD_MAX_AGE_DAYS.GOOGLE} jours pour Google`,
+        'pour un compte verrouillé ou supprimé',
+        "Une boutique en ligne d'ORBES, une fois ouverte, mesure ses propres commandes selon sa propre politique de confidentialité et le consentement qu'elle demande elle-même, non selon cette section.",
         `(${Object.values(CLICK_PARAMS).slice(0, -1).join(', ')} ou ${Object.values(CLICK_PARAMS).at(-1)})`,
         'responsables de traitement indépendants',
         "hors de l'Union européenne",
@@ -1139,8 +1143,9 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect([ADS_SINCE.en('2026-10-27'), ADS_SINCE.fr('2026-11-01')]).toEqual(['Advertising measurement: since 27 October 2026', 'Mesure publicitaire : depuis le 1er novembre 2026']);
     // Its own version: the date of its final commit, recorded with each choice; its words pinned to it.
     const PUBLISHED_ADS: Readonly<Record<string, string>> = {
-      // Lot M4 (K27 A4; step M4.14): prepared for the switch, never shown while it is off; to counsel before it is on.
-      '2026-10-26': 'c2023a4091861852',
+      // Lot M4 (K27 A4; step M4.14): prepared for the switch, never shown while it is off; to counsel before it is on (the
+      // online store's own policy named for the store, S1; an account locked or deleted, in the step's verification).
+      '2026-10-26': 'af35ea545206565a',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify({ section: ADS_SECTION, sentences: ADS_SENTENCES, since: { en: ADS_SINCE.en('2000-01-01'), fr: ADS_SINCE.fr('2000-01-01') } })).digest('hex').slice(0, 16);
     expect({ version: ADS_TEXT_VERSION, fingerprint }).toEqual({ version: ADS_TEXT_VERSION, fingerprint: PUBLISHED_ADS[ADS_TEXT_VERSION] });
