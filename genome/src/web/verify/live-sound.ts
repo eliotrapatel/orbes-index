@@ -1,11 +1,12 @@
 /**
  * The designed sounds of a LIVE RELEASE (lot Q1 §3.10; D45 OP-19, D46, D47 OP-28): the owner's files of
- * sound/final/ (picks.json) replace the room's synthesized tick and chord. The LIVE flow's eleven ship here
- * (`sounds/*.mp3`, published by scripts/build-web.ts under /assets/ with a content hash, cached as immutable); the
- * vault's five come with THE VAULT (lot Q3). The scan result's chord stays in sound.ts (reading N12).
+ * sound/final/ (picks.json) replace the room's synthesized tick and chord. The LIVE flow's eleven and THE VAULT's five
+ * (lot Q3, step Q3.10; D58) ship here (`sounds/*.mp3`, published by scripts/build-web.ts under /assets/ with a content
+ * hash, cached as immutable): sixteen in all. The scan result's chord stays in sound.ts (reading N12).
  *
  *   gesture ──▶ prime(): the audio session ambient (where offered), the AudioContext created or resumed, each file
- *               fetched and decoded off the gesture's task (once; a file that failed is tried again at the next)
+ *               fetched and decoded off the gesture's task (once; a file that failed is tried again at the next); the
+ *               room's gestures load the LIVE flow's eleven, the vault's press (prime('vault')) its five too
  *   cue(passage, base) ──▶ each of its sounds at its offset from the passage's own start (SFX_AT), on the context's
  *               clock, each buffer through a GainNode at 0.9, as the mockup's sfx-engine.js plays them
  *   a screen change ──▶ stopAll(): what still sounds or waits to sound is stopped
@@ -32,11 +33,24 @@ import roomTickMp3 from './sounds/room-tick.mp3';
 import securedMp3 from './sounds/secured.mp3';
 import soldOutMp3 from './sounds/sold-out.mp3';
 import turnMp3 from './sounds/turn.mp3';
+import vaultHalvesMp3 from './sounds/vault-halves.mp3';
+import vaultLidMp3 from './sounds/vault-lid.mp3';
+import vaultRareMp3 from './sounds/vault-rare.mp3';
+import vaultRevealMp3 from './sounds/vault-reveal.mp3';
+import vaultUnlockMp3 from './sounds/vault-unlock.mp3';
 import welcomeMp3 from './sounds/welcome.mp3';
 
-/** The LIVE flow's designed sounds: eleven of the sixteen chosen (the five vault-* come with lot Q3). */
+/** The LIVE flow's designed sounds: eleven of the sixteen chosen. */
 export const LIVE_SOUNDS = ['room-tick', 'draw', 'opening', 'welcome', 'place', 'turn', 'hold', 'secured', 'confirmed', 'sold-out', 'after-room'] as const;
-export type LiveSoundName = (typeof LIVE_SOUNDS)[number];
+/**
+ * THE VAULT's five (lot Q3, step Q3.10; D35, D58; picks.json: vault-unlock take 1, vault-halves 2, vault-lid 2,
+ * vault-reveal 3, vault-rare 3): a soft lock at the unlock, the halves, the lid's swing, the warm tone at the prize (a
+ * second, rarer tone for a rare one).
+ */
+export const VAULT_SOUNDS = ['vault-unlock', 'vault-halves', 'vault-lid', 'vault-reveal', 'vault-rare'] as const;
+/** Every designed sound of the build: the sixteen chosen. */
+export const ALL_SOUNDS = [...LIVE_SOUNDS, ...VAULT_SOUNDS] as const;
+export type LiveSoundName = (typeof ALL_SOUNDS)[number];
 
 /** Each sound's published URL (the build's hashed /assets/ file). */
 export const LIVE_SOUND_FILES: Readonly<Record<LiveSoundName, string>> = Object.freeze({
@@ -51,6 +65,11 @@ export const LIVE_SOUND_FILES: Readonly<Record<LiveSoundName, string>> = Object.
   confirmed: confirmedMp3,
   'sold-out': soldOutMp3,
   'after-room': afterRoomMp3,
+  'vault-unlock': vaultUnlockMp3,
+  'vault-halves': vaultHalvesMp3,
+  'vault-lid': vaultLidMp3,
+  'vault-reveal': vaultRevealMp3,
+  'vault-rare': vaultRareMp3,
 });
 
 /** The gain each buffer plays through (sfx-engine.js: `g.gain.value = 0.9`). */
@@ -80,6 +99,23 @@ export const SFX_AT = Object.freeze({
   sold: [['sold-out', 0.25]],
   confirmed: [['confirmed', 0.6]],
   after: [['after-room', 1.15]],
+  // THE VAULT's opening (lot Q3, step Q3.10; N2): from the server's answer (the timeline's 0), as the reference's door()
+  // plays them: the unlock at once, the halves at 0.1 k, the lid at 2 k, the reveal's tone at 3.40 k; k 1.4 for a rare
+  // reward, whose tone is the second, rarer one (D15). Reduced motion: the reward at once, its tone alone.
+  vault: [
+    ['vault-unlock', 0],
+    ['vault-halves', 0.1],
+    ['vault-lid', 2],
+    ['vault-reveal', 3.4],
+  ],
+  vaultRare: [
+    ['vault-unlock', 0],
+    ['vault-halves', 0.1 * 1.4],
+    ['vault-lid', 2 * 1.4],
+    ['vault-rare', 3.4 * 1.4],
+  ],
+  vaultStill: [['vault-reveal', 0.05]],
+  vaultStillRare: [['vault-rare', 0.05]],
 } satisfies Record<string, readonly (readonly [LiveSoundName, number])[]>);
 export type LivePassage = keyof typeof SFX_AT;
 
@@ -236,10 +272,10 @@ export class LiveSound implements SoundSwitch {
 
   /**
    * In a gesture of the room (a size, ENTER, ENTER THE LINE, the seal, a tap or a key in the room), before anything is
-   * awaited: the audio session made ambient, the AudioContext created (the first time) or resumed, the files loaded.
-   * Nothing when the sound is off.
+   * awaited: the audio session made ambient, the AudioContext created (the first time) or resumed, the files loaded (the
+   * LIVE flow's; with `vault`, THE VAULT's press, its five too). Nothing when the sound is off.
    */
-  prime(): void {
+  prime(set: 'live' | 'vault' = 'live'): void {
     if (!this.on) return;
     try {
       const session = this.env.audioSession();
@@ -253,12 +289,12 @@ export class LiveSound implements SoundSwitch {
     } catch {
       this.ctx = null;
     }
-    if (this.ctx) this.load(this.ctx);
+    if (this.ctx) this.load(this.ctx, set === 'vault' ? ALL_SOUNDS : LIVE_SOUNDS);
   }
 
   /** Each file fetched and decoded once, off the gesture's own task; one that failed is tried again at the next prime. */
-  private load(ctx: LiveAudioContext): void {
-    for (const name of LIVE_SOUNDS) {
+  private load(ctx: LiveAudioContext, names: readonly LiveSoundName[]): void {
+    for (const name of names) {
       if (this.buffers.has(name) || this.loading.has(name)) continue;
       const pending = new Promise<void>((resolve) => this.env.setTimeout(resolve, 0))
         .then(() => this.env.load(LIVE_SOUND_FILES[name]))

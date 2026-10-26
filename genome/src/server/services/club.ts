@@ -63,6 +63,7 @@ import type { AccountDropEntry, DropService } from './drops.js';
 import { accountGuarantees, type AccountGuarantee } from './guarantees.js';
 import { orderReference } from './orders.js';
 import { creditBalances, ensureGrants, usableAt } from './tier-grants.js';
+import { giveTierVaults } from './vault.js';
 
 /** The pieces that count for nothing in the club: revoked, flagged or retired by ORBES, whose ownership stays open (N3). */
 export const CLUB_EXCLUDED_STATUSES: readonly ProductStatus[] = Object.freeze(['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const);
@@ -324,6 +325,11 @@ export interface ClubInUse {
    * other two.
    */
   warrantyCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
+  /**
+   * Its vaults' credits left (THE VAULT, lot Q3: a house credit won, or a friend's credit for a first piece while it
+   * holds none), whatever its tier, not expired: summed as the others, read apart from them ("credits in YOUR ACCOUNT").
+   */
+  vaultCredit: { balanceMinor: number; currency: string; expiresAt: Date } | null;
   /** Its yearly care of the year (UTC); null when its tier gives none. */
   care: { year: number; used: number; allowance: CareAllowance } | null;
   /**
@@ -425,7 +431,7 @@ export class ClubService {
   async status(accountId: string): Promise<ClubStatus> {
     // The tiers' grants (plan NEXT-NINE, BP-19 T5), made here too when the tier was reached without a write that makes them.
     await inTransaction(this.db, async (tx) => {
-      for (const n of await ensureGrants(tx, accountId, this.clock())) await this.audit.record(n, tx);
+      for (const n of [...(await ensureGrants(tx, accountId, this.clock())), ...(await giveTierVaults(tx, accountId, this.clock()))]) await this.audit.record(n, tx);
     });
     const [standing, words, entries, program] = await Promise.all([this.tierOf(accountId), this.benefitWords(this.db), this.drops.accountEntries(accountId), readProgram(this.db)]);
     const gifts = await activeGifts(this.db, program);
@@ -456,7 +462,7 @@ export class ClubService {
     };
   }
 
-  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday credit, its warranty credit, its yearly care of the year, its welcome gifts. */
+  /** The account's benefits in use now (ClubInUse): its tiers' credit, its birthday, warranty and vaults' credits, its yearly care of the year, its welcome gifts. */
   async inUse(accountId: string, tier: ClubTier, program?: ClubProgram): Promise<ClubInUse> {
     const now = this.clock();
     const p = program ?? (await readProgram(this.db));
@@ -472,6 +478,7 @@ export class ClubService {
     const credit = summed(balances.filter((g) => g.kind === 'CREDIT'));
     const birthdayCredit = summed(balances.filter((g) => g.kind === 'BIRTHDAY'));
     const warrantyCredit = summed(balances.filter((g) => g.kind === 'WARRANTY'));
+    const vaultCredit = summed(balances.filter((g) => g.kind === 'VAULT'));
     const year = await careThisYear(this.db, accountId, now, p);
     const care = year.allowance === 0 ? null : { year: year.year, used: year.used, allowance: year.allowance };
     const grants = await this.db
@@ -496,7 +503,7 @@ export class ClubService {
         if (g.tier !== null && g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
       }
     }
-    return { credit, birthdayCredit, warrantyCredit, care, gifts, creditChannels: [...p.creditChannels] };
+    return { credit, birthdayCredit, warrantyCredit, vaultCredit, care, gifts, creditChannels: [...p.creditChannels] };
   }
 
   /** THE CLUB (GET /api/v1/the-club, public): every tier's program lines then its words, the credit's currency, the gifts. */

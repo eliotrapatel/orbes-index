@@ -37,6 +37,10 @@
  * network's budget alone, whatever addresses it comes from. No variable of
  * their own either: both follow RATE_LIMIT_API_PER_MINUTE.
  *
+ * THE VAULT's opening (lot Q3, step Q3.9; plan §2.9, §2.10): POST /api/v1/account/vaults/:id/open draws on its
+ * scope's `api` budget and, once the session guard has found the account, on the account's own: VAULT_OPEN_PER_MINUTE
+ * openings a minute, whatever its network (the route's own hook, `vaultOpen`).
+ *
  * Clients are keyed by the peppered hash of their IP (IPv6 grouped by /64),
  * accounts by the peppered hash of their id; raw addresses are never kept,
  * not even in the in-memory store.
@@ -65,6 +69,9 @@ export const SEEN_RATE_FACTOR = 2;
 /** The `founding` group's budget, as a fraction of the `api` one (120 → 10 registrations a minute per network). */
 export const FOUNDING_RATE_DIVISOR = 12;
 
+/** THE VAULT's openings a minute per signed-in account (plan Q3 §2.9: "rate-limited 10 a minute per account"). */
+export const VAULT_OPEN_PER_MINUTE = 10;
+
 const WINDOW_MS = 60_000;
 /** Clients tracked per group (LRU). Larger than the plugin default so a wide botnet cannot evict counters cheaply. */
 const TRACKED_CLIENTS = 50_000;
@@ -79,6 +86,8 @@ declare module 'fastify' {
 export type RateLimiters = Readonly<Record<RateGroup, onRequestAsyncHookHandler>> & {
   /** The LIVE RELEASES' budget per signed-in account (apiPerMinute), run after the session guard; nothing without an account. */
   readonly liveAccount: onRequestAsyncHookHandler;
+  /** THE VAULT's openings per signed-in account (VAULT_OPEN_PER_MINUTE), run after the session guard; nothing without an account. */
+  readonly vaultOpen: onRequestAsyncHookHandler;
 };
 
 export function groupLimits(config: Pick<AppConfig, 'rateLimits'>): Record<RateGroup, number> {
@@ -117,7 +126,17 @@ export async function registerRateLimits(app: FastifyInstance, config: Pick<AppC
   const liveAccount: onRequestAsyncHookHandler = async function liveAccount(request, reply) {
     if (request.orbes.account) await perAccount.call(this, request, reply);
   };
-  return Object.freeze({ ...hooks, liveAccount });
+  const openOptions = {
+    max: VAULT_OPEN_PER_MINUTE,
+    timeWindow: WINDOW_MS,
+    cache: TRACKED_CLIENTS,
+    keyGenerator: (req: FastifyRequest) => pseudonymize(config.ipHashPepper, 'account', `rl:vault-open:${req.orbes.account?.account.id ?? ''}`),
+  };
+  const perAccountOpen = enforce(app.createRateLimit(openOptions));
+  const vaultOpen: onRequestAsyncHookHandler = async function vaultOpen(request, reply) {
+    if (request.orbes.account) await perAccountOpen.call(this, request, reply);
+  };
+  return Object.freeze({ ...hooks, liveAccount, vaultOpen });
 }
 
 /** The hook of one budget: through while it lasts, then 429 RATE_LIMITED with Retry-After. */

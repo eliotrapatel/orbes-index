@@ -6,11 +6,18 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runDbCli, type CliIO } from '../../scripts/db.js';
-import { MIGRATIONS } from '../../src/server/db/migrate.js';
+import { testConfig } from '../../src/server/config.js';
+import { createContext } from '../../src/server/context.js';
+import { MIGRATIONS, migrateDown, migrationStatus } from '../../src/server/db/migrate.js';
+import { inTransaction } from '../../src/server/db/connection.js';
+import { clearTheVaultForReset } from '../../src/server/db/seed/vault-reset.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID } from '../../src/server/db/seed/demo.js';
 import { KeyService } from '../../src/server/keys/key-service.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { AuditService } from '../../src/server/services/audit.js';
+import { ensureSku } from '../../src/server/services/stock.js';
+import { VaultService } from '../../src/server/services/vault.js';
+import { createManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
 const NOW = new Date('2026-10-01T09:00:00.000Z');
@@ -161,6 +168,68 @@ describe('db CLI: seed and reset-demo', () => {
     const first = await t.db.selectFrom('audit_logs').select(['id']).orderBy('id').executeTakeFirstOrThrow();
     expect(Number(first.id)).toBe(1);
   }, 180_000);
+
+  it('reset-demo clears what THE VAULT’s down steps refuse (lot Q3), which production keeps', async () => {
+    // The demo holds the reference's example rewards (D26); here a dev database also used THE VAULT: vaults opened to a
+    // credit, a credit to give, a right to buy, GUARANTEED and a piece won free (a VAULT order at 0 holding its unit),
+    // an invitation, an invited account, a source changed, a release's vault on and a vault-only model.
+    const clock = createManualClock(NOW.toISOString());
+    const ctx = await createContext(testConfig(), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+    try {
+      // The demo's MONOLITHE (its right to buy) at a price, one unit in stock to be won free.
+      const modelId = (await t.db.selectFrom('vault_rewards').select('model_id').where('kind', '=', 'PRODUCT').executeTakeFirstOrThrow()).model_id!;
+      await t.db.updateTable('models').set({ base_price_minor: 120_000, base_currency: 'EUR' }).where('id', '=', modelId).execute();
+      const email = 'reset-admin@orbes.test';
+      const staff = { type: 'admin' as const, id: (await t.db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id };
+      const locationId = (await t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      const skuId = await inTransaction(t.db, (tx) => ensureSku(tx, modelId, null));
+      await ctx.services.stock.adjust({ skuId, locationId, delta: 1, note: 'Counted.' }, staff);
+      await t.db.insertInto('vault_rewards').values({ kind: 'PRODUCT', odds_in: 2_000, quantity: 1, model_id: modelId, mode: 'FREE', position: 6 }).execute();
+      let next = 0;
+      const opener = new VaultService({ db: t.db, audit: ctx.audit, profiles: ctx.services.profiles, clock: clock.now, random: () => next });
+      const accounts = (await t.db.selectFrom('accounts').select('id').where('status', '=', 'ACTIVE').orderBy('created_at').execute()).map((a) => a.id);
+      const kinds: string[] = [];
+      // CREDIT, CREDIT TO GIVE, PRODUCT (right to buy), GUARANTEED, then the piece won free, by their parts.
+      for (const [i, part] of [0, 100_000, 150_000, 190_000, 195_500].entries()) {
+        const given = await ctx.services.vault.give({ source: 'PROFILE', accountId: accounts[i]! });
+        next = part;
+        kinds.push((await opener.open(accounts[i]!, given.vaults[0]!.id)).kind);
+      }
+      expect(kinds).toEqual(['CREDIT', 'CREDIT_TO_GIVE', 'PRODUCT', 'GUARANTEED', 'PRODUCT']);
+      await ctx.services.vault.invitation(accounts[0]!);
+      await t.db.updateTable('accounts').set({ invited_by: accounts[0]!, invited_at: NOW }).where('id', '=', accounts[5]!).execute();
+      await t.db.updateTable('vault_sources').set({ enabled: false }).where('source', '=', 'WORN').execute();
+      await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', modelId).execute();
+      const live = await t.db.selectFrom('drops').select('id').where('mode', '=', 'LIVE').where('parent_drop_id', 'is', null).executeTakeFirst();
+      if (live) await t.db.updateTable('drops').set({ vault_on: true }).where('id', '=', live.id).execute();
+      expect(await t.db.selectFrom('orders').select('id').where('channel', '=', 'VAULT').execute()).toHaveLength(1);
+    } finally {
+      await ctx.close();
+    }
+
+    const r = await run(['reset-demo', '--yes'], t.db);
+    expect(r.code, r.io.text()).toBe(0);
+    expect(r.io.text()).toMatch(/rolled back 0062_vault_rewards, 0061_the_vault, .*0001_initial\)/);
+    // A fresh demo: no vault, the example rewards under the floor again.
+    expect(await t.db.selectFrom('vaults').select('id').execute()).toEqual([]);
+    expect((await t.db.selectFrom('vault_rewards').select('kind').orderBy('position').execute()).map((x) => x.kind)).toEqual(['I_WAS_THERE', 'CREDIT', 'CREDIT_TO_GIVE', 'PRODUCT', 'GUARANTEED', 'THE_PIECE']);
+  }, 240_000);
+
+  it('keeps THE VAULT’s down guards for every other caller: a vault left in place refuses the rollback', async () => {
+    const other = await createTestDb();
+    try {
+      await other.db.insertInto('vault_rewards').values({ kind: 'GUARANTEED', odds_in: 200, quantity: 1, position: 1 }).execute();
+      expect((await migrateDown(other.db)).reverted).toEqual(['0062_vault_rewards']);
+      await expect(migrateDown(other.db)).rejects.toThrow(/migration 0061_the_vault cannot be rolled back: 0 vaults, .* 1 vault rewards/);
+      // reset-demo's clearing, on a database where 0062 is no longer applied.
+      const applied = (await migrationStatus(other.db)).filter((m) => m.executedAt !== undefined).map((m) => m.name);
+      expect(await clearTheVaultForReset(other.db, applied)).toEqual({ deleted: { vault_rewards: 1 } });
+      expect((await other.db.selectFrom('vault_rewards').select('kind').execute()).map((x) => x.kind)).toEqual(['I_WAS_THERE']);
+      expect((await migrateDown(other.db)).reverted).toEqual(['0061_the_vault']);
+    } finally {
+      await other.close();
+    }
+  });
 
   it('reset-demo refuses to wipe non-demo data without --force; seed refuses to mix with it', async () => {
     const other = await createTestDb();

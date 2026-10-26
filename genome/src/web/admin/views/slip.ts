@@ -10,6 +10,8 @@
  *
  * Both print The parcel (plan MACRO M3 §1.3, B1 and B2): the box to use with its inside sides, and the parcel's weight
  * (or what it misses), as the parcel's packing reads them, recorded once it is packed; never a cost.
+ *
+ * Both list THE VAULT CARD (lot Q3, §2.8) under a piece whose box holds it, as its checklist line says; no row otherwise.
  */
 import { h } from '../../shared/dom.js';
 import { formatDate } from '../format.js';
@@ -19,6 +21,9 @@ import { packingSlip } from '../model/orders.js';
 import { href } from '../router.js';
 import { button, linkButton, statusMark } from '../ui/components.js';
 import type { ViewContext } from './context.js';
+
+/** THE VAULT CARD's row (lot Q3, §2.8), under a piece whose box holds it. */
+const VAULT_CARD_ROW = Object.freeze({ label: 'Vault card', value: 'THE VAULT CARD' });
 
 /** The parcel block (plan MACRO M3 §1.3): the box and the parcel's weight. */
 function parcelBlock(p: { box: string; weight: string }, row: (label: string, value: string | null, testid: string) => HTMLElement): HTMLElement {
@@ -51,6 +56,7 @@ export async function packingSlipView(ctx: ViewContext): Promise<HTMLElement> {
   // The parcel's box and weight; the slip stands without them should its parcel not be read.
   const [d, parcel] = await Promise.all([ctx.api.order(id), ctx.api.parcel(id).catch(() => null)]);
   const s = packingSlip(d);
+  const vaultCard = parcel?.orders.find((o) => o.orderId === d.order.id)?.vaultCard === true;
   const print = button('Print', { kind: 'primary', testId: 'slip-print', onClick: () => window.print() });
   const row = (label: string, value: string | null, testid: string) =>
     h('div', { class: 'printdoc__row' }, h('dt', { class: 'printdoc__label' }, label), h('dd', { class: 'printdoc__value', data: { testid } }, value ?? 'None'));
@@ -98,6 +104,7 @@ export async function packingSlipView(ctx: ViewContext): Promise<HTMLElement> {
           row('Add-ons', s.addons.length ? s.addons.join(' · ') : null, 'slip-addons'),
           row('Engraving', s.engraving, 'slip-engraving'),
           row('Surprise', s.surprise, 'slip-surprise'),
+          vaultCard ? row(VAULT_CARD_ROW.label, VAULT_CARD_ROW.value, 'slip-vault-card') : null,
         ),
       ),
       h('footer', { class: 'printdoc__foot' }, `${s.release ? `${s.release} · ` : ''}${s.channel} · ORBES Client Services`),
@@ -145,6 +152,7 @@ export async function shippingSlipView(ctx: ViewContext): Promise<HTMLElement> {
             row('Add-ons', p.addons.length ? p.addons.join(' · ') : null, 'slip-addons'),
             row('Engraving', p.engraving, 'slip-engraving'),
             row('Surprise', p.surprise, 'slip-surprise'),
+            p.vaultCard ? row(VAULT_CARD_ROW.label, VAULT_CARD_ROW.value, 'slip-vault-card') : null,
           ),
         ),
       ),

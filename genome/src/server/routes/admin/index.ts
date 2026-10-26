@@ -11,7 +11,8 @@
  * assigned, the defaults of THE HOUSE'S GUARANTEE, the answers to « How did you hear about ORBES? », a
  * pre-registration removed from the founding list, an email kind switched on or off, a test email to oneself, the
  * founding announcement sent or cancelled, a house moment switched on or off, a house message sent, scheduled or
- * cancelled); every
+ * cancelled, THE VAULT's sources set, a vault given to a segment, the ENGRAVING add-on's prices and YOUR ORDERS switch
+ * changed); every
  * mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
@@ -75,6 +76,7 @@ import { adminSignUpRoutes } from './sign-up.js';
 import { adminSupplierOrderRoutes } from './supplier-orders.js';
 import { adminSystemRoutes } from './system.js';
 import { adminTestEntrantRoutes } from './test-entrants.js';
+import { adminVaultRoutes } from './vault.js';
 import { adminWarrantyClaimRoutes } from './warranty-claims.js';
 import { adminWornRoutes } from './worn.js';
 
@@ -125,6 +127,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminShopifyRoutes, deps);
   await app.register(adminCircleRoutes, deps);
   await app.register(adminClubRoutes, deps);
+  await app.register(adminVaultRoutes, deps);
   await app.register(adminReportRoutes, deps);
   await app.register(adminRevocationRoutes, deps);
   await app.register(adminKeyRoutes, deps);

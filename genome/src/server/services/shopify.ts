@@ -10,7 +10,8 @@
  *                        the gallery as its images, by their absolute address. A model's sizes are its SKUs (one per
  *                        model and size, services/stock.ts), naturally sorted, ONE SIZE first; a model without a SKU
  *                        yet is in one size. Every product is imported as a draft, not published: Shopify is not decided
- *                        (choice 9), the owner publishes there. A model inactive or discontinued is `archived`.
+ *                        (choice 9), the owner publishes there. A model inactive or discontinued is `archived`. A
+ *                        vault-only model (THE VAULT, lot Q3, §4.5: never sold) is never one of its lines.
  *                        A model and its variants (plan NOCTURNE, N1) are ONE product, the main model's (its title, type
  *                        and handle): Option1 « Variant » (each model's label) and Option2 « Size » (its sizes; left out
  *                        when every model of it is in one size), each model of it priced in the store's currency in its
@@ -43,6 +44,11 @@
  *                        store matches its customers to the ORBES accounts once it exists. No VAT, no shipping fee:
  *                        taxes and shipping are 0.00. An AUDITOR reads the emails and the buyers masked (the routes).
  *                        Never an order of a test account (the test entrants' pool, services/population.ts).
+ *                        THE VAULT (lot Q3, plan §8, S2-S4): a VAULT order is a platform order like the others (Source
+ *                        « orbes-vault »): bought under its right to buy at its usual price, paid as every platform order
+ *                        (later through a Shopify checkout for that order); won free at 0 (no checkout), PAID once claimed;
+ *                        both packed and shipped by the platform, their units out of its stock. A vault-only model is
+ *                        never one of the product export's lines; its SKUs take its unpublished product's ids (S5).
  *
  * Only the columns ORBES fills are written, in the published order: Shopify leaves the others to their defaults on an
  * import, and its header names are its own (test/services/shopify.test.ts holds them against the published lists).
@@ -278,6 +284,9 @@ export class ShopifyExportService {
       .select(['id', 'name', 'type', 'sku_prefix', 'slug', 'active', 'image_sha256', 'base_price_minor', 'variant_of', 'variant_label', 'created_at'])
       .where('base_currency', '=', currency)
       .where('base_price_minor', 'is not', null)
+      // THE VAULT (lot Q3, §4.5, S4): a vault-only model is never sold, so never one of the store's sellable lines; its SKUs
+      // map to an unpublished Shopify product by link only (plan §8).
+      .where('vault_only', '=', false)
       .orderBy('name')
       .orderBy('id')
       .execute();
@@ -422,6 +431,19 @@ export class ShopifyExportService {
       .where('active', '=', true)
       .where('base_currency', '=', currency)
       .where('base_price_minor', 'is not', null)
+      // THE VAULT (lot Q3, §4.5): a set holding a vault-only model is never sold (its releases refused, assertSetSellable).
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('set_models as vs')
+              .innerJoin('models as vm', 'vm.id', 'vs.model_id')
+              .select(sql<number>`1`.as('one'))
+              .whereRef('vs.set_id', '=', 'sets.id')
+              .where('vm.vault_only', '=', true),
+          ),
+        ),
+      )
       .orderBy(sql`lower(name)`)
       .orderBy('id')
       .execute();

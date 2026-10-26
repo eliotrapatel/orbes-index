@@ -99,6 +99,7 @@ import {
   parcelReady,
   parcelView,
   toShip,
+  vaultCardOrders,
   type OnItsWayRow,
   type ShippingOrderView,
   type ToShipRow,
@@ -837,7 +838,7 @@ export class LogisticsService {
       const suggestion = await packingSuggestion(tx, members);
       const { box } = await packingBox(tx, shipment, suggestion);
       const weight = parcelWeight(box, suggestion);
-      const lines = checklistOf(members, ticked, scanned, box, suggestion.addonItems);
+      const lines = checklistOf(members, ticked, scanned, box, suggestion.addonItems, await vaultCardOrders(tx, members));
       if (lines.some((l) => !l.ticked) || shipment.photo === null) throw packingIncomplete();
       const now = this.clock();
       const packedAt = now < shipment.packing_started_at ? shipment.packing_started_at : now;

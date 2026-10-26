@@ -110,6 +110,7 @@ import { nextBirthday } from './birthday-credits.js';
 import { readProgram } from './club-program.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountHouseMessages, type ExportedHouseMessage } from './house-messages.js';
+import { accountVaultData, type ExportedVault, type ExportedVaultGift } from './vault.js';
 import { accountWornPhotos, type ExportedWornPhoto } from './worn.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
@@ -558,6 +559,18 @@ export interface AccountExport {
    */
   tierGrants: ExportedTierGrant[];
   /**
+   * THE VAULT (lot Q3), oldest first: each vault with its occasion (the source and its detail), when it was given, until
+   * when it waited, its state, and once opened what it held (kind, prize, line, odds) and its offer's end; never the
+   * house's note nor who gave it.
+   */
+  vaults: ExportedVault[];
+  /** Its personal invitation link (INVITE A FRIEND): its code and when it was made; null before it was made. */
+  invitation: { code: string; createdAt: Date } | null;
+  /** Whether the account was created through a collector's invitation link, and when; never who invited it. */
+  invited: { invitedBy: boolean; invitedAt: Date | null };
+  /** The credits to give it gave (its vault held one) or accepted, oldest first: amount, state, when; never the other account. */
+  vaultGifts: ExportedVaultGift[];
+  /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans);
    * never Client Services' tags and private notes (plan CUSTOMER INTELLIGENCE §3.0 (k), CLIENT_NOTE_ACTIONS).
@@ -673,9 +686,9 @@ export class OwnerService {
     const open = (id: string) => balances.some((b) => b.grantId === id && b.balanceMinor > 0 && b.expiresAt.getTime() > now.getTime());
     const birthdays = grants.filter((g): g is typeof g & { kind: 'BIRTHDAY' } => g.kind === 'BIRTHDAY').sort((a, b) => (a.birthday_on! < b.birthday_on! ? 1 : -1));
     const shown = [
-      ...grants.filter((g) => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
+      ...grants.filter((g): g is typeof g & { kind: 'GIFT' | 'CREDIT' } => (g.kind === 'GIFT' || g.kind === 'CREDIT') && g.tier !== null).sort((a, b) => a.tier! - b.tier! || (a.kind < b.kind ? 1 : -1)),
       ...birthdays.filter((g, i) => i < 2 || open(g.id)),
-      ...grants.filter((g) => g.kind === 'WARRANTY').sort((a, b) => b.granted_at.getTime() - a.granted_at.getTime() || (a.id < b.id ? -1 : 1)),
+      ...grants.filter((g): g is typeof g & { kind: 'WARRANTY' } => g.kind === 'WARRANTY').sort((a, b) => b.granted_at.getTime() - a.granted_at.getTime() || (a.id < b.id ? -1 : 1)),
     ];
     const next = nextBirthday({ birthDate: profile?.birth_date ?? null, birthDateAt: profile?.birth_date_at ?? null, granted: birthdays.map((g) => g.birthday_on!), days: program.birthdayCreditDays, now });
     return {
@@ -919,7 +932,12 @@ export class OwnerService {
     assertAccountId(accountId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const account = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', accountId).forUpdate().executeTakeFirst();
+      // FOR NO KEY UPDATE (as a sign-in takes it): the account's own actions (their row FOR SHARE, then a release's) and
+      // a lock or a sign-in in progress are waited for, but not a FOR KEY SHARE: a sell-out PAY holds its release's row
+      // and then takes its line's accounts FOR KEY SHARE for their vaults (services/vault.ts giveLiveVaults), while this
+      // lock holds the account and then locks the releases of its entries (removeAccountLiveEntries); with FOR UPDATE
+      // here each waited for the other (a deadlock, lot Q3). The status changed below is not a key column.
+      const account = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', accountId).forNoKeyUpdate().executeTakeFirst();
       if (!account) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
       if (account.status === 'LOCKED') throw conflict('ACCOUNT_ALREADY_LOCKED', 'This account is already locked.');
       if (account.status !== 'ACTIVE') throw conflict('ACCOUNT_NOT_ACTIVE', 'Only an active account can be locked.');
@@ -1085,6 +1103,7 @@ export class OwnerService {
         .execute();
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
+      const vault = await accountVaultData(tx, a.id, now);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -1187,6 +1206,10 @@ export class OwnerService {
         wornPhotos: await accountWornPhotos(tx, a.id),
         claimCodes,
         tierGrants,
+        vaults: vault.vaults,
+        invitation: vault.invitation,
+        invited: vault.invited,
+        vaultGifts: vault.vaultGifts,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -1237,6 +1260,8 @@ export class OwnerService {
             wornPhotos: out.wornPhotos.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
+            vaults: out.vaults.length,
+            vaultGifts: out.vaultGifts.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

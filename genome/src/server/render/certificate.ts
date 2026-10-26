@@ -639,8 +639,8 @@ export function renderCertificateCsv(items: readonly CertificateItem[], opts: Pi
 
 // ── Specimen ───────────────────────────────────────────────────────────────
 
-/** A layer as SVG; clip paths take ids from `ids`. */
-function layerSvg(layer: PdfLayer, ids: { next: number; prefix: string }, defs: string[]): string {
+/** A layer as SVG; clip paths take ids from `ids` (THE VAULT CARD's specimen draws its layers the same way). */
+export function layerSvg(layer: PdfLayer, ids: { next: number; prefix: string }, defs: string[]): string {
   if (layer.kind === 'fill') return `<path fill="${layer.color}"${layer.rule === 'even-odd' ? ' fill-rule="evenodd"' : ''} d="${layer.d}"/>`;
   if (layer.kind === 'stroke') {
     return `<path fill="none" stroke="${layer.color}" stroke-width="${fmt(layer.width)}" stroke-linecap="${layer.cap}" stroke-linejoin="${layer.join}" d="${layer.d}"/>`;

@@ -211,6 +211,8 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     expect(started.checklist.map((l) => [l.key.split(':')[0], l.label, l.byScan])).toEqual([
       ['piece', 'The right piece: its card scanned', true],
       ['card', 'The card, its claim code visible', false],
+      // Lot Q3 (§2.8): a salon's piece opens a vault, so THE VAULT CARD goes in its box.
+      ['vault-card', 'THE VAULT CARD', false],
       ['box', 'The box and the pouch', false],
     ]);
     // Not an ORBES code.
@@ -298,7 +300,7 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     expect(await refusal(lg().checkPacked(id, { ticked: all.filter((k) => k !== 'box') }, agent, scope()))).toMatchObject({ code: 'PACKING_INCOMPLETE' });
     const packed = await lg().checkPacked(id, { ticked: all }, agent, scope());
     expect(packed.step).toBe('PACKED');
-    expect((await db().selectFrom('shipments').select('checklist').where('id', '=', packed.shipment!.id).executeTakeFirstOrThrow()).checklist.map((l) => l.key)).toEqual([`piece:${id}`, `card:${id}`, 'box']);
+    expect((await db().selectFrom('shipments').select('checklist').where('id', '=', packed.shipment!.id).executeTakeFirstOrThrow()).checklist.map((l) => l.key)).toEqual([`piece:${id}`, `card:${id}`, `vault-card:${id}`, 'box']);
     // Packed: the photo no longer changes.
     expect(await refusal(lg().setPhoto(id, { mime: 'image/jpeg', bytes: jpegPhoto(8, 8) }, agent, scope()))).toMatchObject({ code: 'PACKING_PACKED', status: 409 });
     // Ship refuses a parcel whose address was cleared meanwhile.

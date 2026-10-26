@@ -1093,7 +1093,7 @@
      lead (views/desktop-signin.ts measures them), dissolving into the white at its foot, where they stand in ink; it
      runs under the panel to the panel's centre, its side's dissolve ending there, so the panel (white, one fine line)
      stands over the photograph and not beside it; the piece stays whole left of the panel (§3, §10.28, §10.30). */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .d-signin {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .d-signin {
     /* As far under the panel as the piece stays a gutter clear of it (its width --frame-focus-w, centred in the
        photograph as wide as its box): 96 px at least (a narrow window), half the panel at most (a wide one). */
     --d-signin-under: clamp(var(--d-s9), calc(((1 - var(--frame-focus-w)) / 2 * (100vw - var(--d-edge) - 440px) - var(--d-gutter)) / ((1 + var(--frame-focus-w)) / 2)), calc(440px / 2));
@@ -1209,4 +1209,169 @@
     background-color: color-mix(in srgb, var(--vault-ink) 88%, var(--vault-ground));
   }
 
+}
+
+/* ══ THE VAULT page on a computer (lot Q3, step Q3.11; plan §3.5; D41, D43, D69; MK #vault-page's `.vp--desk`) ════════
+   Its own page under the bar, the phone's order on the page's grid: the overline, the title (44 px), his sentence; YOUR
+   VAULTS (16 px) with its doors two side by side at the zoom 1.3 (a third wraps), each 136 px under the line above
+   (D69); OPENED compact, the source on the day's line, a row's action after what it held (N33); the ledger in one line
+   per source (the occasion, its line, the state on the right edge); the grid of eight four to a row. Dark in both modes,
+   as on the phone (vault/vault-page.css holds the rest). */
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne .view--vault.vp {
+    --dz: 1.3;
+    display: grid;
+    grid-template-columns: var(--d-page-grid);
+    column-gap: var(--d-gutter);
+    align-content: start;
+    padding: 0 0 var(--d-s9);
+  }
+
+  html:not(.d-touch) body.nocturne .view--vault.vp > * {
+    grid-column: canvas;
+    min-width: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-over--top {
+    margin-top: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-title {
+    font-size: var(--d-fs-t1);
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-lead {
+    max-width: 34em;
+  }
+
+  html:not(.d-touch) body.nocturne .vp :is(.vp-sec--vaults, .vp-sec--how, .vp-sec--hold) > .vp-over {
+    font-size: var(--fs-input);
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-vaults {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-door {
+    margin-top: 136px;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-opened dt .vp-src {
+    display: inline;
+    margin-left: 1.4em;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-opened dd {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 2.4em;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-opened dd > .vp-occ__state {
+    order: -1;
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-occ {
+    display: grid;
+    grid-template-columns: 220px 1fr 260px;
+    align-items: baseline;
+    gap: 32px;
+    padding: 16px 0;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-occ__p {
+    margin: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-occ__state {
+    justify-self: end;
+    justify-content: flex-end;
+    margin: 0;
+    text-align: right;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-hold {
+    grid-template-columns: repeat(4, 1fr);
+    column-gap: 40px;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-rw__r {
+    font-size: var(--fs-display-sm);
+    letter-spacing: 0.16em;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-rw__p {
+    max-width: 22em;
+    font-size: var(--fs-body);
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-occ__state.vp-link,
+  html:not(.d-touch) body.nocturne .vp .vp-opened dd > .vp-occ__state.vp-link {
+    margin-block: -14.8px;
+  }
+
+  html:not(.d-touch) body.nocturne .vp .vp-occ__state--link:hover {
+    text-decoration-color: var(--vp-ink);
+  }
+
+  /* Below 1200 px the two doors of a row at the zoom 1.05 (MK draws 1440's 1.3 only), the room above each lid scaled with
+     it (136 px × 1.05 / 1.3), so the boxes never meet across their columns. */
+  @media (max-width: 1199.98px) {
+    html:not(.d-touch) body.nocturne .view--vault.vp {
+      --dz: 1.05;
+    }
+
+    html:not(.d-touch) body.nocturne .vp .vp-door {
+      margin-top: 110px;
+    }
+  }
+}
+
+/* A credit to give, as its friend opens it, on a computer (lot Q3 §3.10): its head and its line on the page's grid. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne .view--gift.vp-gift {
+    display: grid;
+    grid-template-columns: var(--d-page-grid);
+    column-gap: var(--d-gutter);
+    align-content: start;
+    padding-bottom: var(--d-s9);
+  }
+
+  html:not(.d-touch) body.nocturne .view--gift.vp-gift > * {
+    grid-column: canvas;
+    min-width: 0;
+    padding: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .vp-gift .vp-gift__head {
+    margin-top: var(--d-s9);
+  }
+
+  html:not(.d-touch) body.nocturne .vp-gift .vp-gift__title {
+    font-size: var(--d-fs-t1);
+    line-height: 1.04;
+    letter-spacing: var(--d-tr-t1);
+  }
+
+  html:not(.d-touch) body.nocturne .vp-gift .vp-gift__actions {
+    max-width: 440px;
+  }
+}
+
+/* THE VAULT in YOUR ORDERS on a computer (lot Q3 §3.8): a right to buy at the head of ORDERS on the page's edge, its form
+   column 640 px at most; the sizes of a claim or a right to buy from the column's left edge, under their label. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne .n-vault-rights > .n-vault-buy {
+    max-width: 640px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  html:not(.d-touch) body.nocturne :is(.n-vault-claim, .n-vault-buy) .n-sizes {
+    justify-content: flex-start;
+  }
 }

@@ -47,6 +47,7 @@ import { lookbookNotFound, SLUG_MAX, SLUG_RE } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { countedCollector } from './population.js';
 import { parisDay, parisDayStart, parisMonthStart } from './schedule.js';
+import { assertSellable } from './vault-orders.js';
 
 /** The open wishes of one account at most: a bound for the page, the payload and the table. */
 export const WISHLIST_MAX = 200;
@@ -207,6 +208,8 @@ export class WishlistService {
       // Read in this transaction: a model hidden before it is not found; hidden after, the wish stays.
       const m = await modelRows(tx).where('m.slug', '=', key).executeTakeFirst();
       if (!m || m.lookbook === 'HIDDEN' || !shownTo(m, tier)) throw lookbookNotFound();
+      // THE VAULT (lot Q3, §4.5): a vault-only model is never sold, never wished for (409 MODEL_VAULT_ONLY).
+      await assertSellable(tx, [m.id]);
       const open = await tx.selectFrom('account_wishes').select('added_at').where('account_id', '=', id).where('model_id', '=', m.id).where('removed_at', 'is', null).executeTakeFirst();
       if (open) return { wished: true as const, item: itemOf(m, open.added_at, tier), count: await openCount(tx, id) };
       // Never past WISHLIST_MAX, a reopened wish included.

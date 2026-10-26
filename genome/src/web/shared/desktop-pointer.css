@@ -126,7 +126,7 @@
 
   /* In the light mode the firmer line is already near the ink: the hover also takes the hover's ground (ink at 4 %), so
      it reads as a step, the press one further (§10.16). */
-  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"]) .n-btn--ol:not(:disabled, [aria-disabled="true"]):hover:not(:active) {
+  html[data-mode="light"]:not(.d-touch) body.nocturne:not([data-screen="scan"], [data-screen="vault"]) .n-btn--ol:not(:disabled, [aria-disabled="true"]):hover:not(:active) {
     background-color: var(--d-hover-ground, transparent);
   }
 

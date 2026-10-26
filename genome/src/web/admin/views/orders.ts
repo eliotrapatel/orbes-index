@@ -17,7 +17,7 @@
  */
 import { h, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
-import { boardFilters, cardCase, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence, TEST_ORDERS_TEXT } from '../model/orders.js';
+import { boardFilters, cardCase, cardHolds, CHANNEL_LABELS, delaysLine, orderOrigin, durationText, LATE_LABELS, lateSentence, TEST_ORDERS_TEXT } from '../model/orders.js';
 import { defaultPeriod, periodProblem, SHOPIFY_PERIOD_MAX_DAYS } from '../model/shopify.js';
 import { href } from '../router.js';
 import { ORDER_CHANNELS, type OrderBoard, type OrderBoardColumn, type OrderCard } from '../types.js';
@@ -141,7 +141,7 @@ function wrappableEmail(email: string): Child[] {
 }
 
 function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
-  const origin = x.release?.title ?? CHANNEL_LABELS[x.channel];
+  const origin = orderOrigin(x);
   const orderCase = cardCase(x);
   const size = x.sizeLabel ?? (x.skuCode ? 'ONE SIZE' : 'Size to enter');
   return h(
@@ -163,6 +163,8 @@ function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
     orderCase ? h('span', { class: 'ocard__case', attrs: { title: 'An order case is open: see the order’s page.' }, data: { testid: 'order-card-case' } }, statusMark(orderCase, 'outline')) : null,
     // The dash of a release's name keeps to the word before it: a balanced line never opens on it.
     x.release ? h('span', { class: 'ocard__origin' }, x.release.title.replace(/ ([—–]) /g, '\u00a0$1 ')) : null,
+    // Lot Q3 (§4.5): a vault's order says where it comes from.
+    x.channel === 'VAULT' ? h('span', { class: 'ocard__origin', data: { testid: 'order-card-vault' } }, orderOrigin(x)) : null,
     h('span', { class: 'ocard__piece' }, `${x.model.name} · ${size}`),
     h('span', { class: 'ocard__who' }, ...wrappableEmail(x.account.email)),
     x.sourceReference ? h('span', { class: ['ocard__line', 'mono'] }, x.sourceReference) : null,

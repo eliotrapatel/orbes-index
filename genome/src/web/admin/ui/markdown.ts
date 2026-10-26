@@ -7,10 +7,12 @@
  * tables, fenced code, block quotes, rules, and inline code, bold, italic,
  * links and images.
  *
- * Links: http(s) opens in a new tab; a link to the other document opens it in
- * the console; any other relative link (the repository's docs) reads as plain
- * text, since the console does not serve them. Images: `../assets/<name>`
- * comes from GET /api/admin/documents/assets/<name>; others are left out.
+ * Links: http(s) opens in a new tab; a link to another document opens it in
+ * the console; a link to `../assets/<name>` (THE VAULT CARD's print files)
+ * downloads that file from GET /api/admin/documents/assets/<name>; any other
+ * relative link (the repository's docs) reads as plain text, since the
+ * console does not serve them. Images: `../assets/<name>` comes from the same
+ * route; others are left out.
  */
 import { h, type Child } from '../../shared/dom.js';
 import { href } from '../router.js';
@@ -92,6 +94,8 @@ function inline(text: string, o: MarkdownOptions): Child[] {
 function link(label: string, url: string, o: MarkdownOptions): Child {
   const text = inline(label, o);
   if (/^https?:\/\//i.test(url)) return h('a', { class: 'md__link', attrs: { href: url, target: '_blank', rel: 'noopener noreferrer' } }, ...text);
+  const asset = /^\.\.\/assets\/([\w.-]+)$/.exec(url);
+  if (asset) return h('a', { class: 'md__link', attrs: { href: o.assetUrl(asset[1]), download: asset[1] } }, ...text);
   const file = url.split('#')[0].split('/').pop() ?? '';
   const id = o.documentIds[file];
   if (id) return h('a', { class: 'md__link', attrs: { href: href('document', { docId: id }) } }, ...text);

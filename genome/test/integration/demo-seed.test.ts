@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import {
+  DEMO_VAULT_TABLE,
   DEMO_ACCOUNTS,
   DEMO_PROFILES,
   DEMO_CATEGORIES,
@@ -324,6 +325,24 @@ describe('demo seed', () => {
     expect(status.guarantees).toEqual([expect.objectContaining({ scope: 'MODEL', target: 'MONOLITHE', pieces: 1, release: null })]);
     const audit = await ctx.db.selectFrom('audit_logs').select(['action', 'actor_type']).where('action', '=', 'guarantee.grant').execute();
     expect(audit).toEqual([{ action: 'guarantee.grant', actor_type: 'system' }]);
+  });
+
+  it('fills THE VAULT\'s house table with the reference\'s example rewards under the floor (lot Q3, step Q3.12; OP-27), audited by the seed, no vault given', async () => {
+    const s = await ctx.services.vault.settings();
+    expect(s.rewards.map((r) => [r.kind, r.oddsText, r.quantity, r.amountMinor, r.currency, r.modelName, r.mode, r.active])).toEqual([
+      ['I_WAS_THERE', null, null, null, null, null, null, true],
+      ['CREDIT', '1 IN 10', 1_000, 2_500, 'EUR', null, null, true],
+      ['CREDIT_TO_GIVE', '1 IN 20', 500, 3_000, 'EUR', null, null, true],
+      ['PRODUCT', '1 IN 25', 40, null, null, 'MONOLITHE', 'RIGHT_TO_BUY', true],
+      ['GUARANTEED', '1 IN 200', 10, null, null, null, null, true],
+      ['THE_PIECE', '1 IN 2000', 2, null, null, null, null, true],
+    ]);
+    expect(s.rewards).toHaveLength(DEMO_VAULT_TABLE.length + 1);
+    // 10 % + 5 % + 4 % + 0.5 % + 0.05 %: the floor holds the rest, published as 1 IN 1.
+    expect(s).toMatchObject({ partsGiven: 195_500, floor: { parts: 804_500, oddsIn: 1, oddsText: '1 IN 1' } });
+    const audit = await ctx.db.selectFrom('audit_logs').select(['actor_type', 'actor_id']).where('action', '=', 'vault.reward.create').execute();
+    expect(audit).toEqual(DEMO_VAULT_TABLE.map(() => ({ actor_type: 'system', actor_id: 'demo-seed' })));
+    expect(await ctx.db.selectFrom('vaults').select('id').execute()).toEqual([]);
   });
 
   it('gives the demo collectors full, partial and empty profiles: a date set by Client Services, Other, a retired finish (plan CUSTOMER INTELLIGENCE §3.1, step 1.11)', async () => {

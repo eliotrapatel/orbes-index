@@ -78,6 +78,8 @@ const RUNNING: ReadonlySet<Kind> = new Set<Kind>(['room', 'join', 'queue', 'sold
  */
 const END_PLAN: readonly [Place, string][] = [
   ['head', ':scope > .n-live__outcome-block'],
+  // THE VAULT under the sentence of a release sold out whole (lot Q3 §3.4; MK 11, desk), above THE RELEASES.
+  ['body', ':scope > .live__vault-slot'],
   ['body', ':scope > .n-live__contact'],
   ['body', ':scope > .n-question'],
   ['body', ':scope > .n-live__back'],

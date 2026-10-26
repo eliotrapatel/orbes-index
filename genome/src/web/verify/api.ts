@@ -92,8 +92,15 @@ import type {
   WishRemoved,
   PieceWorn,
   SheetWornPage,
+  AccountVaultsView,
+  VaultClaimSizesView,
+  VaultDoorView,
+  VaultGiftView,
+  VaultRevealView,
+  VaultRightToBuyView,
 } from './types.js';
 import type { SeenBatchBody, SeenSendResult } from './seen-model.js';
+import { forgetInvite, keptInvite } from './vault/invite.js';
 
 /** One catalogue add-on and its units, as a choice or an addition sends it (plan MACRO M3 §4.2, D2). */
 export interface AddonUnits {
@@ -603,6 +610,99 @@ export class ApiClient {
     return this.liveAction('POST', id, 'release', {});
   }
 
+  // ── THE VAULT (lot Q3, step Q3.10) ─────────────────────────────────────────
+
+  /**
+   * THE VAULT's door on SOLD OUT for your size and on the end page of a release sold out whole (§3.3, §3.4): the entry's
+   * own vault of that release while it waits; null when there is none (404 VAULT_NOT_FOUND: none given, opened or kept
+   * past its 30 days, N28).
+   */
+  async liveVault(dropId: string): Promise<VaultDoorView | null> {
+    try {
+      const r = await this.request<{ vault?: VaultDoorView }>('GET', `/api/v1/account/vaults/live/${encodeURIComponent(dropId)}`);
+      if (!r?.vault || typeof r.vault.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+      return r.vault;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  /**
+   * The opening (§2.2): the server draws and writes the outcome before it answers; a vault already opened answers its
+   * outcome again (409 VAULT_EXPIRED, VAULT_REVOKED; 429 past ten openings a minute).
+   */
+  async openVault(id: string): Promise<VaultRevealView> {
+    const r = await this.request<{ reveal?: VaultRevealView }>('POST', `/api/v1/account/vaults/${encodeURIComponent(id)}/open`, {}, { csrf: true });
+    if (!r?.reveal || typeof r.reveal.prize !== 'string' || typeof r.reveal.odds !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.reveal;
+  }
+
+  // ── THE VAULT page, its row, NOW's line, YOUR ORDERS, the invitation and gift pages (lot Q3, step Q3.11) ──────────
+
+  /** THE VAULT page (§3.5): YOUR VAULTS, OPENED, HOW TO OBTAIN A VAULT, WHAT A VAULT CAN HOLD. */
+  async vaults(): Promise<AccountVaultsView> {
+    const r = await this.request<AccountVaultsView>('GET', '/api/v1/account/vaults');
+    if (!r || !Array.isArray(r.waiting) || !Array.isArray(r.opened) || !Array.isArray(r.ledger) || !Array.isArray(r.grid)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The quiet number next to THE VAULT and NOW's line (D18): how many vaults wait. */
+  async vaultsWaiting(): Promise<number> {
+    const r = await this.request<{ waiting?: unknown }>('GET', '/api/v1/account/vaults/summary');
+    if (!r || typeof r.waiting !== 'number' || !Number.isInteger(r.waiting) || r.waiting < 0) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.waiting;
+  }
+
+  /** INVITE A FRIEND (§2.3.5): the personal link, made at the first press and the same ever after. */
+  async vaultInvite(): Promise<{ code: string; url: string }> {
+    const r = await this.request<{ code?: unknown; url?: unknown }>('POST', '/api/v1/account/vaults/invite', {}, { csrf: true });
+    if (!r || typeof r.code !== 'string' || typeof r.url !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return { code: r.code, url: r.url };
+  }
+
+  /** A credit to give, as its link reads it (N10): never anything of the giver. */
+  async vaultGift(code: string): Promise<VaultGiftView> {
+    const r = await this.request<{ gift?: VaultGiftView }>('GET', `/api/v1/account/vaults/gifts/${encodeURIComponent(code)}`);
+    if (!r?.gift || typeof r.gift.amount !== 'string' || typeof r.gift.state !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.gift;
+  }
+
+  /** ACCEPT: the credit for a first piece, once (409 VAULT_GIFT_ENDED, VAULT_GIFT_NOT_FOR_YOU). */
+  async acceptVaultGift(code: string): Promise<VaultGiftView> {
+    const r = await this.request<{ gift?: VaultGiftView }>('POST', `/api/v1/account/vaults/gifts/${encodeURIComponent(code)}/accept`, {}, { csrf: true });
+    if (!r?.gift || typeof r.gift.amount !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.gift;
+  }
+
+  /** YOUR ORDERS (§3.8): the rights to buy still open. */
+  async vaultRightsToBuy(): Promise<VaultRightToBuyView[]> {
+    const r = await this.request<{ items?: VaultRightToBuyView[] }>('GET', '/api/v1/account/vaults/rights-to-buy');
+    if (!r || !Array.isArray(r.items)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.items;
+  }
+
+  /** BUY under a right to buy, within its 24 hours (409 VAULT_OFFER_ENDED after): the order made. */
+  async buyVault(vaultId: string, input: { size?: string | null; address?: { addressId: string } | null } = {}): Promise<AccountOrder> {
+    const r = await this.request<{ order?: AccountOrder }>('POST', `/api/v1/account/vaults/${encodeURIComponent(vaultId)}/buy`, input, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
+  }
+
+  /** A piece won free: the sizes it can be claimed in, until when. */
+  async vaultClaimSizes(orderId: string): Promise<VaultClaimSizesView> {
+    const r = await this.request<VaultClaimSizesView>('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/claim`);
+    if (!r || typeof r.orderId !== 'string' || !Array.isArray(r.sizes)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** CLAIM IT within its 30 days, in a size with a unit, at its address (409 ORDER_ADDRESS_MISSING without one). */
+  async claimVaultOrder(orderId: string, input: { size?: string | null; address?: { addressId: string } | null } = {}): Promise<AccountOrder> {
+    const r = await this.request<{ order?: AccountOrder }>('POST', `/api/v1/account/orders/${encodeURIComponent(orderId)}/claim`, input, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
+  }
+
   private async liveAction(method: Method, id: string, action: string, body: Record<string, unknown>): Promise<LiveEntry> {
     const r = await this.request<{ entry?: LiveEntry }>(method, `/api/v1/live/${encodeURIComponent(id)}/${action}`, body, { csrf: true });
     if (!r?.entry || typeof r.entry.status !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
@@ -670,8 +770,12 @@ export class ApiClient {
   async register(input: SignUpInput): Promise<SessionInfo> {
     const body: Record<string, unknown> = { email: input.email, password: input.password, firstName: input.firstName, lastName: input.lastName, country: input.country };
     if (input.heard) body.heard = input.heard.other ? { optionId: input.heard.optionId, other: input.heard.other } : { optionId: input.heard.optionId };
+    // A friend's invitation kept by /verify/join/<code> (lot Q3, N10): sent once with the account, then forgotten.
+    const invite = keptInvite();
+    if (invite) body.invite = invite;
     const s = await this.request<SessionInfo>('POST', '/api/v1/account/register', body);
     this.remember(s);
+    if (invite) forgetInvite();
     return s;
   }
 

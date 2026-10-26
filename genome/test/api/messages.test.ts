@@ -30,6 +30,8 @@ describe('MESSAGES for the collector (CS-01)', () => {
     catalog = await seedCatalog(h.ctx);
     me = await accountClient(h);
     operator = await adminClient(h, 'OPERATOR');
+    // THE VAULT's sources off: no vault's FROM ORBES arrival among these messages (test/services/vault-sources.test.ts).
+    await h.ctx.db.updateTable('vault_sources').set({ enabled: false }).execute();
     // A piece registered to the account: its scan, then its registration.
     const p = await issue(h.ctx, catalog);
     await h.ctx.services.warranty.activate(p.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
@@ -163,6 +165,8 @@ describe('house messages for the collector (plan MACRO M2 §1.4, D24 M3 and M4)'
     me = await accountClient(h);
     admin = await adminClient(h, 'ADMIN');
     meId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', me.email.toLowerCase()).executeTakeFirstOrThrow()).id;
+    // THE VAULT's sources off: no vault's FROM ORBES arrival among these messages (test/services/vault-sources.test.ts).
+    await h.ctx.db.updateTable('vault_sources').set({ enabled: false }).execute();
     const p = await issue(h.ctx, catalog);
     await h.ctx.services.warranty.activate(p.product.productId, { retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
     const scan = safeJson(await me.client.post('/api/v1/verify', { code: p.code.data })) as { registration: { token: string } };

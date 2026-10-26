@@ -138,13 +138,13 @@ function cut(s: string, max: number): string {
 }
 
 /** A rendered title as stored: one line, spaces made single, at most 400 characters; blank → null. */
-function deliveredTitle(s: string): string | null {
+export function deliveredTitle(s: string): string | null {
   const line = s.replace(/[\r\n\t]+/g, ' ').replace(CONTROL, '').replace(/\s+/g, ' ').trim();
   return line === '' ? null : cut(line, HOUSE_DELIVERED_TITLE_MAX);
 }
 
 /** Rendered words as stored: line breaks kept, at most 8 000 characters; blank → null. */
-function deliveredBody(s: string): string | null {
+export function deliveredBody(s: string): string | null {
   const text = s.replace(/\r\n?/g, '\n').replace(CONTROL, '').trim();
   return /\S/.test(text) ? cut(text, HOUSE_DELIVERED_BODY_MAX) : null;
 }
@@ -478,15 +478,15 @@ export class HouseMomentService {
     if (rows.length === 0) return [];
     const standings = await clubStandings(this.db, [...new Set(rows.map((g) => g.account_id))], now);
     return rows
-      .filter((g) => usableAt({ kind: g.kind, tier: g.kind === 'CREDIT' ? (g.tier as 2 | 3) : null }, standings.get(g.account_id)?.tier ?? 0))
+      .filter((g) => usableAt({ kind: g.kind, tier: g.kind === 'CREDIT' ? (g.tier as 2 | 3) : null, usableWhileNoPiece: g.usable_while_no_piece }, standings.get(g.account_id)?.tier ?? 0))
       .map((g) => ({ accountId: g.account_id, key: momentKey.CREDIT_EXPIRING(g.id), pieceRef: null, values: { firstName: g.first_name, amount: houseMoney(g.balance, g.currency), expires: houseDate(parisDay(g.expires_at)) } }));
   }
 
   /** The credit grants of `kinds` matching `where`, with their balance (the amount less the open uses), not delivered yet. */
   private async grants(kinds: CreditKind[], where: ReturnType<typeof sql>) {
     const moment = kinds.length === 1 && kinds[0] === 'BIRTHDAY' ? 'BIRTHDAY_CREDIT' : 'CREDIT_EXPIRING';
-    const r = await sql<{ id: string; account_id: string; kind: CreditKind; tier: number | null; granted_at: Date; expires_at: Date; amount_minor: number; currency: string; used: string | number | null; first_name: string | null }>`
-      SELECT g.id, g.account_id, g.kind, g.tier, g.granted_at, g.expires_at, g.amount_minor, g.currency, pr.first_name,
+    const r = await sql<{ id: string; account_id: string; kind: CreditKind; tier: number | null; usable_while_no_piece: boolean; granted_at: Date; expires_at: Date; amount_minor: number; currency: string; used: string | number | null; first_name: string | null }>`
+      SELECT g.id, g.account_id, g.kind, g.tier, g.usable_while_no_piece, g.granted_at, g.expires_at, g.amount_minor, g.currency, pr.first_name,
              (SELECT sum(u.amount_minor) FROM credit_uses u WHERE u.grant_id = g.id AND u.released_at IS NULL) AS used
         FROM tier_grants g
         LEFT JOIN account_profiles pr ON pr.account_id = g.account_id

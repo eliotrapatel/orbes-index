@@ -52,6 +52,9 @@
  *              their deadlines. ENDED by an ADMIN: WAITING, QUEUED and TURN ENDED at once; holds may still be
  *              confirmed. `ended_at` and `ended_reason` say when it began; the release is over once no turn and no hold
  *              is left. EXTEND moves `closes_at`, ADD PIECES raises a size's stock, before the end only.
+ *   THE VAULT  (lot Q3, step Q3.5) on a release with its switch on (`vault_on`, live-console.ts setVault): the PAY that
+ *              sells a size out (`soldOutSizes`; the whole release, before its end ENDS the line) gives a vault to every
+ *              entry of that size still WAITING or QUEUED (services/vault.ts giveLiveVaults); never at a CLOSE.
  *
  * The after-room (after-room.ts, plan LIVE RELEASE+): a child LIVE RELEASE (`parent_drop_id`) that a release's sell-out
  * opens for the entries it ENDS, remembered then (`endRelease`, before they are ENDED). It is seen from its T0 by its
@@ -123,7 +126,7 @@ import { sql, type Expression, type RawBuilder, type SqlBool } from 'kysely';
 import { fromBase64Url, utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
-import { inTransaction, type Db } from '../db/connection.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import { LIVE_HOLD_MINUTES, LIVE_PACE_BATCH, LIVE_PACE_MINUTES, type AccessCombine, type DropRow, type LiveEndReason, type LiveEntryStatus, type LiveResolution } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
@@ -143,6 +146,7 @@ import { defaultLocationId } from './stock.js';
 import { readActingAccount } from './ownership.js';
 import { participationCount, participations } from './participation.js';
 import { cleanCriteria, isSegmentMember, segmentCondition, type SegmentGroup } from './segments.js';
+import { giveLiveVaults } from './vault.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -198,6 +202,19 @@ export function onSaleOf(sizes: readonly { piece?: number | null; stock: number 
     else byPiece.set(s.piece, (byPiece.get(s.piece) ?? 0) + s.stock);
   }
   return byPiece.size === 0 ? plain : Math.min(...byPiece.values());
+}
+
+/**
+ * THE VAULT's LIVE source (lot Q3, step Q3.5; plan §2.3.1): the sizes a PAY in the sizes `own` sold out. Every size when
+ * the release is now sold out whole (its pieces on sale confirmed; a set's, its sets, as `onSaleOf` counts: D6);
+ * otherwise each of `own` now fully confirmed, its confirmed pieces its stock (D4 "when your size sells out"; a 2+ piece
+ * entry its size can no longer serve gets nothing while the size is not fully paid, N19).
+ */
+export function soldOutSizes(sizes: readonly { id: string; piece?: number | null; stock: number; confirmed: number }[], own: readonly string[]): string[] {
+  const stock = onSaleOf(sizes);
+  const first = Math.min(...sizes.map((s) => s.piece ?? 0));
+  if (stock > 0 && sizes.filter((s) => (s.piece ?? 0) === first).reduce((n, s) => n + s.confirmed, 0) >= stock) return sizes.map((s) => s.id);
+  return sizes.filter((s) => own.includes(s.id) && s.stock > 0 && s.confirmed >= s.stock).map((s) => s.id);
 }
 
 /**
@@ -994,7 +1011,8 @@ export interface WithdrawnLiveInterest {
 /**
  * Remove the open entries of an account (WAITING, QUEUED, TURN, SECURED: REMOVED by the lock's ADMIN, add-ons
  * dropped) and withdraw its interest in the releases not opened yet, in the transaction of its lock, whose row lock
- * on the account is already held; the releases of those entries are locked first (FOR UPDATE, by id), as every action
+ * on the account is already held (FOR NO KEY UPDATE: a sell-out PAY holding one of those releases gives its line's
+ * vaults under FOR KEY SHARE on their accounts, never waiting for it); the releases of those entries are locked first (FOR UPDATE, by id), as every action
  * takes them. A piece so given back goes to the next in line at the engine's next pass. Returns them for their audit
  * entries, written after the lock's row locks (auditRemovedLiveEntries).
  */
@@ -1890,7 +1908,12 @@ export class LiveService {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     let leftOut: LeftOutAddon[] = [];
-    await this.changing(id, (mark, changes) => inTransaction(this.db, async (tx) => {
+    // Run again on a deadlock or a serialization failure (40P01, 40001); each try takes its frame marks afresh and reads
+    // its add-ons left out anew. A sell-out's vaults take the line's accounts FOR KEY SHARE, which an account's lock
+    // (OwnerService.lock, FOR NO KEY UPDATE, then the releases) never blocks: the two never wait for each other (lot Q3).
+    await this.changing(id, (mark, changes) => inRetriedTransaction(this.db, async (tx) => {
+      changes.anew();
+      leftOut = [];
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
@@ -1898,6 +1921,13 @@ export class LiveService {
       await tx.updateTable('live_entries').set({ status: 'CONFIRMED', confirmed_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const confirmed: AuditRecordInput = { actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } };
       const notes: AuditRecordInput[] = [confirmed];
+      // THE VAULT's LIVE source (lot Q3, step Q3.5): the sizes this PAY sold out give their line its vaults before the end ENDS it.
+      // Never once `closes_at` has passed (D8): a hold paid after the close, before the engine's next pass ends the release
+      // CLOSED (settleEnd), however many pieces it leaves, so it sells nothing out for a vault.
+      if (d.vault_on && !d.ended_at && now.getTime() < d.closes_at.getTime()) {
+        const own = d.set_id === null ? [e.size_id] : (await tx.selectFrom('live_entry_sizes').select('size_id').where('entry_id', '=', e.id).execute()).map((x) => x.size_id);
+        notes.push(...(await giveLiveVaults(tx, d, soldOutSizes(await this.sizeTotals(tx, d), own), now)));
+      }
       await this.settleEnd(tx, d, now, notes, changes);
       const created = await ordersForLiveEntry(tx, e.id, actor, now);
       notes.push(...created.notes);
@@ -2515,7 +2545,7 @@ export class LiveService {
 
   /** The audit entries of a transaction, written last: no row is locked after the audit chain's lock. */
   private async record(tx: Db, notes: readonly AuditRecordInput[]): Promise<void> {
-    for (const n of notes) await this.audit.record(n, tx);
+    await this.audit.recordAll(notes, tx);
   }
 
   /** An ACTIVE account, its row FOR SHARE (a lock under way finishes first; 403 ACCOUNT_LOCKED once locked). */

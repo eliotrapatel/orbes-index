@@ -2,13 +2,17 @@
  * ORBES verification app — layout and screens.
  * Foundation (tokens, type, brackets, buttons, fields, motion) in ../shared/brand.css; the house look before NOCTURNE
  * (the certificate, the room, the board) in ./house.css; NOCTURNE's foundation (the chrome and its pieces, shared with
- * the legal pages) in ../shared/nocturne.css; NOCTURNE's screens here, in that order of the cascade.
+ * the legal pages) in ../shared/nocturne.css; THE VAULT's object (lot Q3) in ./vault/vault.css, after the rules of the
+ * room it stands in (as the vault reference's stylesheet follows them); NOCTURNE's screens here, in that order of the
+ * cascade.
  */
 @import "../shared/brand.css";
 @import "./house.css";
 @import "../shared/nocturne.css";
 @import "../shared/light.css";
 @import "../shared/desktop-base.css";
+@import "./vault/vault.css";
+@import "./vault/vault-page.css";
 
 /* ── NOW (plan NOCTURNE, screen 1, step N3; C1, C10, C42, C43): /verify, in place of the landing ──
    What leads (views/now.ts) as the canvas sets it: the hero's photograph whole at the column's width, faded, its words
@@ -4075,8 +4079,10 @@ body.nocturne[data-screen="live"] {
   margin-top: 18px;
 }
 
-/* NOW's line under the hero, before YOUR PIECES, while an answer is unread. */
-.now__messages {
+/* NOW's line under the hero, before YOUR PIECES, while an answer is unread; THE VAULT's while a vault waits (lot Q3
+   §3.7), in its pattern, after it when both show (one hairline between them). */
+.now__messages,
+.now__vault {
   align-items: center;
   margin-top: 40px;
   padding-top: 18px;
@@ -4087,6 +4093,11 @@ body.nocturne[data-screen="live"] {
 
 .now__messages-sentence {
   margin-top: 6px;
+}
+
+.now__messages + .now__vault {
+  margin-top: 0;
+  border-top: 0;
 }
 
 /* ── SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10): the button under a LIVE RELEASE's CONFIRMED, a draw's place

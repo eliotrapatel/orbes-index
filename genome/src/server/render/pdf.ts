@@ -66,6 +66,11 @@ export interface PdfPage {
   layers?: readonly PdfLayer[];
   /** Link annotations in page millimetres: a rectangle that opens `url` (http or https only). */
   links?: readonly PdfLink[];
+  /**
+   * The trimmed card on a page drawn with its bleed (page millimetres, y down): written as the page's TrimBox, its
+   * BleedBox the whole page, so a print shop cuts there (THE VAULT CARD's single card, plan OQ Q3 §5).
+   */
+  trimBox?: { xMm: number; yMm: number; wMm: number; hMm: number };
 }
 
 /** A link annotation: the rectangle (page millimetres, y down) a click opens `url` from. */
@@ -268,6 +273,19 @@ function drawLayers(doc: PDFKit.PDFDocument, layers: readonly PdfLayer[], mode: 
   }
 }
 
+/** TrimBox (the trimmed card) and BleedBox (the whole page) of a page drawn with its bleed, in PDF points (y up). */
+function setTrimBox(doc: PDFKit.PDFDocument, page: PdfPage): void {
+  const t = page.trimBox;
+  if (!t) return;
+  if (![t.xMm, t.yMm, t.wMm, t.hMm].every(Number.isFinite) || t.wMm <= 0 || t.hMm <= 0 || t.xMm < 0 || t.yMm < 0 || t.xMm + t.wMm > page.widthMm || t.yMm + t.hMm > page.heightMm) {
+    throw new RangeError('a trim box is a positive rectangle inside its page');
+  }
+  const data = doc.page.dictionary.data as Record<string, unknown>;
+  const pt = (mm: number) => Math.round(mmToPt(mm) * 1e4) / 1e4;
+  data.TrimBox = [pt(t.xMm), pt(page.heightMm - t.yMm - t.hMm), pt(t.xMm + t.wMm), pt(page.heightMm - t.yMm)];
+  data.BleedBox = [0, 0, pt(page.widthMm), pt(page.heightMm)];
+}
+
 const LINK_URL_RE = /^https?:\/\/[\x21-\x7e]{1,2000}$/;
 
 function addLinks(doc: PDFKit.PDFDocument, links: readonly PdfLink[]): void {
@@ -321,6 +339,7 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
     const spots = declareSpotColors(doc, meta.spotColors ?? []);
     for (const page of pages) {
       doc.addPage({ size: [mmToPt(page.widthMm), mmToPt(page.heightMm)], margin: 0 });
+      if (page.trimBox) setTrimBox(doc, page);
       if (page.fills && page.fills.length > 0) drawShapes(doc, page.fills, spots, mode, overprint);
       if (page.layers && page.layers.length > 0) {
         doc.save();

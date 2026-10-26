@@ -74,7 +74,7 @@ import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
 import { ApiClient, ApiError, settledWithin } from './api.js';
 import { buildVerifyInput, defaultZoomLevel, zoomLabel, type ZoomState } from './capture.js';
-import { DESKTOP, HINTS, HOW, MESSAGES, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
+import { DESKTOP, HINTS, HOW, MESSAGES, PROBLEMS, problemForApiError, STATUS, VAULT, type ProblemAction, type ProblemKind } from './copy.js';
 import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
@@ -101,6 +101,7 @@ import { howView } from './views/how.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { messageOf } from './views/forms.js';
 import { liveView } from './views/live.js';
+import { liveVault } from './vault/live-vault.js';
 import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { WORN_ENTRY_MARK } from './views/worn-sheet.js';
@@ -128,28 +129,32 @@ import { wishlistArrangement } from './views/desktop-wishlist.js';
 import { releaseArrangement } from './views/desktop-release.js';
 import { piecesArrangement } from './views/desktop-pieces.js';
 import { isScanPagePath, SCAN_PAGE_PATH, scanPageView } from './views/desktop-scan.js';
-import { ACCOUNT_PATH, ACCOUNT_WISHLIST_PATH, accountPath, accountRouteOf, isAccountView, type AccountView } from './views/desktop-account.js';
+import { ACCOUNT_PATH, ACCOUNT_VAULT_PATH, ACCOUNT_WISHLIST_PATH, accountPath, accountRouteOf, isAccountView, type AccountView } from './views/desktop-account.js';
+import { GIFT_PATH, giftCodeOf, isVaultPagePath, joinCodeOf, VAULT_PAGE_PATH, vaultLinkOf } from './vault-model.js';
+import { forgetGift, keepGift, keepInvite, keptGift } from './vault/invite.js';
+import { vaultPageView } from './views/vault-page.js';
+import { vaultGiftView } from './views/vault-gift.js';
 import { isSignInPath, registerSignInPage, SIGN_IN_PATH, signInPageView, type SignInPageView, type SignInRequest, type SignInTab } from './views/desktop-signin.js';
 import { FROM_ORBES_KEY, isMessagesPath, isWriteContext, messagesPageView, messagesPath, messagesSubjectOf, subjectKey } from './views/desktop-messages.js';
 import { isOrdersPath, orderPagePath, orderPageView, orderReferenceOf } from './views/desktop-order.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'vault' | 'gift' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
  * sheet, the releases or a release's page, the circle or a post, THE CLUB, HOW RELEASES WORK, YOUR WISHLIST.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'vault' | 'gift' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'scanPage', 'account', 'signIn', 'messages', 'order', 'reset', 'unsubscribe'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist', 'vault', 'gift', 'scanPage', 'account', 'signIn', 'messages', 'order', 'reset', 'unsubscribe'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' | 'vault' | 'join' | 'gift' | 'scanPage' | 'account' | 'signIn' | 'messages' | 'order' | 'reset' | 'unsubscribe' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   // Desktop (decision 5): MESSAGES in two parts and an order's page of a computer. A phone keeps the account
   // sheet's MESSAGES (NOW at its address) and the order's card on MY PIECES' ORDERS (an order's address shows it there).
@@ -159,6 +164,8 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   // and the sign-in where it stands: NOW at these addresses); YOUR WISHLIST's card's address is its page everywhere.
   const account = accountRouteOf(path);
   if (account === 'wishlist') return 'wishlist';
+  // THE VAULT (lot Q3 §3.5): its card's address is its page everywhere, as YOUR WISHLIST's.
+  if (account === 'vault') return 'vault';
   if (account && isDesktop()) return 'account';
   if (isSignInPath(path) && isDesktop()) return 'signIn';
   if (path === PIECES_PATH) return 'pieces';
@@ -174,6 +181,10 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   if (isClubPath(path)) return 'club';
   // YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), opened from the account sheet.
   if (isWishlistPath(path)) return 'wishlist';
+  // THE VAULT page (lot Q3 §3.5), opened from the account sheet's row; a friend's invitation and a credit to give (N10).
+  if (isVaultPagePath(path)) return 'vault';
+  const vaultLink = vaultLinkOf(path);
+  if (vaultLink) return vaultLink;
   // Desktop: the SCAN page of a computer (a phone keeps NOW at this address).
   if (isScanPagePath(path) && isDesktop()) return 'scanPage';
   // The emails' pages (lot M1, step M1.19): an email's link, on a phone and a computer alike.
@@ -265,6 +276,9 @@ const signInTabOf = (state: unknown): SignInTab => ((state as { tab?: unknown } 
 
 /** YOUR WISHLIST's address: on a computer its card's, under YOUR ACCOUNT (desktop). */
 const wishlistPath = (): string => (isDesktop() ? ACCOUNT_WISHLIST_PATH : WISHLIST_PATH);
+
+/** THE VAULT page's address (lot Q3 §3.5, D41): on a computer its card's, under YOUR ACCOUNT. */
+const vaultPath = (): string => (isDesktop() ? ACCOUNT_VAULT_PATH : VAULT_PAGE_PATH);
 
 /** THE RELEASES' tab its place in the history keeps (plan LIVE RELEASE+, choice 5): PAST, or LIVE by default. */
 const releasesTabOf = (state: unknown): ReleasesTab => ((state as { tab?: unknown } | null)?.tab === 'past' ? 'past' : 'live');
@@ -370,6 +384,17 @@ class App {
     const arrival = readArrival(location, document, tabStorage(), history);
     // What the collector looks at (plan CUSTOMER INTELLIGENCE §3.3 T.9): off in an automated browser, nothing drawn.
     seen.start(this.api);
+    // A credit to give opened signed out on a phone (plan §3.5, §3.10): its page again in MY PIECES' place once signed in
+    // there (SIGN IN or CREATE ACCOUNT); signed in anywhere else, the kept code is forgotten.
+    this.session.subscribe((s) => {
+      if (s.status !== 'signed-in') return;
+      const code = keptGift();
+      if (!code) return;
+      forgetGift();
+      if (isDesktop() || this.screen !== 'pieces' || entryOf(history.state) !== 'pieces') return;
+      replaceEntry({ screen: 'gift' }, `${GIFT_PATH}/${code}`);
+      void this.showGift();
+    });
     this.photoInput.addEventListener('change', () => {
       const file = this.photoInput.files?.[0];
       this.photoInput.value = '';
@@ -434,6 +459,10 @@ class App {
         void this.showAccount();
       } else if (entry === 'wishlist' || route === 'wishlist') {
         if (this.screen !== 'wishlist') void this.showWishlist();
+      } else if (entry === 'vault' || route === 'vault') {
+        if (this.screen !== 'vault') void this.showVault();
+      } else if (entry === 'gift' || route === 'gift') {
+        if (this.screen !== 'gift') void this.showGift();
       } else if ((entry === 'scanPage' || route === 'scanPage') && isDesktop()) {
         if (this.screen !== 'scanPage') void this.showScanPage();
       } else if (entry === 'reset' || route === 'reset') {
@@ -486,12 +515,14 @@ class App {
         accountHost: {
           navigate: (view) => this.navigateAccount(view),
           openWishlist: () => this.openWishlist(),
+          openVault: () => this.openVaultPage(),
           signedOut: () => this.openNow(),
           signIn: (view) => this.accountSignIn(view),
           openMessages: () => this.openMessages(),
         },
         onTheClub: () => this.openClub(),
         onWishlist: () => this.openWishlist(),
+        onVault: () => this.openVaultPage(),
         onScan: () => void this.startScan(),
         onScanPage: () => this.openScanPage(),
         onConcerning: (target) => this.openConcerning(target),
@@ -537,7 +568,7 @@ class App {
       }
       if (this.screen !== 'account') return;
       const named = accountRouteOf(location.pathname);
-      const view: AccountView = named && named !== 'wishlist' ? named : 'account';
+      const view: AccountView = named && named !== 'wishlist' && named !== 'vault' ? named : 'account';
       replaceEntry({ screen: 'landing' }, LANDING_PATH);
       void this.showLanding().then(() => {
         if (this.screen === 'landing') this.shell?.openAccountSheet(view);
@@ -640,6 +671,36 @@ class App {
         } else pushEntry({ screen: 'wishlist' }, path);
       } else if (location.pathname !== path) replaceEntry(history.state, path);
       void this.showWishlist(false);
+    } else if (route === 'vault') {
+      // THE VAULT page over the landing, as YOUR WISHLIST: its own address put back. On a computer, its card's page,
+      // over YOUR ACCOUNT (lot Q3 §3.5, D41).
+      const path = vaultPath();
+      if (entryOf(history.state) !== 'vault') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        if (isDesktop()) {
+          pushEntry({ screen: 'account', view: 'account' }, ACCOUNT_PATH);
+          pushEntry({ screen: 'vault', under: 'account' }, path);
+        } else pushEntry({ screen: 'vault' }, path);
+      } else if (location.pathname !== path) replaceEntry(history.state, path);
+      void this.showVault(false);
+    } else if (route === 'gift') {
+      // A credit to give (N10): its page over the landing, its address kept (its code).
+      if (entryOf(history.state) !== 'gift') {
+        const path = location.pathname;
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'gift' }, path);
+      }
+      void this.showGift(false);
+    } else if (route === 'join') {
+      // A friend's invitation (N10): its code kept in this tab for CREATE ACCOUNT, then the sign-in on CREATE ACCOUNT
+      // with its line (a computer's page; a phone's MY PIECES); already signed in, NOW.
+      const code = joinCodeOf(location.pathname);
+      if (code) keepInvite(code);
+      replaceEntry({ screen: 'landing' }, LANDING_PATH);
+      void this.session.ensure().then(
+        (st) => (st.status === 'signed-in' ? void this.showLanding(false) : this.openJoin()),
+        () => this.openJoin(),
+      );
     } else if (route === 'account') {
       // Desktop (decision 5): YOUR ACCOUNT over the landing, a section's page over both.
       const view = accountRouteOf(location.pathname) as AccountView;
@@ -780,6 +841,7 @@ class App {
    */
   private openHouse(target: HouseTarget): void {
     if (target.to === 'piece') this.openPiece(target.id, target.tab);
+    else if (target.to === 'vault') this.openVaultPage();
     else if (target.to === 'my-pieces') this.openPieces({ tab: 'pieces' });
     else if (target.to === 'collection') this.openLookbook();
     else if (isDesktop()) this.openAccountSection(target.to === 'sizes' ? 'sizes' : 'account');
@@ -909,6 +971,42 @@ class App {
   }
 
   /**
+   * THE VAULT page (lot Q3 §3.5, D41): the account sheet's row and the computer's card, NOW's line, OPEN ANOTHER under an
+   * opened vault (N3: where another vault waits or OPENED holds this one); over the current entry (over YOUR ACCOUNT's
+   * page on a computer), or in the place of a chapter's, as YOUR WISHLIST.
+   */
+  private openVaultPage(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'vault') {
+      void this.showVault();
+      return;
+    }
+    if (entry === 'account') pushEntry({ screen: 'vault', under: 'account' }, vaultPath());
+    else if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club' || entry === 'wishlist') replaceEntry({ screen: 'vault' }, vaultPath());
+    else pushEntry({ screen: 'vault' }, vaultPath());
+    void this.showVault();
+  }
+
+  /** A friend's invitation (N10): the sign-in on CREATE ACCOUNT, its line above the form (a computer's page; a phone's MY PIECES). */
+  private openJoin(): void {
+    if (isDesktop()) {
+      this.openSignIn({ tab: 'create', lead: VAULT.join.lead });
+      return;
+    }
+    pushEntry({ screen: 'pieces' }, PIECES_PATH);
+    void this.showPieces(true, 'create', VAULT.join.lead);
+  }
+
+  /** THE VAULT page signed out: the sign-in, the page once signed in (a computer's sign-in page; a phone's MY PIECES). */
+  private vaultSignIn(): void {
+    if (isDesktop()) this.openSignIn({ lead: DESKTOP.signIn.lead });
+    else {
+      replaceEntry({ screen: 'pieces' }, PIECES_PATH);
+      void this.showPieces();
+    }
+  }
+
+  /**
    * YOUR ACCOUNT (desktop, decision 5): the header's account button and every ‹ YOUR ACCOUNT, over the page it
    * is opened from (back returns there); from a section of the account or YOUR WISHLIST over it, back to it.
    */
@@ -919,7 +1017,7 @@ class App {
       void this.showAccount();
       return;
     }
-    if ((entry === 'account' || entry === 'wishlist') && (history.state as { under?: unknown } | null)?.under === 'account') {
+    if ((entry === 'account' || entry === 'wishlist' || entry === 'vault') && (history.state as { under?: unknown } | null)?.under === 'account') {
       history.back();
       return;
     }
@@ -1175,6 +1273,7 @@ class App {
       onModel: (slug) => this.openSheet(slug),
       onCircle: () => this.openCircle(),
       onPost: (id) => this.openCirclePost(id),
+      onVault: () => this.openVaultPage(),
       focus,
     });
     if (await this.swap(view.root, 'landing', focus)) this.live = view;
@@ -1182,7 +1281,7 @@ class App {
   }
 
   /** MY PIECES (F-01): the signed-in owner's pieces, its orders and its releases, or the sign-in when signed out. */
-  private async showPieces(focus = true, signInTab?: SignInTab): Promise<void> {
+  private async showPieces(focus = true, signInTab?: SignInTab, signInLead?: string): Promise<void> {
     this.generation++;
     this.stopCamera();
     this.pieceId = null;
@@ -1211,6 +1310,7 @@ class App {
       },
       localZone: localZone(),
       signInTab,
+      signInLead,
     });
     // Desktop (BRIEF §10.11): on a computer the PIECES tab is shown once its banner is known (a short wait at
     // most), so the banner and the page are laid out together; the page never moves when the banner arrives.
@@ -1330,6 +1430,43 @@ class App {
     else view.dispose();
   }
 
+  /** THE VAULT page (lot Q3 §3.5): YOUR VAULTS, OPENED, HOW TO OBTAIN A VAULT, WHAT A VAULT CAN HOLD. */
+  private async showVault(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = vaultPageView({
+      api: this.api,
+      session: this.session,
+      sound: this.liveSound,
+      onSignIn: () => this.vaultSignIn(),
+      onPieces: () => this.openPieces(),
+      onProfile: () => (isDesktop() ? this.openAccountSection('profile') : this.shell?.openAccountSheet('profile')),
+    });
+    if (await this.swap(view.root, 'vault', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /**
+   * A credit to give (N10): its page, signed in; the sign-in first. On a phone its code is kept for MY PIECES' sign-in and
+   * its page reopened once signed in (start()); a computer's sign-in page returns to it by itself.
+   */
+  private async showGift(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const code = giftCodeOf(location.pathname);
+    const view = vaultGiftView({
+      api: this.api,
+      session: this.session,
+      code,
+      onSignIn: () => {
+        if (code && !isDesktop()) keepGift(code);
+        this.vaultSignIn();
+      },
+    });
+    if (await this.swap(view.root, 'gift', focus)) this.live = view;
+    else view.dispose();
+  }
+
   /** YOUR ACCOUNT or one of its sections (desktop, decision 5), as its address names it. */
   private async showAccount(focus = true): Promise<void> {
     const page = this.shell?.page;
@@ -1338,7 +1475,7 @@ class App {
       return;
     }
     const named = accountRouteOf(location.pathname);
-    const view: AccountView = named && named !== 'wishlist' ? named : 'account';
+    const view: AccountView = named && named !== 'wishlist' && named !== 'vault' ? named : 'account';
     // MESSAGES is its own page in two parts: an entry of the account's that names it shows that page.
     if (view === 'messages') {
       replaceEntry({ screen: 'messages' }, messagesPath(null));
@@ -1664,6 +1801,14 @@ class App {
       api: this.api,
       session: this.session,
       sound: this.liveSound,
+      // THE VAULT (lot Q3, step Q3.10; D65): on SOLD OUT for your size and the end page of a release sold out whole.
+      vault: liveVault({
+        api: this.api,
+        sound: this.liveSound,
+        messageOf,
+        onVaultPage: () => this.openVaultPage(),
+        surface: () => (view.root.isConnected ? view.root : null),
+      }),
       sheet,
       failure: failure ?? undefined,
       onRetry: () => void this.showRelease(id, true, afterRoom),

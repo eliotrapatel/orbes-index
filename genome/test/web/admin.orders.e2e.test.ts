@@ -930,7 +930,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     // APPLY CREDIT: its sentence, both credits offered (€ 70); € 30 takes the birthday's € 20 first, then € 10 of PLATINE's.
     await p.click('[data-testid=order-credit-apply]');
     expect(await p.locator('dialog .dialog__text').textContent()).toBe(
-      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
+      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then a vault’s, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
     );
     expect(await p.locator('dialog input[name=amount]').inputValue()).toBe('70');
     expect(await p.locator('dialog').textContent()).toMatch(/Available: Birthday €\s20 until/u);

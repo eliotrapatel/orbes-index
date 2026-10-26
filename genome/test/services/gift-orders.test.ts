@@ -412,7 +412,7 @@ describe('the welcome gift (BP-19 T5)', () => {
     await setGift(3, null);
   });
 
-  it('draws an invoice at the most lines it carries: six add-ons, an engraving priced from the settings (plan NEXT LOT §3.6.C), its shipping, a credit split over the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), a warranty credit (plan ORBES CARE) and both tiers, and both tiers\' gifts', async () => {
+  it('draws an invoice at the most lines it carries: six add-ons, an engraving priced from the settings (plan NEXT LOT §3.6.C), its shipping, a credit split over the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), a vault\'s credit (THE VAULT), a warranty credit (plan ORBES CARE) and both tiers, and both tiers\' gifts', async () => {
     const [platineGift, palladiumGift] = [await giftModel('ANNEAU VII', [null], 2), await giftModel('ANNEAU VIII', [null], 2)];
     await setGift(2, platineGift);
     await setGift(3, palladiumGift);
@@ -427,6 +427,12 @@ describe('the welcome gift (BP-19 T5)', () => {
     await t.db
       .insertInto('tier_grants')
       .values({ account_id: a.id, tier: null, kind: 'WARRANTY', granted_at: clock.now(), amount_minor: 3_000, currency: 'EUR', expires_at: new Date(clock.now().getTime() + 365 * 86_400_000) })
+      .execute();
+    // A vault's credit (THE VAULT, lot Q3), as an opening gives it: no tier, its vault, € 25 for 30 days.
+    const [won] = (await ctx.services.vault.give({ source: 'PROFILE', accountId: a.id })).vaults;
+    await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: a.id, tier: null, kind: 'VAULT', vault_id: won!.id, granted_at: clock.now(), amount_minor: 2_500, currency: 'EUR', expires_at: new Date(clock.now().getTime() + 30 * 86_400_000) })
       .execute();
     const opensAt = new Date(clock.now().getTime() + HOUR);
     const r = await createLiveRelease(f, {
@@ -449,18 +455,19 @@ describe('the welcome gift (BP-19 T5)', () => {
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
     const order = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow();
     expect(await giftsOf(order.id)).toHaveLength(2);
-    // € 200 of credit: the birthday's € 20 first, the warranty's € 30, PALLADIUM's € 100, then PLATINE's € 50.
-    await orders().applyCredit(order.id, 20_000, admin);
+    // € 225 of credit: the birthday's € 20 first, the vault's € 25, the warranty's € 30, PALLADIUM's € 100, then PLATINE's € 50.
+    await orders().applyCredit(order.id, 22_500, admin);
     // An engraving of before priced from the settings (plan NEXT LOT §3.6.C; lot Q2, step Q2.5, N15: kept as sold), entered
     // by Client Services: its own line.
     await t.db.updateTable('orders').set({ engraving_text: 'A. & L.', engraving_minor: 3_000, engraving_by: 'STAFF' }).where('id', '=', order.id).execute();
     await pay(order.id);
     const invoice = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', order.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
     const lines = linesOf(invoice.lines);
-    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
+    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
     expect(lines).toHaveLength(INVOICE_MAX_LINES);
     expect(lines.filter((l) => l.kind === 'CREDIT').map((l) => [l.label, l.amountMinor])).toEqual([
       ['CREDIT · BIRTHDAY', -2_000],
+      ['CREDIT · VAULT', -2_500],
       ['CREDIT · WARRANTY', -3_000],
       ['CREDIT · PALLADIUM', -10_000],
       ['CREDIT · PLATINE', -5_000],

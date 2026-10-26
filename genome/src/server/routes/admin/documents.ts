@@ -1,11 +1,13 @@
 /**
  * The staff documents the console shows under Documents: the sales and
- * shipping playbook (J-09) and the packaging kit (D-02), as Markdown, with
- * the illustrations they embed.
+ * shipping playbook (J-09), the packaging kit (D-02) and THE VAULT CARD (lot
+ * Q3, §5: the card in the box of a bought piece and its print files), as
+ * Markdown, with the illustrations and the files they cite.
  *
  *   GET /api/admin/documents              the list (id, title, summary, language)
  *   GET /api/admin/documents/:id          one document: its Markdown
- *   GET /api/admin/documents/assets/:name one of its illustrations
+ *   GET /api/admin/documents/assets/:name one of its illustrations, or a print
+ *                                         file (a PDF, shown inline, named)
  *
  * AUDITOR, like every read (RETAIL never reads them: its sale shell has no
  * Documents). The files are copies of docs/launch/*.md and of the images they
@@ -41,12 +43,22 @@ export const STAFF_DOCUMENTS: readonly StaffDocument[] = Object.freeze([
     summary: 'The packaging text, the certificate card, the French lexicon and the launch announcement, in English and French.',
     lang: 'en',
   },
+  {
+    id: 'vault-card',
+    file: 'VAULT-CARD.md',
+    title: 'THE VAULT CARD',
+    summary: 'The card in the box of every bought piece: what it says, when it goes in the parcel, and its print files, an A4 sheet of eight and a single card.',
+    lang: 'fr',
+  },
 ]);
 
-/** The illustrations the documents embed, by the name the Markdown gives them (../assets/…). */
+/** The illustrations the documents embed and the files they link to, by the name the Markdown gives them (../assets/…). */
 export const DOCUMENT_ASSETS: Readonly<Record<string, string>> = Object.freeze({
   'certificate-card-specimen.svg': 'image/svg+xml',
   'admin-02-product.png': 'image/png',
+  'vault-card-specimen.svg': 'image/svg+xml',
+  'vault-card-sheet.pdf': 'application/pdf',
+  'vault-card-single.pdf': 'application/pdf',
 });
 
 const DIR = new URL('../../documents/', import.meta.url);
@@ -71,6 +83,7 @@ export const adminDocumentRoutes: FastifyPluginAsync<AdminRouteDeps> = async (ap
     const type = Object.prototype.hasOwnProperty.call(DOCUMENT_ASSETS, name) ? DOCUMENT_ASSETS[name] : undefined;
     if (!type) throw new DomainError('DOCUMENT_NOT_FOUND', 404, 'No such illustration.');
     reply.header('content-type', type);
+    if (type === 'application/pdf') reply.header('content-disposition', `inline; filename="${name}"`);
     reply.header('cache-control', 'private, max-age=3600');
     reply.header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
     return reply.send(load(`assets/${name}`));

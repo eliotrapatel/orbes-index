@@ -1603,9 +1603,124 @@ body[data-screen="live"] .corners {
   margin-top: 18px;
 }
 
-.live__sold > .live__vault-slot {
+.live__sold > .live__vault-slot.has-vault {
   width: 100%;
   margin-top: 34px;
+}
+
+/* A LIVE page holding THE VAULT's door (SOLD OUT for your size, the end page; phone and computer): each door's floor
+   (vault.css .vo-floor) reaches wider than the window once projected, so the app is clipped sideways, never up or down
+   (the open lid, the float), and the page never scrolls sideways. `clip` makes no scroll container: the sticky menu
+   stays. THE VAULT page clips the same way (vault-page.css). */
+.app:has(.live__vault-slot.has-vault) {
+  overflow-x: clip;
+}
+
+/* THE VAULT in its place (lot Q3, step Q3.10; MK S, 11): the slot gives the box the column's width; the block's own
+   margin is the slot's (34 px under the sentence, only once it holds a vault: an empty slot takes no room), the room
+   above the box for its open lid its own padding (vault.css, D69: 36 px on a phone, 78 px on a computer). */
+.live__vault-slot {
+  width: 100%;
+}
+
+.live__vault-slot > .vault-box > .vlt {
+  margin-top: 0;
+}
+
+/* Arriving after the screen (its door read), it resolves as the screen's last lines do. */
+@media (prefers-reduced-motion: no-preference) {
+  .live__vault-slot > .vault-box {
+    animation: live-fade-in 0.8s ease both;
+  }
+}
+
+/* The page dims while THE VAULT opens (lot Q3 §3.2; MK S "it opens in that pose (the page dims)", its vo-pagedim; N35):
+   on SOLD OUT for your size and the end page only (THE VAULT page never: no slot there), from 1.8 s over 1.25 s to 16 %,
+   held there while the box is open; a rare reward's from 2.52 s over 1.75 s (D15). On a phone the photograph, the head,
+   every line of the screen but the vault, and its hairline; the foot stays (MK's phone frame); OPEN ANOTHER is the
+   vault's own and stays bright. Every line back at full strength once OPEN ANOTHER closes it. Reduced motion: at once.
+   The computer's own places: desktop-room.css. */
+.view--live:not(.d-room):has(.live__vault-slot .vlt.is-open) :is(.live__photo, .live__head, .live__screen > :not(.live__vault-slot), .live__vault-slot .vlt__rule) {
+  opacity: 0.16;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .view--live:not(.d-room):has(.live__vault-slot .vlt.is-playing) :is(.live__photo, .live__head, .live__screen > :not(.live__vault-slot), .live__vault-slot .vlt__rule) {
+    animation: vlt-pagedim 1.25s cubic-bezier(0.16, 1, 0.3, 1) 1.8s backwards;
+  }
+
+  .view--live:not(.d-room):has(.live__vault-slot .vlt.is-playing.is-rare) :is(.live__photo, .live__head, .live__screen > :not(.live__vault-slot), .live__vault-slot .vlt__rule) {
+    animation: vlt-pagedim 1.75s cubic-bezier(0.16, 1, 0.3, 1) 2.52s backwards;
+  }
+}
+
+@keyframes vlt-pagedim {
+  from { opacity: 1; }
+}
+
+/* The end page of a release sold out whole with THE VAULT, on a phone (lot Q3 §3.4; MK 11, OP-28; N17): drawn in the
+   room's look as MK draws it (views/live.ts stagedEnd: no chrome, the room's foot with THE CLUB and the copyright line,
+   dark in both modes): the model's photograph on the top with ORBES on it (the page's own picture gives way to it);
+   LIVE RELEASE and its day on the photograph's foot, the name, SOLD OUT, the sentence, in the room's type; the door
+   34 px under the sentence; then the question after, THE RELEASES; HOW RELEASES WORK in the room's foot. */
+.view--live.live--end-vault.live--photo:not(.d-room) > .live__stage {
+  margin-top: 76px;
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__end > :is(.n-ph, .n-live__seal, .n-live__tiles, .n-live__how) {
+  display: none;
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__end > .n-live__words {
+  margin-top: 0;
+  padding-top: 56px;
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__words > .n-live__kind {
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  color: var(--ink-soft);
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__words > .n-live__title {
+  margin-top: 14px;
+  font-size: var(--fs-heading);
+  line-height: 1.6;
+  letter-spacing: var(--track-display);
+  text-indent: var(--track-display);
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__title > br {
+  display: none;
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__end > .n-live__outcome-block {
+  margin-top: 0;
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__outcome {
+  margin-top: 8px;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__outcome-text {
+  max-width: 300px;
+  margin: 16px auto 0;
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+.view--live.live--end-vault:not(.d-room) .n-live__end > .live__vault-slot.has-vault {
+  margin-top: 34px;
+  /* The box at the same share of the width as on SOLD OUT (MK 11 as MK S): never the page's text gutter. */
+  padding-inline: 0;
 }
 
 .live__place {

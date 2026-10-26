@@ -19,7 +19,8 @@
  * Prices are the server's, never computed here but for the sum of what is shown; an add-on the app cannot read is left
  * out, never guessed.
  */
-import { ADDONS, ORDERS } from './copy.js';
+import { ADDONS, ORDERS, VAULT } from './copy.js';
+import { parisTime } from './vault-model.js';
 import type { AccountAddonOffer, AccountOrder, AddonOfferItem, ChosenAddon, LeftOutAddon } from './types.js';
 import { formatMoney, upper, type Row } from './view-model.js';
 
@@ -164,7 +165,8 @@ export function orderAddonRows(o: Pick<AccountOrder, 'addonItems'>): Row[] {
     const name = upper(a?.name);
     const p = price(a?.priceMinor);
     if (!name || n <= 0 || p === null || typeof a.currency !== 'string') continue;
-    out.push([ADDONS.units(name, n), addonPrice(p * n, a.currency)]);
+    // A free add-on from THE VAULT (lot Q3 §3.8, N11): its unit at 0 reads FREE.
+    out.push([ADDONS.units(name, n), p === 0 ? VAULT.orders.free : addonPrice(p * n, a.currency)]);
   }
   return out;
 }
@@ -236,6 +238,13 @@ export function addonSheet(offer: AccountAddonOffer, chosen: ReadonlyMap<string,
   const currency = typeof offer.currency === 'string' ? offer.currency : null;
   if (!offer.canAdd) return { rows: [], empty: offer.reason === 'PACKING_STARTED' ? ORDERS.addons.locked : ORDERS.addons.none, paidNote: null, currency };
   // The engraving is never added here: it has its own ENGRAVING section on the order (lot Q2, N9), as the server offers it.
-  const rows = addonRows(offer.offer, chosen).filter((r) => !r.engraving);
+  const rows = addonRows(offer.offer, chosen)
+    .filter((r) => !r.engraving)
+    // An add-on a vault's right to buy offers (lot Q3 §3.8, N11): its line says until when, in Paris.
+    .map((r) => {
+      const until = (Array.isArray(offer.offer) ? offer.offer : []).find((o) => o?.addonId === r.addonId)?.vaultUntil;
+      const time = typeof until === 'string' ? parisTime(until) : '';
+      return time ? { ...r, line: VAULT.orders.addonUntil(time) } : r;
+    });
   return { rows, empty: rows.length === 0 ? ORDERS.addons.none : null, paidNote: offer.paid === true && rows.length > 0 ? ORDERS.addons.paidAdd : null, currency };
 }

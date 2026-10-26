@@ -81,6 +81,9 @@ describe('pageOf (plan CUSTOMER INTELLIGENCE §3.3 T.9)', () => {
       // The emails' pages (lot M1, step M1.19): SET A NEW PASSWORD and STOP THESE EMAILS are never recorded.
       reset: null,
       unsubscribe: null,
+      // THE VAULT page and a credit to give's page (lot Q3, step Q3.11): never recorded.
+      vault: null,
+      gift: null,
     };
     for (const [screen, view] of Object.entries(all)) expect(pageOf(screen as SeenScreen, STATE), screen).toEqual(view);
   });

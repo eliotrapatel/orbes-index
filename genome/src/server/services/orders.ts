@@ -104,9 +104,9 @@
  *                `order.create` and `order.gift`.
  *   the credit   (BP-19 T5) taken off a RESERVED order by Client Services (`applyCredit`): its channel one THE PROGRAM
  *                names, its currency the credit's, the account at the grant's tier now (a birthday credit, plan
- *                CUSTOMER INTELLIGENCE §3.5 SB.4, or a warranty credit, plan ORBES CARE, whatever the tier), the
- *                grant not expired, the amount within the balance and the piece's price; the birthday credit first,
- *                then the warranty credit, then PALLADIUM's, then the earliest expiry. A CREDIT line on the invoice.
+ *                CUSTOMER INTELLIGENCE §3.5 SB.4, a vault's or a warranty credit, whatever the tier), the grant not
+ *                expired, the amount within the balance and the piece's price; the birthday credit first, then a
+ *                vault's, the warranty credit, PALLADIUM's, then the earliest expiry. A CREDIT line on the invoice.
  *                Removed while RESERVED (`removeCredit`), released when the order is cancelled or returned, the
  *                expiry unchanged. Audited `order.credit.apply`, `.remove`, `.release`.
  *
@@ -163,6 +163,7 @@ import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, creditKindOrder, ensureGrants, usableAt, type CreditKind } from './tier-grants.js';
+import { giveTierVaults, revokeReturnedPieceVaults } from './vault.js';
 import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
 import { ordersForSetSale } from './set-sales.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
@@ -180,6 +181,7 @@ import {
   type EngravingUnit,
   type OrdersEngraving,
   adminAddonUnits,
+  attachVaultAddons,
   cancelUnits,
   carryChoices,
   exportedAddonItems,
@@ -268,6 +270,15 @@ export const orderNotPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parce
 const claimUnderWay = () => conflict('CLAIM_OPEN', 'A warranty claim is under way for this piece: finish or close it first.');
 const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order: transfer the piece instead.');
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
+/**
+ * THE VAULT (lot Q3, §2.4; 0062's `orders_vault`): a VAULT order at 0 holds the unit reserved for its winner until the
+ * claim (the collector's CLAIM IT chooses its size), never waits for stock, and stays at 0; a VAULT order bought under a
+ * right to buy keeps a price. Client Services' edits that would break that are refused in words.
+ */
+const vaultFree = (o: Pick<OrderRow, 'channel' | 'price_minor'>) => o.channel === 'VAULT' && o.price_minor === 0;
+const vaultUnclaimed = () => conflict('ORDER_VAULT_UNCLAIMED', 'A piece won in a vault keeps the unit held for its winner until it is claimed: its location, size and price do not change before.');
+const vaultNoUnit = () => conflict('ORDER_VAULT_NO_UNIT', 'A piece won in a vault never waits for stock: none is available there in its size.');
+const vaultPrice = () => conflict('ORDER_VAULT_PRICE', 'A piece won in a vault stays free, and one bought from a vault keeps its price.');
 /** Plan NEXT LOT §3.6.F and §3.6.G: a draw's entry and a salon's request with a size fix it; an exchange goes through an order case. */
 const sizeFixed = () => conflict('ORDER_SIZE_FIXED', 'The size of this order is the one chosen at its entry or request.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
@@ -699,6 +710,8 @@ export interface AccountOrder {
   set: AccountOrderSet | null;
   /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
   giftTier: 'PLATINE' | 'PALLADIUM' | null;
+  /** THE VAULT (lot Q3 §3.8): a VAULT order's, won free (at 0, its end to be claimed) or bought under a right to buy; null otherwise. */
+  vault: { free: boolean; claimBy: Date | null } | null;
   /** BP-19 T5: the credit taken off it (its open uses), in its currency; 0 for none. */
   creditMinor: number;
   status: OrderStatus;
@@ -1249,14 +1262,15 @@ async function settleShipmentDelivered(tx: Db, orderId: string, now: Date): Prom
  * waiting order »); an order waiting for stock stops waiting. The audit entries of the orders served are added to
  * `notes`.
  */
-export async function release(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function release(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[], also: OrderUpdate = {}): Promise<OrderRow> {
   // Its parcel being packed (plan NEXT LOT §3.5.6.7): the shipment is cancelled and this order's piece unbound from it;
   // the other orders of the parcel keep their pieces and their packing start, and Start packing opens a new shipment.
   await cancelOpenShipment(tx, o.id, now);
   if (o.reservation === null) return o;
-  if (o.reservation === 'AWAITING') return updateOrder(tx, o.id, { reservation: null });
+  // `also` (a cancellation's status) in the same write: a VAULT order at 0 holds its unit while RESERVED (orders_vault).
+  if (o.reservation === 'AWAITING') return updateOrder(tx, o.id, { reservation: null, ...also });
   await lockSku(tx, o.sku_id!);
-  const after = await updateOrder(tx, o.id, { reservation: null });
+  const after = await updateOrder(tx, o.id, { reservation: null, ...also });
   notes.push(...(await serveWaiting(tx, o.sku_id!, o.location_id, actor, now)));
   return after;
 }
@@ -1323,6 +1337,10 @@ interface NewOrder {
   /** Macro scope K44 T2 (plan MACRO M3 §5.2): the set sale this order is a piece of, and that piece (services/set-sales.ts). */
   setSaleId?: string;
   setPiece?: number;
+  /** THE VAULT (lot Q3, §2.4): a VAULT order's vault; won free, its end to be claimed and the unit reserved at once (STOCK). */
+  vaultId?: string;
+  claimBy?: Date;
+  reservation?: 'STOCK';
 }
 
 /**
@@ -1355,6 +1373,9 @@ export async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, 
       exchange_of_order_id: n.exchangeOfOrderId ?? null,
       set_sale_id: n.setSaleId ?? null,
       set_piece: n.setSaleId ? (n.setPiece ?? null) : null,
+      // THE VAULT (lot Q3): only on a VAULT order (the other channels' rows are written as before).
+      ...(n.vaultId ? { vault_id: n.vaultId, claim_by: n.claimBy ?? null } : {}),
+      ...(n.reservation ? { reservation: n.reservation } : {}),
       shipping_service: n.shipping?.service ?? null,
       shipping_minor: n.shipping?.service ? n.shipping.minor : null,
       shipping_benefit: n.shipping?.service ? n.shipping.benefit : null,
@@ -1379,7 +1400,9 @@ export async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, 
         ? { giftGrantId: n.giftGrantId }
         : n.exchangeOfOrderId
           ? { exchangeOfOrderId: n.exchangeOfOrderId }
-          : { shopRequestId: n.shopRequestId! };
+          : n.vaultId
+            ? { vaultId: n.vaultId }
+            : { shopRequestId: n.shopRequestId! };
   notes.push(
     await recordChange(
       tx,
@@ -1459,7 +1482,7 @@ export async function ordersForLiveEntry(
   }
   const locationId = await releaseLocation(tx, e.stock_location_id);
   // BP-19 T5: the account's grants, its tier read now.
-  notes.push(...(await ensureGrants(tx, e.account_id, now)));
+  notes.push(...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now)));
   // BP-19 T4: one fee for the entry, on its first piece; the others travel with it (its service at 0).
   let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('live_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
   for (let piece = 1; piece <= e.quantity; piece++) {
@@ -1505,6 +1528,8 @@ export async function ordersForLiveEntry(
     const carried = await carryChoices(tx, [...orders].sort((a, b) => a.piece - b.piece), { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
+    // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+    notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   }
   return { orders, notes, addonsLeftOut };
 }
@@ -1551,7 +1576,7 @@ export async function orderForDrawEntry(
   const existing = new Set((await tx.selectFrom('orders').select('piece').where('drop_entry_id', '=', e.id).execute()).map((r) => r.piece));
   const pieces = Math.max(1, Number(e.pieces) || 1);
   if (existing.size >= pieces) return { order: null, orders: [], notes: [], addonsLeftOut: [] };
-  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now))];
   const locationId = await releaseLocation(tx, e.stock_location_id);
   let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('drop_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
   const orders: OrderRow[] = [];
@@ -1594,6 +1619,8 @@ export async function orderForDrawEntry(
     const carried = await carryChoices(tx, [first], { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
+    // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+    notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   }
   return { order: orders[0] ?? null, orders, notes, addonsLeftOut };
 }
@@ -1631,7 +1658,7 @@ async function setOrdersForLiveEntry(
   const orders: OrderRow[] = [];
   if (done.size >= e.quantity) return { orders, notes, addonsLeftOut: [] };
   const locationId = await releaseLocation(tx, e.stock_location_id);
-  notes.push(...(await ensureGrants(tx, e.account_id, now)));
+  notes.push(...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now)));
   let parent: OrderRow | null = existing.find((o) => o.piece === 1) ?? null;
   /** Each set's first piece's order, as created (lot Q2, step Q2.4, D25): what carries the set's add-ons. */
   const carriers: OrderRow[] = [];
@@ -1670,6 +1697,8 @@ async function setOrdersForLiveEntry(
     const carried = await carryChoices(tx, carriers, { liveEntryId: e.id }, houseCurrencyOf(e.currency), actor, now);
     notes.push(...carried.notes);
     addonsLeftOut = carried.leftOut;
+    // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+    notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   }
   return { orders, notes, addonsLeftOut };
 }
@@ -1690,7 +1719,7 @@ async function setOrderForDrawEntry(
   if (await tx.selectFrom('orders').select('id').where('drop_entry_id', '=', e.id).executeTakeFirst()) return { order: null, orders: [], notes: [], addonsLeftOut: [] };
   const sizes = await tx.selectFrom('drop_entry_sizes').select(['piece', 'size_id']).where('entry_id', '=', e.id).orderBy('piece').execute();
   const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
-  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now)), ...(await giveTierVaults(tx, e.account_id, now))];
   const sold = await ordersForSetSale(
     tx,
     {
@@ -1712,6 +1741,8 @@ async function setOrderForDrawEntry(
   notes.push(...(await attachGifts(tx, first, actor, now)).notes);
   const carried = await carryChoices(tx, [first], { dropEntryId: e.id }, priced ? houseCurrencyOf(e.currency) : null, actor, now);
   notes.push(...carried.notes);
+  // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+  notes.push(...(await attachVaultAddons(tx, first, actor, now)).notes);
   return { order: first, orders: sold.orders, notes, addonsLeftOut: carried.leftOut };
 }
 
@@ -1724,7 +1755,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   const r = await tx.selectFrom('shop_requests').select(['id', 'account_id', 'model_id', 'status', 'outcome', 'size_label']).where('id', '=', requestId).executeTakeFirst();
   if (!r || r.status !== 'CLOSED' || r.outcome !== 'ACCEPTED') throw new Error(`orderForShopRequest: request ${requestId} is not ACCEPTED`);
   if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [], addonsLeftOut: [] };
-  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now))];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now)), ...(await giveTierVaults(tx, r.account_id, now))];
   // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later. Offered when it
   // was asked (plan NEXT LOT §3.3): a size set aside since stays its own. A typed model's order keeps the declared label
   // of the SKU it resolves to (SIZE 52 asked where 52 is declared too: 52), so the order and its SKU name one size.
@@ -1756,6 +1787,8 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   // collector read them in); Client Services then enters the piece's price in that currency (setTerms).
   const carried = await carryChoices(tx, [order], { shopRequestId: r.id }, await baseCurrency(tx, r.model_id), actor, now);
   notes.push(...carried.notes);
+  // THE VAULT (lot Q3, §2.4 ADDON): a free add-on won in a vault, on the sale's first order, after the add-ons bought.
+  notes.push(...(await attachVaultAddons(tx, order, actor, now)).notes);
   return { order, notes, addonsLeftOut: carried.leftOut };
 }
 
@@ -1911,8 +1944,9 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
       await settleShipmentDelivered(tx, o.id, now);
       break;
     case 'CANCELLED': {
-      const released = await release(tx, o, actor, now, extra);
-      after = await updateOrder(tx, released.id, { status: 'CANCELLED', cancelled_at: now });
+      const cancelled = { status: 'CANCELLED' as const, cancelled_at: now };
+      const released = await release(tx, o, actor, now, extra, cancelled);
+      after = released.status === 'CANCELLED' ? released : await updateOrder(tx, released.id, cancelled);
       // Plan MACRO M3 §4.2: its add-ons cancelled with it, the stock they held free again.
       const addonUnits = await cancelUnits(tx, after, now);
       details = { released: o.reservation, ...(addonUnits > 0 ? { addonUnits } : {}) };
@@ -2038,7 +2072,7 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
 export async function returnInTransaction(
   tx: Db,
   o: OrderRow,
-  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string; keepAddons?: boolean; addonsOut?: readonly string[] },
+  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string; keepAddons?: boolean; addonsOut?: readonly string[]; keepVault?: boolean },
   expected: { productId: string | null; reclaim: boolean; claimHash: string | null },
   actor: Actor,
   now: Date,
@@ -2123,6 +2157,8 @@ export async function returnInTransaction(
     ...(addons.returned > 0 ? { addonUnits: addons.returned, addonUnitsRestocked: addons.restocked } : {}),
   };
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.caseId ? null : r.note, details }, actor, now), ...extra, ...withdrawn);
+  // THE VAULT (round 5, D5): a returned piece takes its unopened PIECE vault back; a size exchange keeps it.
+  if (r.keepVault !== true) notes.push(...(await revokeReturnedPieceVaults(tx, p.id, now)));
   // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is. A size exchange carries it onto its
   // EXCHANGE order (`createExchangeOrder`), from what is released here.
   const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, kind: creditKind(u.kind), tier: creditTier(u), amountMinor: u.amount_minor }));
@@ -2141,13 +2177,13 @@ export async function returnInTransaction(
 export interface CarriedCredit {
   grantId: string;
   kind: CreditKind;
-  /** Null on a birthday or a warranty credit. */
+  /** Null on a birthday, a warranty or a vault's credit. */
   tier: 2 | 3 | null;
   amountMinor: number;
 }
 
 /** A credit grant's kind as an order reads it: a tier's (CREDIT), the birthday credit (BIRTHDAY) or a warranty credit (WARRANTY). */
-const creditKind = (kind: string): CreditKind => (kind === 'BIRTHDAY' || kind === 'WARRANTY' ? kind : 'CREDIT');
+const creditKind = (kind: string): CreditKind => (kind === 'BIRTHDAY' || kind === 'WARRANTY' || kind === 'VAULT' ? kind : 'CREDIT');
 /** A credit grant's tier as an order reads it: a tier's credit's only, none on a birthday or a warranty credit. */
 const creditTier = (g: { kind: string; tier: number | null }): 2 | 3 | null => (g.kind !== 'CREDIT' || g.tier === null ? null : (g.tier as 2 | 3));
 
@@ -2408,6 +2444,58 @@ async function engravingDocuments(tx: Db, before: OrderRow, after: OrderRow, act
   return notes;
 }
 
+/** A collector's delivery address for an order, checked before the transaction (`setAddress`, THE VAULT's claim and right to buy). */
+export interface CheckedOrderAddress {
+  savedId: string | undefined;
+  fresh: DeliveryAddress | null;
+  save: boolean;
+}
+
+/** An address input checked: one of YOUR ADDRESSES by its id (404 ADDRESS_NOT_FOUND), or a new one (400), saved when asked. */
+export function checkOrderAddress(input: OrderAddressInput): CheckedOrderAddress {
+  if (!input || typeof input !== 'object') throw validationError('Enter the name and the address.');
+  const savedId = 'addressId' in input ? input.addressId : undefined;
+  if (savedId !== undefined && (typeof savedId !== 'string' || !UUID_RE.test(savedId))) throw addressNotFound();
+  const fresh = savedId === undefined ? checkAddress((input as { address: unknown }).address) : null;
+  const save = savedId === undefined && (input as { save?: unknown }).save === true;
+  return { savedId, fresh, save };
+}
+
+/**
+ * A collector's address written on a locked order of theirs (`setAddress`'s rule; the account's addresses locked by the
+ * caller): saved to YOUR ADDRESSES when asked; the first address sets `address_at`, a later one `address_changed_at`; the
+ * same address again changes nothing. Returns the order after it and the audit entries (`order.address` first).
+ */
+export async function writeOrderAddress(tx: Db, o: OrderRow, checked: CheckedOrderAddress, actor: Actor, now: Date): Promise<{ order: OrderRow; notes: AuditRecordInput[] }> {
+  const notes: AuditRecordInput[] = [];
+  let a: DeliveryAddress;
+  if (checked.savedId !== undefined) {
+    const row = await tx.selectFrom('account_addresses').select(['name', 'address', 'country', 'phone']).where('id', '=', checked.savedId.toLowerCase()).where('account_id', '=', o.account_id).executeTakeFirst();
+    if (!row) throw addressNotFound();
+    a = row;
+  } else {
+    a = checked.fresh!;
+    if (checked.save) {
+      const saved = await insertAddress(tx, o.account_id, a, false, actor, now);
+      notes.push(saved.note, ...saved.vaulted);
+    }
+  }
+  const same = o.buyer_name === a.name && o.buyer_address === a.address && o.buyer_country === a.country && o.buyer_phone === a.phone;
+  if (same) return { order: o, notes };
+  const changed = o.address_at !== null;
+  const after = await updateOrder(tx, o.id, {
+    buyer_name: a.name,
+    buyer_address: a.address,
+    buyer_country: a.country,
+    buyer_phone: a.phone,
+    address_by: 'COLLECTOR',
+    address_at: o.address_at ?? now,
+    address_changed_at: changed ? (now < o.address_at! ? o.address_at : now) : null,
+  });
+  notes.unshift(await recordChange(tx, o, after, 'order.address', { details: { by: 'collector', country: a.country, changed } }, actor, now));
+  return { order: after, notes };
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface OrderServiceDeps {
@@ -2642,6 +2730,8 @@ export class OrderService {
         'o.location_id',
         'o.set_sale_id',
         'o.set_piece',
+        'o.vault_id',
+        'o.claim_by',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -2730,6 +2820,7 @@ export class OrderService {
       withOrder: r.with_order_id ? orderReference(r.with_order_id) : null,
       set: r.set_sale_id !== null && sets.has(r.set_sale_id) ? { ...sets.get(r.set_sale_id)!, piece: r.set_piece! } : null,
       giftTier: r.gift_grant_id ? (giftTiers.get(r.gift_grant_id) === 3 ? 'PALLADIUM' : 'PLATINE') : null,
+      vault: r.channel === 'VAULT' ? { free: r.price_minor === 0, claimBy: r.claim_by ?? null } : null,
       creditMinor: credits.get(r.id) ?? 0,
       status: r.status,
       reservedAt: r.reserved_at,
@@ -2854,11 +2945,7 @@ export class OrderService {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
     const account = accountId.toLowerCase();
     const id = knownOrderId(orderId);
-    if (!input || typeof input !== 'object') throw validationError('Enter the name and the address.');
-    const savedId = 'addressId' in input ? input.addressId : undefined;
-    if (savedId !== undefined && (typeof savedId !== 'string' || !UUID_RE.test(savedId))) throw addressNotFound();
-    const fresh = savedId === undefined ? checkAddress((input as { address: unknown }).address) : null;
-    const save = savedId === undefined && (input as { save?: unknown }).save === true;
+    const checked = checkOrderAddress(input);
     await inRetriedTransaction(this.db, async (tx) => {
       await lockAccountAddresses(tx, account);
       const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
@@ -2866,32 +2953,8 @@ export class OrderService {
       if (o.with_order_id !== null) throw travelsWith(o.with_order_id);
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
       if (o.packing_started_at !== null) throw packingStarted();
-      const now = this.clock();
-      const notes: AuditRecordInput[] = [];
-      let a: DeliveryAddress;
-      if (savedId !== undefined) {
-        const row = await tx.selectFrom('account_addresses').select(['name', 'address', 'country', 'phone']).where('id', '=', savedId.toLowerCase()).where('account_id', '=', account).executeTakeFirst();
-        if (!row) throw addressNotFound();
-        a = row;
-      } else {
-        a = fresh!;
-        if (save) notes.push((await insertAddress(tx, account, a, false, actor, now)).note);
-      }
-      const same = o.buyer_name === a.name && o.buyer_address === a.address && o.buyer_country === a.country && o.buyer_phone === a.phone;
-      if (!same) {
-        const changed = o.address_at !== null;
-        const after = await updateOrder(tx, o.id, {
-          buyer_name: a.name,
-          buyer_address: a.address,
-          buyer_country: a.country,
-          buyer_phone: a.phone,
-          address_by: 'COLLECTOR',
-          address_at: o.address_at ?? now,
-          address_changed_at: changed ? (now < o.address_at! ? o.address_at : now) : null,
-        });
-        notes.unshift(await recordChange(tx, o, after, 'order.address', { details: { by: 'collector', country: a.country, changed } }, actor, now));
-      }
-      for (const n of notes) await this.audit.record(n, tx);
+      const written = await writeOrderAddress(tx, o, checked, actor, this.clock());
+      for (const n of written.notes) await this.audit.record(n, tx);
     });
     return this.accountOrder(account, id);
   }
@@ -3120,7 +3183,8 @@ export class OrderService {
    * refused once a piece is linked to it (409 ORDER_PIECE_LINKED: the piece is transferred instead). A parcel ships
    * complete from one location (plan NEXT LOT §3.5.6.6), so the orders travelling together move together: every open
    * order of its parcel (its first order and the orders travelling with it) moves in the same transaction, refused while
-   * any of them has a piece linked. Each order moved is audited `order.location`.
+   * any of them has a piece linked. Each order moved is audited `order.location`. A VAULT order at 0 moves only once
+   * claimed (409 ORDER_VAULT_UNCLAIMED) and only where a unit of its size is (409 ORDER_VAULT_NO_UNIT).
    */
   async changeLocation(orderId: string, locationId: string, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -3139,6 +3203,8 @@ export class OrderService {
         if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
         const open = (await parcelOrders(tx, key)).filter((p) => ORDER_HOLDING_STATUSES.includes(p.status));
         if (open.some((p) => p.product_id !== null)) throw pieceLinked();
+        // THE VAULT: a piece won free moves only once claimed, and only where a unit of its size is (below).
+        if (open.some((p) => vaultFree(p) && p.status === 'RESERVED')) throw vaultUnclaimed();
         const moving = open.filter((p) => p.location_id !== to);
         if (moving.length === 0) throw validationError('The order is already served from there.');
         // What they hold is given back first, the orders waiting first, so a piece freed never serves an order of the
@@ -3151,6 +3217,10 @@ export class OrderService {
         }
         for (const m of moving) {
           const r = released.find((x) => x.id === m.id)!;
+          if (vaultFree(r)) {
+            await lockSku(tx, r.sku_id!);
+            if ((await stockLevel(tx, r.sku_id!, to)).available < 1) throw vaultNoUnit();
+          }
           // Plan MACRO M3 §4.2: its add-ons move with it, or the change is refused (ORDER_ADDON_NOT_AT_LOCATION).
           await moveUnits(tx, r, to);
           const after = await hold(tx, await updateOrder(tx, r.id, { location_id: to }), actor, now, extra);
@@ -3187,6 +3257,10 @@ export class OrderService {
    * currency's rate, or no shipping when none is set), while a fee entered by hand stays as entered, for Client Services
    * to enter again. The orders travelling with it follow (its service at 0). Audited
    * `order.shipping` (each order), the service, the fee and the free tier.
+   *
+   * THE VAULT (lot Q3): a VAULT order at 0 changes size or price only once claimed (409 ORDER_VAULT_UNCLAIMED), then a
+   * size only to one with a unit at its location (409 ORDER_VAULT_NO_UNIT); a VAULT order's price is never set to 0 nor
+   * cleared, nor changed from 0 (409 ORDER_VAULT_PRICE).
    */
   async setTerms(orderId: string, input: OrderTermsInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -3223,6 +3297,8 @@ export class OrderService {
       const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();
+      if ((sizeChange || priceChange) && vaultFree(o) && o.status === 'RESERVED') throw vaultUnclaimed();
+      if (priceChange && o.channel === 'VAULT' && (o.price_minor === 0 || price === null || price === 0)) throw vaultPrice();
       if (sizeChange && (await sizeChosen(tx, o))) throw sizeFixed();
       if (priceChange && o.channel === 'GIFT') throw giftTermsFixed();
       if (priceChange) {
@@ -3282,6 +3358,8 @@ export class OrderService {
         // Both SKUs locked first, in one order (two orders swapping sizes never wait for each other).
         for (const id of [...new Set([o.sku_id, skuId].filter((x): x is string => x !== null))].sort()) await lockSku(tx, id);
         const released = await release(tx, after, actor, now, extra);
+        // THE VAULT: a piece won free, once claimed, changes only to a size with a unit to hold (never waiting).
+        if (vaultFree(o) && (skuId === null || (await stockLevel(tx, skuId, o.location_id)).available < 1)) throw vaultNoUnit();
         // Named as its SKU names it (Small typed for a SKU created SMALL reads SMALL, on the invoice too).
         const label = skuId === null ? null : (await tx.selectFrom('skus').select('size_label').where('id', '=', skuId).executeTakeFirstOrThrow()).size_label;
         after = await hold(tx, await updateOrder(tx, released.id, { size_label: label, sku_id: skuId }), actor, now, extra);

@@ -125,6 +125,8 @@ Le propriétaire a validé la carte 79t le 2026-10-07 : `CERTIFICATE_LAYOUT_STAT
 One side only; the back is blank (owner, 2026-10-07).
 Une seule face ; le dos est blanc (propriétaire, 2026-10-07).
 
+**THE VAULT CARD.** Beside the MINT CERTIFICATE, the box of a bought piece also holds THE VAULT CARD, the same 95 × 62 mm: its words and its print files are in [THE VAULT CARD](VAULT-CARD.md). · À côté de la MINT CERTIFICATE, la boîte d'une pièce achetée contient aussi THE VAULT CARD, au même format : ses mots et ses fichiers d'impression sont dans [THE VAULT CARD](VAULT-CARD.md).
+
 ---
 
 ## 3. Second-hand purchase · Achat d'occasion

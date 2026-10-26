@@ -899,9 +899,10 @@ describe('the Club\'s drops (P-R03)', () => {
     expect([0, 1, 2, 3, null].map(tierName)).toEqual(['None', 'TITANE', 'PLATINE', 'PALLADIUM', '—']);
   });
 
-  it('opens on the Drops tab, then the Circle tab (P-X01), the Tiers tab (P-X04), the Requests tab (P-X08)', () => {
-    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle', 'tiers', 'requests']);
-    expect(CLUB_TABS.map((t) => t.label)).toEqual(['Drops', 'Circle', 'Tiers', 'Requests']);
+  it('opens on the Drops tab, then the Circle tab (P-X01), the Tiers tab (P-X04), the Requests tab (P-X08), THE VAULT (lot Q3)', () => {
+    expect(CLUB_TABS.map((t) => t.id)).toEqual(['drops', 'circle', 'tiers', 'requests', 'vault']);
+    expect(CLUB_TABS.map((t) => t.label)).toEqual(['Drops', 'Circle', 'Tiers', 'Requests', 'THE VAULT']);
+    expect(clubTab({ tab: 'vault' })).toBe('vault');
     expect(clubTab({ tab: 'requests' })).toBe('requests');
     expect(clubTab({})).toBe('drops');
     expect(clubTab({ tab: 'nope' })).toBe('drops');

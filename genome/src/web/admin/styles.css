@@ -8027,3 +8027,10 @@ a.collectors__kpi-link:focus-visible {
   text-decoration-color: var(--hairline-strong);
   text-underline-offset: 3px;
 }
+
+/* ── CLUB > THE VAULT (lot Q3, step Q3.12) ─────────────────────────────── */
+
+/* A row's actions as two pairs (Edit · Deactivate, Up · Down): on a narrow screen the pairs wrap, never one button alone. */
+.table .col--wrap .row-actions.vault__pair {
+  flex-wrap: nowrap;
+}

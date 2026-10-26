@@ -42,7 +42,8 @@
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
  */
 import { orderAddonRows, orderAddons, orderAddonsMinor, type OrderAddonsModel } from './addons-model.js';
-import { LIVE, ORDERS, SETS } from './copy.js';
+import { LIVE, ORDERS, SETS, VAULT } from './copy.js';
+import { parisYmd, vaultDay } from './vault-model.js';
 import { formatMoney } from './live-model.js';
 import type { OrderDocumentKind } from './api.js';
 import { orderContext } from './messages-model.js';
@@ -105,6 +106,33 @@ export interface OrderModel {
   photo: PhotoModel | null;
   /** Macro scope K44: the set it is a piece of, said on its group (its one price, its total) and its own page; null for none. */
   set: OrderSetModel | null;
+  /** THE VAULT (lot Q3 §3.8, D20): a piece won free while it can be claimed (CLAIM IT with its size and address); null otherwise. */
+  vaultClaim: OrderVaultClaimModel | null;
+}
+
+/** A piece won free in YOUR ORDERS (lot Q3 §3.8; D20, N12): CLAIM IT until its day, in a size with a unit, at its address. */
+export interface OrderVaultClaimModel {
+  orderId: string;
+  /** `27 NOVEMBER`, the Paris day of its end to be claimed. */
+  until: string;
+  /** CLAIM IT's name for a reader (`Claim MONOLITHE IN BLUE`). */
+  label: string;
+  /** No delivery address on it yet: YOUR ORDERS asks for it first (D20). */
+  needsAddress: boolean;
+}
+
+/** A VAULT order won free (at 0), its end to be claimed; any other: false. */
+function vaultFree(o: AccountOrder): boolean {
+  return o.channel === 'VAULT' && o.vault?.free === true;
+}
+
+/** CLAIM IT on a piece won free while it waits to be claimed (RESERVED, its day not past); null otherwise. */
+export function orderVaultClaim(o: AccountOrder, now: number = Date.now()): OrderVaultClaimModel | null {
+  if (!vaultFree(o) || o.status !== 'RESERVED' || typeof o.vault?.claimBy !== 'string') return null;
+  const t = Date.parse(o.vault.claimBy);
+  const until = vaultDay(parisYmd(o.vault.claimBy));
+  if (!Number.isFinite(t) || t <= now || !until) return null;
+  return { orderId: o.id, until, label: VAULT.orders.claimLabel(modelWithVariant(upper(o.model), o.modelVariant).toUpperCase()), needsAddress: !o.address };
 }
 
 /** A set's piece (macro scope K44 T1 to T3): its set as YOUR ORDERS groups it, and its place among its pieces. */
@@ -253,6 +281,11 @@ export function orderSentence(o: AccountOrder): string {
   const parent = typeof o.withOrder === 'string' && REFERENCE.test(o.withOrder) ? o.withOrder : null;
   // A welcome gift waiting says the order it travels with (BP-19 T5).
   if (o.channel === 'GIFT' && parent && (o.status === 'RESERVED' || o.status === 'PAID')) return ORDERS.gift.travels(parent);
+  // THE VAULT (lot Q3 §3.8): a piece won free, until it is claimed.
+  if (vaultFree(o) && o.status === 'RESERVED' && typeof o.vault?.claimBy === 'string') {
+    const until = vaultDay(parisYmd(o.vault.claimBy));
+    if (until) return VAULT.orders.claimSentence(until);
+  }
   const now = stepNow(o);
   // Macro scope K44: a set is cancelled whole (a piece's size exchange alone is not the set's).
   if (o.status === 'CANCELLED' && isSetPiece(o) && o.channel !== 'EXCHANGE') return SETS.orders.cancelled;
@@ -331,7 +364,7 @@ export function orderRows(o: AccountOrder): Row[] {
   const inSet = isSetPiece(o);
   const rows: Row[] = [
     ...(cancelled && o.size === null ? [] : [[ORDERS.rows.size, size] as Row]),
-    ...(gift ? [[ORDERS.rows.price, ORDERS.gift.price] as Row] : inSet ? [[ORDERS.rows.price, SETS.orders.inSet] as Row] : cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
+    ...(gift ? [[ORDERS.rows.price, ORDERS.gift.price] as Row] : vaultFree(o) ? [[ORDERS.rows.price, VAULT.orders.free] as Row] : inSet ? [[ORDERS.rows.price, SETS.orders.inSet] as Row] : cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
     // An add-on adds to the price: « + € 150 » (C24), its words the app's.
     ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), o.currency ? `+ ${money(a.priceMinor)}` : money(a.priceMinor)]),
     // Plan MACRO M3 §4.4 (D2): its catalogue add-ons, each with its units (POLISHING CLOTH × 2 · + € 30).
@@ -342,7 +375,8 @@ export function orderRows(o: AccountOrder): Row[] {
   if (engraving) rows.push([ORDERS.rows.engraving, ORDERS.engraving.value(engraving.text, engravingMinor > 0 ? money(engravingMinor) : null)]);
   // Lot Q2, step Q2.5: its engraving's unit before its words, at its price (« + € 150 », as an add-on's row reads it).
   else if (engravingMinor > 0) rows.push([ORDERS.rows.engraving, `+ ${money(engravingMinor)}`]);
-  const shipping = shippingValue(o);
+  // A piece won free is shipped free (D20).
+  const shipping = vaultFree(o) && o.shipping && !o.shipping.withOrder ? VAULT.orders.free : shippingValue(o);
   if (shipping) rows.push([ORDERS.rows.shipping, shipping]);
   const fee = shippingFee(o);
   const credit = !gift && priced && typeof o.creditMinor === 'number' && Number.isInteger(o.creditMinor) && o.creditMinor > 0 ? o.creditMinor : 0;
@@ -611,7 +645,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { pare
     // A release names itself; the private salon has none: the model with its variant follows it (C32).
     line: [
       ORDERS.channel[o.channel],
-      o.channel === 'GIFT' ? (giftTier ?? '') : o.release ? upper(o.release) : o.channel === 'SALON' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : '',
+      o.channel === 'GIFT' ? (giftTier ?? '') : o.release ? upper(o.release) : o.channel === 'SALON' || o.channel === 'VAULT' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : '',
     ]
       .filter((x) => x.length > 0)
       .join(' · '),
@@ -639,6 +673,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number, opts: { pare
     reference: ORDERS.reference(o.reference),
     photo: photoModels({ model: o.model, type: '', modelVariant: o.modelVariant, imageUrl: o.imageUrl })[0] ?? null,
     set: orderSet(o, opts.list ?? [o]),
+    vaultClaim: orderVaultClaim(o),
   };
 }
 

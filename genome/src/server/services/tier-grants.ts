@@ -25,6 +25,11 @@
  *                `ensureGrants`. A credit like the birthday credit (`creditBalances`, Apply credit, the invoice's
  *                CREDIT · WARRANTY, the export, END TEST), usable whatever the tier, taken after the birthday credit
  *                and before the tiers' credits.
+ *   vault        a vault's credit (THE VAULT, lot Q3; migration 0062) is a grant of kind VAULT, with no tier, given at a
+ *                vault's opening (a house credit won) or to the friend who accepts a credit to give (services/vault.ts),
+ *                never by `ensureGrants`. A credit like the warranty credit (`creditBalances`, Apply credit, the
+ *                invoice's CREDIT · VAULT, the export, END TEST), usable whatever the tier (a friend's while they hold
+ *                no piece, `usable_while_no_piece`), taken right after the birthday credit: it expires within 30 days.
  *
  * Lock order: the account's grants after the rows of the sale or the order that reads them; the audit log last (the
  * entries are returned for the caller to write after its own).
@@ -37,6 +42,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubCounts, tierOf } from './club.js';
 import { creditOf, readProgram } from './club-program.js';
 import { orderReference } from './orders.js';
+import { giveTierVaults } from './vault.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -94,19 +100,21 @@ export async function ensureGrants(tx: Db, accountId: string, now: Date): Promis
   return notes;
 }
 
-/** The kinds of grant that are credits: a tier's (CREDIT), the birthday credit (§3.5 SB.4), the warranty credit (plan ORBES CARE). */
-export const CREDIT_KINDS = Object.freeze(['CREDIT', 'BIRTHDAY', 'WARRANTY'] as const satisfies readonly TierGrantKind[]);
+/** The kinds of grant that are credits: a tier's (CREDIT), the birthday credit (§3.5 SB.4), the warranty credit (plan ORBES CARE), a vault's (THE VAULT). */
+export const CREDIT_KINDS = Object.freeze(['CREDIT', 'BIRTHDAY', 'WARRANTY', 'VAULT'] as const satisfies readonly TierGrantKind[]);
 export type CreditKind = (typeof CREDIT_KINDS)[number];
 
 /** A credit grant with its balance now: its amount less its open uses. */
 export interface CreditBalance {
   grantId: string;
-  /** A tier's credit, the birthday credit (§3.5 SB.4) or the warranty credit (plan ORBES CARE). */
+  /** A tier's credit, the birthday credit (§3.5 SB.4), the warranty credit (plan ORBES CARE) or a vault's (THE VAULT). */
   kind: CreditKind;
-  /** A tier's credit's tier; null on a birthday or a warranty credit. */
+  /** A tier's credit's tier; null on a birthday, a warranty or a vault's credit. */
   tier: 2 | 3 | null;
   /** A birthday credit's birthday, `YYYY-MM-DD`; null on a tier's credit. */
   birthdayOn: string | null;
+  /** A friend's credit from a credit to give (THE VAULT, N10): usable only while its account holds no piece. */
+  usableWhileNoPiece: boolean;
   amountMinor: number;
   balanceMinor: number;
   currency: string;
@@ -115,14 +123,14 @@ export interface CreditBalance {
 
 /**
  * The account's credit grants with their balances (every one, expired or not, whatever its tier now), the birthday
- * credit first (it expires soonest, §3.5 SB.4.1), then the warranty credit (plan ORBES CARE), then PALLADIUM's, then
- * PLATINE's, the earliest expiry first within each: the order a credit is taken off them. `forUpdate`: their rows
- * locked (in the order's transaction, after the order's row).
+ * credit first (it expires soonest, §3.5 SB.4.1), then a vault's (30 days, THE VAULT), then the warranty credit (plan
+ * ORBES CARE), then PALLADIUM's, then PLATINE's, the earliest expiry first within each: the order a credit is taken off
+ * them. `forUpdate`: their rows locked (in the order's transaction, after the order's row).
  */
 export async function creditBalances(db: Db, accountId: string, opts: { forUpdate?: boolean } = {}): Promise<CreditBalance[]> {
   let q = db
     .selectFrom('tier_grants')
-    .select(['id', 'kind', 'tier', 'birthday_on', 'amount_minor', 'currency', 'expires_at'])
+    .select(['id', 'kind', 'tier', 'birthday_on', 'amount_minor', 'currency', 'expires_at', 'usable_while_no_piece'])
     .where('account_id', '=', accountId)
     .where('kind', 'in', [...CREDIT_KINDS])
     .orderBy(creditKindOrder(sql.ref('kind')))
@@ -145,6 +153,7 @@ export async function creditBalances(db: Db, accountId: string, opts: { forUpdat
     kind: g.kind as CreditKind,
     tier: g.kind === 'CREDIT' ? (g.tier as 2 | 3) : null,
     birthdayOn: g.birthday_on,
+    usableWhileNoPiece: g.usable_while_no_piece,
     amountMinor: g.amount_minor!,
     balanceMinor: Math.max(0, g.amount_minor! - (usedOf.get(g.id) ?? 0)),
     currency: g.currency!,
@@ -153,20 +162,23 @@ export async function creditBalances(db: Db, accountId: string, opts: { forUpdat
 }
 
 /**
- * Whether a credit may be taken off an order of an account at `tier` now (§3.5 SB.4.3): the birthday credit and the
- * warranty credit (plan ORBES CARE) whatever the tier (« every account … piece or not »), a tier's credit while that
- * tier is held. Expiry and balance are the caller's.
+ * Whether a credit may be taken off an order of an account at `tier` now (§3.5 SB.4.3): the birthday credit, the
+ * warranty credit (plan ORBES CARE) and a vault's credit (THE VAULT) whatever the tier (« every account … piece or
+ * not »), a friend's credit from a credit to give only while the account holds no piece (tier 0: "a credit for a
+ * friend's first piece", N10), a tier's credit while that tier is held. Expiry and balance are the caller's.
  */
-export function usableAt(g: Pick<CreditBalance, 'kind' | 'tier'>, tier: number): boolean {
+export function usableAt(g: Pick<CreditBalance, 'kind' | 'tier'> & { usableWhileNoPiece?: boolean }, tier: number): boolean {
+  if (g.kind === 'VAULT') return g.usableWhileNoPiece === true ? tier === 0 : true;
   return g.kind === 'BIRTHDAY' || g.kind === 'WARRANTY' || (g.tier !== null && g.tier <= tier);
 }
 
 /**
  * The order credits are taken off and listed in, by their grant's kind (an SQL expression to sort on): the birthday
- * credit first (§3.5 SB.4.1), then the warranty credit (plan ORBES CARE), then the tiers' credits (their tier next).
+ * credit first (§3.5 SB.4.1), then a vault's (it expires within 30 days, THE VAULT), then the warranty credit (plan
+ * ORBES CARE), then the tiers' credits (their tier next).
  */
 export function creditKindOrder(kind: RawBuilder<unknown>) {
-  return sql<number>`CASE ${kind} WHEN 'BIRTHDAY' THEN 0 WHEN 'WARRANTY' THEN 1 ELSE 2 END`;
+  return sql<number>`CASE ${kind} WHEN 'BIRTHDAY' THEN 0 WHEN 'VAULT' THEN 1 WHEN 'WARRANTY' THEN 2 ELSE 3 END`;
 }
 
 /** An account's grants as their rows hold them, its tiers in order (the console's, the export's). */
@@ -182,7 +194,7 @@ export async function accountGrants(db: Db, accountId: string): Promise<TierGran
  * as a CREDIT, with no tier. Never who applied or released a use.
  */
 export interface ExportedTierGrant {
-  /** Null on a birthday or a warranty credit. */
+  /** Null on a birthday, a warranty or a vault's credit. */
   tier: 'PLATINE' | 'PALLADIUM' | null;
   kind: TierGrantKind;
   /** A birthday credit's birthday, `YYYY-MM-DD`; null on every other grant. */
@@ -265,7 +277,7 @@ export class TierGrantService {
   async ensure(accountId: string): Promise<number> {
     return inTransaction(this.db, async (tx) => {
       const notes = await ensureGrants(tx, accountId, this.clock());
-      for (const n of notes) await this.audit.record(n, tx);
+      for (const n of [...notes, ...(await giveTierVaults(tx, accountId, this.clock()))]) await this.audit.record(n, tx);
       return notes.length;
     });
   }
