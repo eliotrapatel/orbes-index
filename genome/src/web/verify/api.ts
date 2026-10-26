@@ -726,9 +726,14 @@ export class ApiClient {
     return this.request<CirclePost>('GET', `/api/v1/club/circle/${encodeURIComponent(id)}`);
   }
 
-  /** YES or NO to an invitation, until its event begins (409 CIRCLE_FULL past its places). Answered with the post. */
-  circleAnswer(id: string, answer: CircleAnswer): Promise<CirclePost> {
-    return this.request<CirclePost>('POST', `/api/v1/club/circle/${encodeURIComponent(id)}/rsvp`, { answer }, { csrf: true });
+  /**
+   * YES or NO to an invitation, until its event begins (409 CIRCLE_FULL past its places). Answered with the post. On an
+   * invitation for a partner's experience (lot M4, K49 P3), `shareName` shares the reader's name with its partner (true,
+   * with a YES) or stops sharing it (false); left out, a YES keeps the choice as it was.
+   */
+  circleAnswer(id: string, answer: CircleAnswer, opts: { shareName?: boolean } = {}): Promise<CirclePost> {
+    const body = opts.shareName === undefined ? { answer } : { answer, shareName: opts.shareName };
+    return this.request<CirclePost>('POST', `/api/v1/club/circle/${encodeURIComponent(id)}/rsvp`, body, { csrf: true });
   }
 
   /** One vote in a poll, by the index of its option; final. Answered with the post, its results shown. */

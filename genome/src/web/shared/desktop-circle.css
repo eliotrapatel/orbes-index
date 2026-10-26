@@ -217,6 +217,17 @@
     margin-top: var(--d-s2);
   }
 
+  /* WITH <BRAND> (lot M4, K49 P2) 8 px under the kind or the experience, as the experience under the kind. */
+  html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__partner {
+    margin-top: var(--d-s2);
+  }
+
+  /* …and whole wherever it stands, a label that wraps between its words (a brand runs to 80 characters), where the
+     labels of a card or a frame keep to one line (desktop.css: NOW's card, the feed's frame). */
+  html:not(.d-touch) body.nocturne :is(.n-circle-card__partner, .circle-post__partner).n-g.n-lb {
+    white-space: normal;
+  }
+
   html:not(.d-touch) body.nocturne .n-circle-card .n-circle-card__date {
     margin-top: var(--d-s2);
   }
@@ -362,6 +373,10 @@
     margin-top: var(--d-s2);
   }
 
+  html:not(.d-touch) body.nocturne .n-post__head > .circle-post__partner {
+    margin-top: var(--d-s2);
+  }
+
   html:not(.d-touch) body.nocturne .n-post__head > .n-post__title + .n-post__date {
     margin-top: var(--d-s4);
   }
@@ -504,6 +519,20 @@
 
   html:not(.d-touch) body.nocturne .n-post__reply > .n-post__answer-title + .n-post__sentence {
     margin-top: var(--d-s4);
+  }
+
+  /* SHARE MY NAME (lot M4, K49 P3) 24 px under YES / NO (or under the sentence when it is the line alone), in the reply's
+     column (440 px at most); its line 16 px under the row, the refusal 8 px under the line. */
+  html:not(.d-touch) body.nocturne .n-post__reply > .n-post__share-block {
+    margin-top: var(--d-s5);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__share + .n-post__share-line {
+    margin-top: var(--d-s4);
+  }
+
+  html:not(.d-touch) body.nocturne .n-post__share-block > .n-post__share-error {
+    margin-top: var(--d-s2);
   }
 
   /* Stacked on 8–12 (a post without a photograph), YOUR ANSWER 72 px under THE INVITATION's rows. */

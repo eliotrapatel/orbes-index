@@ -290,6 +290,11 @@ const program = (s: UiState) => (full(s) && !s.mutates && named('piece-care', 'c
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 /** YOUR PROFILE's stage (plan CUSTOMER INTELLIGENCE §3.1 P.8): account-profile, then profile-tastes. */
 const profile = (s: UiState) => s.variant === 'account-profile';
+/**
+ * An invitation for a partner's experience on its stage (lot M4, step M4.8; K49 P2, P3): WITH <BRAND>, and SHARE MY NAME,
+ * whose name is YOUR PROFILE's first and last name.
+ */
+const partner = (s: UiState) => s.variant === 'partner';
 /** YOUR WISHLIST's stage (plan CUSTOMER INTELLIGENCE §3.2 W.10): the heart pressed on a sheet; the page, empty then with three. */
 const wishlist = (s: UiState) => s.variant === 'wishes';
 /** The stages of MY PIECES' orders that their one state writes (plan NEXT LOT §3.4, §3.6). */
@@ -311,8 +316,9 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   // The tier program (plan NEXT-NINE, BP-19), in the full demo: a piece's YEARLY CARE at each step, THE CLUB, IN USE;
   // the birthday credit under IN USE (plan CUSTOMER INTELLIGENCE §3.5 SB.4.5: birthday-credit), on its own stage.
   program,
-  // YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8), on its own stage, its two states in order.
-  profile,
+  // YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8), on its own stage, its two states in order; then, on its own stage,
+  // a partner's invitation and SHARE MY NAME, the profile's names (lot M4, step M4.8), its write last.
+  profile: (s) => profile(s) || partner(s),
   // YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10), on its own stage, its states in order.
   wishlist,
   // The account sheet's MESSAGES and its write sheet (plan NEXT-NINE, CS-01), in the draw-leads demo, in order; FROM ORBES
@@ -341,7 +347,7 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   worn: (s) => s.variant === 'worn' || s.variant === 'addons',
   // THE VAULT (lot Q3, step Q3.10) on its stage: its door on SOLD OUT for your size and the end page, closed then opened.
   vault: (s) => s.variant === 'vault',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'vault' && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'house' && s.variant !== 'worn' && s.variant !== 'addons' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'set' && s.variant !== 'set-live' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'vault' && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'house' && s.variant !== 'worn' && s.variant !== 'addons' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'set' && s.variant !== 'set-live' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !partner(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
 });
 
 /** A computer's state (desktop: test/support/nocturne-states.ts DESK_STATES), never in a phone's shard. */

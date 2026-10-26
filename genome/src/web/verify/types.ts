@@ -970,6 +970,8 @@ export interface CircleCard {
   minTier: number;
   /** An invitation's experience of the tier program (plan NEXT-NINE, BP-19 T7), shown above its title; null otherwise. */
   experience?: 'MEMBERS_EVENING' | 'LAUNCH_PREVIEW' | 'PARTNER_EXPERIENCE' | null;
+  /** An invitation for a partner's experience (lot M4, K49 P2): its brand, shown as WITH <BRAND> under the kind; null otherwise. */
+  partner?: { brand: string } | null;
   publishedAt: string;
   cover: CirclePhoto | null;
   eventAt: string | null;
@@ -997,6 +999,12 @@ export interface CirclePost extends CircleCard {
   invitation: { eventAt: string; place: string | null; capacity: number | null; placesLeft: number | null; open: boolean } | null;
   /** `results` only once the reader voted. */
   poll: { options: string[]; vote: number | null; results: { counts: number[]; total: number } | null } | null;
+  /**
+   * On an invitation for a partner's experience (lot M4, K49 P3): whether the reader may share their name with its partner
+   * (`offered`: the account has its first and last name), whether it does (`on`, with a YES only), and the reader's own
+   * name (`name`, null when not offered); null on any other post.
+   */
+  shareName?: { offered: boolean; on: boolean; name: string | null } | null;
   links: {
     drop: { id: string; title: string } | null;
     model: { slug: string; name: string; type: string } | null;

@@ -25,7 +25,10 @@
  * A post, under ‹ THE CIRCLE: its photographs whole at the column's width, unfaded (the first at once, the others
  * lazily, two side by side under it); its kind, its title, its day and its text (plain paragraphs, shared/lookbook.ts);
  * THE INVITATION (WHEN in UTC then on this phone, WHERE, PLACES), then YOUR ANSWER: its sentence and YES / NO, changed
- * until the event begins; THE POLL: its options, one chosen then VOTE (final), then the results, each with its bar;
+ * until the event begins; on an invitation for a partner's experience (lot M4, K49 P2 and P3), WITH <BRAND> under its
+ * kind, and under YES / NO once the reader answered YES the box SHARE MY NAME, <NAME>, WITH <BRAND> (the house's switch
+ * row, saved at once with the answer by the same route, ONE MOMENT… while it is, the server's message and the box back
+ * as it was when refused) and its line; THE POLL: its options, one chosen then VOTE (final), then the results, each with its bar;
  * TO SEE: a release's page, a model's sheet, a link to another site with its host under it (a new tab, noopener
  * noreferrer), each a row that leads on.
  *
@@ -46,7 +49,7 @@ import { computerClock, viewRoot, withNumerals } from './common.js';
 import { isDesktop } from '../../shared/desktop.js';
 import { messageOf } from './forms.js';
 import { CircleCardLines, kindLine } from './invitation.js';
-import { accLink, appAnchor, button, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, textLink } from './nocturne.js';
+import { accLink, appAnchor, button, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, switchControl, textLink } from './nocturne.js';
 import { OwnershipPanel } from './ownership.js';
 
 export interface CircleView {
@@ -321,6 +324,10 @@ class PostPage {
   private disposed = false;
   private busy = false;
   private actionError: string | null = null;
+  /** SHARE MY NAME being saved (lot M4, K49 P3): the choice sent, the box drawn so while it is; null otherwise. */
+  private sharing: boolean | null = null;
+  /** Why SHARE MY NAME could not be saved: the server's message, under its line. */
+  private shareError: string | null = null;
   /** The option chosen before VOTE. */
   private choice: number | null = null;
   private gen = 0;
@@ -398,6 +405,7 @@ class PostPage {
     if (this.busy || l.kind !== 'ready') return;
     this.busy = true;
     this.actionError = null;
+    this.shareError = null;
     this.render();
     let refresh = false;
     try {
@@ -426,6 +434,47 @@ class PostPage {
     this.render();
     // Keyboard focus on what the page now says of the answer or the vote.
     this.root.querySelector<HTMLElement>(kind === 'answer' ? '#circle-answer' : '#circle-poll')?.focus({ preventScroll: true });
+  }
+
+  /**
+   * SHARE MY NAME ticked or unticked (lot M4, K49 P3): saved at once by the answer's own route with the YES, one request at
+   * a time; then the post as the server holds it. Refused, the server's message under the line and the box back as the
+   * server holds it (read again when what changed meanwhile refused it: the event begun, the names gone).
+   */
+  private async share(on: boolean): Promise<void> {
+    const l = this.load;
+    if (this.busy || l.kind !== 'ready') return;
+    this.busy = true;
+    this.sharing = on;
+    this.shareError = null;
+    this.actionError = null;
+    this.render();
+    let refresh = false;
+    try {
+      const post = await this.deps.api.circleAnswer(l.post.id, 'YES', { shareName: on });
+      if (this.disposed) return;
+      this.load = { kind: 'ready', post: circlePostModel(post, this.deps.offsetMinutes) };
+    } catch (e) {
+      if (this.disposed) return;
+      this.deps.session.noteError(e);
+      this.shareError = e instanceof ApiError ? messageOf(e) : CIRCLE.partner.failed;
+      refresh = e instanceof ApiError && e.status === 409;
+    } finally {
+      this.busy = false;
+      this.sharing = null;
+    }
+    if (refresh && this.deps.id) {
+      try {
+        const post = circlePostModel(await this.deps.api.circlePost(this.deps.id), this.deps.offsetMinutes);
+        if (!this.disposed) this.load = { kind: 'ready', post };
+      } catch (e) {
+        this.deps.session.noteError(e);
+      }
+    }
+    if (this.disposed) return;
+    this.render();
+    // Keyboard focus back on the box, or on YOUR ANSWER when the box is no longer offered.
+    (this.root.querySelector<HTMLElement>('.circle-post__share-input') ?? this.root.querySelector<HTMLElement>('#circle-answer'))?.focus({ preventScroll: true });
   }
 
   private choose(index: number): void {
@@ -477,6 +526,8 @@ class PostPage {
             { class: ['n-px', 'n-post__head', photos ? null : 'n-post__head--bare'] },
             h('p', { class: 'n-g n-lb circle-post__kind', text: kindLine(p) }),
             p.experience ? h('p', { class: 'n-g n-lb circle-post__experience', text: p.experience }) : null,
+            // Lot M4 (K49 P2): an invitation for a partner's experience names its partner under its kind, whole (it wraps).
+            p.partner ? h('p', { class: 'n-g n-lb circle-post__partner', text: p.partner }) : null,
             h('h1', { class: 'n-g n-t1 n-post__title circle-post__title', id: 'circle-post-title' }, ...withNumerals(p.title)),
             p.date ? h('p', { class: 'n-sm n-num n-post__date circle-post__date', text: p.date }) : null,
             storyBlock(p.body, { className: 'n-post__text circle-post__text', paragraphClass: 'n-art circle-post__paragraph' }),
@@ -561,9 +612,32 @@ class PostPage {
         heading,
         h('p', { class: 'n-sm n-post__sentence circle-post__sentence', text: inv.sentence }),
         inv.open ? h('div', { class: 'n-duo n-post__choice circle-post__choice', attrs: { role: 'group', 'aria-label': CIRCLE.answerChoice } }, option('YES', CIRCLE.yes), option('NO', CIRCLE.no)) : null,
+        this.shareBlock(p),
         this.errorLine(),
       ),
     );
+  }
+
+  /**
+   * SHARE MY NAME (lot M4, K49 P3), under YES / NO: the box once the reader answered YES (the house's switch row, its whole
+   * row the 44 px target), its line, ONE MOMENT… while the choice is saved, the server's message when it is refused; the
+   * line alone without the box when the account lacks a name or answers are closed. Nothing before a YES.
+   */
+  private shareBlock(p: CirclePostModel): HTMLElement | null {
+    const s = p.share;
+    if (!s || (!s.box && !s.line)) return null;
+    const parts: (HTMLElement | null)[] = [];
+    if (s.box) {
+      const sw = switchControl({ label: s.box.label, checked: this.sharing ?? s.box.on, onChange: (on) => void this.share(on) });
+      sw.input.classList.add('circle-post__share-input');
+      sw.input.disabled = this.busy;
+      sw.input.setAttribute('aria-describedby', 'circle-share-line');
+      parts.push(h('label', { class: 'n-row n-post__share circle-post__share' }, h('span', { class: 'n-g n-row__label n-post__share-label circle-post__share-label', text: s.box.label }), sw.el));
+    }
+    const saving = this.sharing !== null;
+    parts.push(h('p', { class: [...(saving ? ['n-g', 'n-lb', 'n-ivc'] : ['n-sm']), 'n-post__share-line', 'circle-post__share-line'], id: 'circle-share-line', attrs: saving ? { role: 'status' } : {}, text: saving ? CIRCLE.loading : s.line ?? '' }));
+    if (this.shareError) parts.push(h('p', { class: 'n-err form__error n-post__share-error circle-post__share-error', attrs: { role: 'alert' }, text: this.shareError }));
+    return h('div', { class: 'n-post__share-block circle-post__share-block', data: { share: s.box ? (s.box.on ? 'on' : 'off') : 'line' } }, ...parts);
   }
 
   /** THE POLL (C34): one option chosen, then VOTE (final); once voted, the results, the reader's own marked. */

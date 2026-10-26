@@ -555,7 +555,8 @@ describe('the other documents of THE VAULT (plan §7)', () => {
     for (const id of vaultStates) expect(matrix, id).toMatch(new RegExp(`^\\| \`${id}\` \\|`, 'm'));
     for (const shard of ['desk-16', 'desk-17']) expect(matrix, shard).toContain(`| \`${shard}\` | ${DESK_GROUPS[shard]!.length} |`);
     const desk = Object.values(DESK_GROUPS).flat().length;
-    expect(matrix).toContain(`${desk} states beside the phone's ${PHONE_STATES.length} (since lot Q3)`);
+    // Lot M4 (step M4.8) added the partner's invitation since: the totals are counted again, since lot M4.
+    expect(matrix).toContain(`${desk} states beside the phone's ${PHONE_STATES.length} (since lot M4)`);
     // Both copies of the playbook, identical, with THE VAULT CARD's line as the checklist writes it.
     const playbook = readDoc('docs/launch/SALES-PLAYBOOK.md');
     expect(readDoc('genome/src/server/documents/SALES-PLAYBOOK.md')).toBe(playbook);

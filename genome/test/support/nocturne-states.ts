@@ -693,6 +693,90 @@ async function invitationAnswer(page: Page, change: (inv: Record<string, unknown
   });
 }
 
+/** The partner's experience's invitation (lot M4, step M4.8): its WITH <BRAND> line, then, once answered YES, SHARE MY NAME. */
+const PARTNER_POST = '.view--circle-post .circle-post__partner';
+const PARTNER_SHARE = '.view--circle-post .circle-post__share-block';
+
+/** SHARE MY NAME ticked or unticked on the post's page (its row: the label holds the switch). */
+const toggleShare = (run: StateRun) => run.page.locator('.view--circle-post .circle-post__share-label').click();
+
+/**
+ * An invitation for a partner's experience (lot M4, step M4.8; K49 P2, P3; plan M4 §2.4, §7) on the stage `partner`:
+ * WITH <BRAND> under its kind on the post, NOW's card and the feed's; on the post, SHARE MY NAME once the reader answered
+ * YES (off, on, in light), no name on the account, answers closed with the name shared, ONE MOMENT…, refused, the longest
+ * brand; then the whole way, YES then the box ticked (its write, last). No other stage holds a partner.
+ */
+const PARTNER_STATES: readonly UiState[] = [
+  { id: 'partner-post', title: 'An invitation WITH MAISON ORVALE, not answered: no box before a YES', refs: ['M4 P2'], variant: 'partner', as: 'partnerNew', path: post('partnerMain'), ready: PARTNER_POST },
+  { id: 'partner-post-yes', title: 'The partner’s invitation answered YES: SHARE MY NAME, INÈS LAURENT, WITH MAISON ORVALE, off, and its line', refs: ['M4 P3'], variant: 'partner', as: 'partnerOff', path: post('partnerMain'), ready: `${PARTNER_SHARE}[data-share="off"]` },
+  { id: 'partner-post-shared', title: 'The partner’s invitation answered YES, the name shared: the box on, Your name is shared with MAISON ORVALE.', refs: ['M4 P3'], variant: 'partner', as: 'partnerOn', path: post('partnerMain'), ready: `${PARTNER_SHARE}[data-share="on"]` },
+  { id: 'partner-post-shared-light', title: 'The name shared, in light mode', refs: ['M4 P3'], variant: 'partner', as: 'partnerOn', path: post('partnerMain'), light: true, ready: `${PARTNER_SHARE}[data-share="on"]` },
+  { id: 'partner-post-no-name', title: 'The partner’s invitation answered YES by an account without its last name: only the number of guests, no box', refs: ['M4 P3'], variant: 'partner', as: 'partnerNoName', path: post('partnerMain'), ready: `${PARTNER_SHARE}[data-share="line"]` },
+  {
+    id: 'partner-post-closed',
+    title: 'The partner’s invitation once its event has begun, the name shared: the choice as a line, no box',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerOn',
+    path: post('partnerMain'),
+    routes: (page) => invitationAnswer(page, (inv) => ({ ...inv, open: false })),
+    ready: `${PARTNER_SHARE}[data-share="line"]`,
+  },
+  {
+    id: 'partner-post-saving',
+    title: 'SHARE MY NAME ticked, while it is saved: the box on, ONE MOMENT…',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerOff',
+    path: post('partnerMain'),
+    // The choice held on its way, never let through (a hold released at the end would save it, and the states after this
+    // one read the box off).
+    routes: (page) => page.route('**/api/v1/club/circle/*/rsvp', () => new Promise<void>(() => {})),
+    act: async (run) => {
+      await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor();
+      await toggleShare(run);
+    },
+    ready: '.view--circle-post .circle-post__share-line[role="status"]',
+  },
+  {
+    id: 'partner-post-error',
+    title: 'SHARE MY NAME refused: the server’s message, the box back off',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerOff',
+    path: post('partnerMain'),
+    // The server's own refusal (services/circle.ts: CIRCLE_SHARE_NAME_MISSING), the post then read again as it holds it.
+    routes: (page) =>
+      page.route('**/api/v1/club/circle/*/rsvp', (route) =>
+        route.fulfill({ status: 409, json: { error: { code: 'CIRCLE_SHARE_NAME_MISSING', message: 'Your account needs your first and last name to share them.' } } }),
+      ),
+    act: async (run) => {
+      await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor();
+      await toggleShare(run);
+    },
+    ready: `${PARTNER_SHARE}[data-share="off"] .circle-post__share-error`,
+  },
+  { id: 'partner-post-long-brand', title: 'The invitation of the longest brand, answered YES: WITH and the box wrap whole', refs: ['M4 P2', 'M4 P3'], variant: 'partner', as: 'partnerOff', path: post('partnerLong'), ready: `${PARTNER_SHARE}[data-share="off"]`, stress: true },
+  { id: 'partner-now', title: 'NOW: the next invitation is the partner’s of the longest brand, WITH under its kind', refs: ['M4 P2'], variant: 'partner', as: 'partnerOn', path: at('/verify'), ready: '.view--now[data-ready] .now__invitation .n-circle-card__partner' },
+  { id: 'partner-circle', title: 'THE CIRCLE: the two partners’ invitations, each WITH its brand under its kind', refs: ['M4 P2'], variant: 'partner', as: 'partnerOn', path: at('/verify/circle'), ready: '.view--circle article .n-circle-card__partner' },
+  {
+    id: 'partner-post-share-ticked',
+    title: 'The partner’s invitation answered YES here, then SHARE MY NAME ticked: Your name is shared with MAISON ORVALE.',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerNew',
+    path: post('partnerMain'),
+    mutates: true,
+    act: async (run) => {
+      await button(run, 'YES').click();
+      await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor({ timeout: 20_000 });
+      await toggleShare(run);
+      await run.page.locator(`${PARTNER_SHARE}[data-share="on"]`).waitFor({ timeout: 20_000 });
+    },
+    ready: `${PARTNER_SHARE}[data-share="on"]`,
+  },
+];
+
 /** The states of the phone (and the boutique board's screen): those of the NOCTURNE baseline at c3d25c2. */
 export const PHONE_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
@@ -2510,6 +2594,9 @@ export const PHONE_STATES: readonly UiState[] = [
     stress: true,
   },
 
+  // ── THE CIRCLE, an invitation for a partner's experience (lot M4, step M4.8; K49 P2 and P3) on its stage (partner) ──
+  ...PARTNER_STATES,
+
   // ── The legal pages ──
   { id: 'legal-privacy', title: 'The legal pages: PRIVACY', refs: ['C23'], variant: 'full', path: at('/legal/privacy'), ready: '.legal__section' },
   { id: 'legal-terms', title: 'The legal pages: TERMS', refs: ['C23'], variant: 'full', path: at('/legal/terms'), ready: '.legal__section' },
@@ -3787,6 +3874,13 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('vault-open'), 1440, { extra: { as: 'vaultSOpenDesk' } }),
     onDesk(phoneState('vault-open-rare'), 1440, { extra: { as: 'vaultSRareDesk' } }),
     onDesk(phoneState('live-end-vault-open'), 1440, { extra: { as: 'vaultEndOpenDesk', path: release('vaultEndOpenDesk'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpenDesk'), openTheVault(run, { reduced: true })) } }),
+    // ── An invitation for a partner's experience (lot M4, step M4.8; K49 P2, P3; Rule-2: the phone's information) on its
+    // stage (partner): the post in each state of SHARE MY NAME, NOW's card and the feed at 1440 × 900; the box off and on
+    // also in light; the longest brand and NOW's card also at 1024 × 768 ──
+    ...desk(1440, 'partner-post', 'partner-post-yes', 'partner-post-shared', 'partner-post-no-name', 'partner-post-closed', 'partner-post-saving', 'partner-post-error', 'partner-post-long-brand', 'partner-now', 'partner-circle'),
+    onDesk(phoneState('partner-post-yes'), 1440, { light: true }),
+    onDesk(phoneState('partner-post-shared-light'), 1440, { light: true, name: 'partner-post-shared' }),
+    ...desk(1024, 'partner-post-long-brand', 'partner-now'),
   ],
   // ── THE VAULT page and its surroundings on a computer (lot Q3, step Q3.11; MK V desk): its own page, /verify/account/
   // vault (also at 1024 × 768, and in light: dark all the same), none waiting, a first visit, ONE MOMENT…, could not be

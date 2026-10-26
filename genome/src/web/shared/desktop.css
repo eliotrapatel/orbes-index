@@ -1568,6 +1568,15 @@
     margin-left: auto;
   }
 
+  /* THE CIRCLE never breaks over the card's next line (lot M4, step M4.8): beside an invitation kept for PALLADIUM (a
+     partner's experience, by THE PROGRAM's default) at 1024 px the head's three words are 2 px wider than the card's
+     line, and the title gave way, its second word drawn over the next line. It keeps its width; what passes the line
+     runs into the card's padding. */
+  html:not(.d-touch) body.nocturne .view--now .now__invitation > .d-now-head > h2 {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
   html:not(.d-touch) body.nocturne .view--now .now__card .n-card::before,
   html:not(.d-touch) body.nocturne .view--now .now__card::before {
     inset: var(--d-s3);

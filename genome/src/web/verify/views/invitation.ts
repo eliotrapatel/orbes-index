@@ -6,6 +6,8 @@
  * VOTED); and its one text link (SEE THE INVITATION, SEE THE POLL, READ THE NOTE).
  *
  *   INVITATION                                     n-circle-card__kind
+ *   PARTNER EXPERIENCE                             n-circle-card__experience (an experience of the tier program)
+ *   WITH MAISON X                                  n-circle-card__partner (lot M4, K49 P2: a partner's experience)
  *   AN EVENING AT THE ATELIER                      n-circle-card__title
  *   3 OCT 2026                                     n-circle-card__date
  *   12 OCT 2026 · 17:00 UTC · PARIS                n-circle-card__event (its time never parts from its hour)
@@ -101,6 +103,8 @@ export class CircleCardLines {
     const lines: (HTMLElement | null)[] = [
         h('p', { class: 'n-g n-lb n-circle-card__kind circle-card__kind', text: kindLine(card) }),
         card.experience ? h('p', { class: 'n-g n-lb n-circle-card__experience circle-card__experience', text: card.experience }) : null,
+        // Lot M4 (K49 P2): an invitation for a partner's experience names its partner under its kind, whole (it wraps).
+        card.partner ? h('p', { class: 'n-g n-lb n-circle-card__partner circle-card__partner', text: card.partner }) : null,
         h(this.opts.heading, { class: 'n-g n-t2 n-circle-card__title circle-card__title', id: this.opts.titleId }, ...withNumerals(card.title)),
         card.date ? h('p', { class: 'n-sm n-num n-circle-card__date', text: card.date }) : null,
         event ? h('p', { class: 'n-g n-lb n-ivc n-num n-circle-card__event circle-card__event' }, ...eventWords(event)) : null,

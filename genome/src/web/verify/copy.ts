@@ -1711,6 +1711,23 @@ export const CIRCLE = Object.freeze({
   openLink: 'OPEN THE LINK',
   /** The accessible name of a link to another site: where it leads. */
   externalLabel: (host: string) => `Open the link on ${host}, in a new tab`,
+  /**
+   * An invitation for a partner's experience (lot M4, K49 P2 and P3): WITH <BRAND> under its kind, on the post, NOW's card
+   * and the feed's; on the post, once the reader answered YES, the box that shares their first and last name with the
+   * partner (off by default, changed until the event begins), and its line. No line names a tap or a click: the phone and
+   * the computer read the same words.
+   */
+  partner: Object.freeze({
+    with: (brand: string) => `WITH ${brand}`,
+    /** The box's words: the reader's own name, as the partner would receive it. */
+    share: (name: string, brand: string) => `SHARE MY NAME, ${name}, WITH ${brand}`,
+    shareOn: (brand: string) => `Your name is shared with ${brand}.`,
+    shareOff: (brand: string) => `Unticked, ${brand} receives only the number of guests.`,
+    /** An account without both its first and last name: no box. */
+    headcountOnly: (brand: string) => `Only the number of guests is shared with ${brand}.`,
+    /** The choice could not be sent (no answer of the server to show). */
+    failed: 'Your choice could not be saved just now. Please try again.',
+  }),
 });
 
 /**
