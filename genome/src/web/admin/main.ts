@@ -92,6 +92,7 @@ import { supplierOrdersView } from './views/supplier-orders.js';
 import { linkCollectorsView } from './views/link-collectors.js';
 import { linkView } from './views/link.js';
 import { linksView } from './views/links.js';
+import { adPlatformsView } from './views/ad-platforms.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -246,6 +247,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   links: { view: linksView, title: 'Links', nav: 'links' },
   link: { view: linkView, title: 'Link', nav: 'links' },
   linkCollectors: { view: linkCollectorsView, title: 'Collectors', nav: 'links' },
+  adPlatforms: { view: adPlatformsView, title: 'Ad platforms', nav: 'links' },
   founding: { view: foundingView, title: 'Founding list', nav: 'founding' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },

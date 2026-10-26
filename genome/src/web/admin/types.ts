@@ -474,6 +474,60 @@ export type AdSkipReason = (typeof AD_SKIP_REASONS)[number];
 export const ADS_TEST_EVENT_CODE_MAX = 40;
 export const ADS_GOOGLE_ACTION_PATTERN = /^customers\/[0-9]{1,12}\/conversionActions\/[0-9]{1,20}$/;
 
+/**
+ * A platform as Links → Ad platforms reads it (GET /api/admin/ads, services/ads.ts AdsPlatformView, lot M4 plan §3.5):
+ * its keys present or missing (never a key), its API version, its last send and last error, its events by status, and
+ * Meta's and TikTok's test event code (Google's test mode is validateOnly: null).
+ */
+export interface AdsPlatformView {
+  platform: AdsPlatform;
+  ready: boolean;
+  apiVersion: string;
+  lastSentAt: string | null;
+  lastError: { error: string; at: string } | null;
+  counts: Record<AdEventStatus, number>;
+  testCode: string | null;
+}
+
+/**
+ * GET /api/admin/ads (AUDITOR): the switch (since when, by whom), the phrases it asks for, the three platforms, the link
+ * channels and the platforms each maps to, each act's Google Ads conversion action, the choices of this Paris month.
+ */
+export interface AdsSettings {
+  on: boolean;
+  eventsFrom: string | null;
+  switchedAt: string | null;
+  switchedBy: { id: string; email: string } | null;
+  phrases: { on: string; off: string };
+  platforms: AdsPlatformView[];
+  channels: { id: string; name: string; platforms: AdsPlatform[] }[];
+  googleActions: Record<AdEventKind, string | null>;
+  consent: { month: string; granted: number; declined: number };
+}
+
+/** GET /api/admin/ads/events (AUDITOR): an event of the outbox, no account and no email. */
+export interface AdEventView {
+  id: number;
+  platform: AdsPlatform;
+  kind: AdEventKind;
+  status: AdEventStatus;
+  skipReason: AdSkipReason | null;
+  attempts: number;
+  createdAt: string;
+  notBefore: string;
+  sentAt: string | null;
+  settledAt: string | null;
+  lastError: string | null;
+}
+
+/** POST /api/admin/ads/test/:platform (ADMIN): SEND A TEST EVENT's answer, scrubbed of every key. */
+export interface AdsTestResult {
+  platform: AdsPlatform;
+  ok: boolean;
+  status: number | null;
+  answer: string;
+}
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

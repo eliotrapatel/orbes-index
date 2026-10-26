@@ -8301,3 +8301,209 @@ a.collectors__kpi-link:focus-visible {
     margin-left: 0;
   }
 }
+
+/* ── Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5) ─────────────── */
+
+/* CONVERSIONS: OFF, the state's word beside its mark. */
+.adplat__state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0 0;
+}
+
+.adplat__state-label {
+  font-size: var(--fs-label);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+/* A section's sentence: the off state, what a section counts, its rule. */
+.adplat__line {
+  max-width: 76ch;
+  margin: 12px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.adplat__line + .deflist,
+.adplat__line + .empty,
+.adplat__line + div > .empty {
+  margin-top: 6px;
+}
+
+/* The three platforms side by side on a desk, two at 1 024 px, one under the other on a phone. */
+.adplat__platforms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 32px 40px;
+  margin-top: 16px;
+}
+
+.adplat__platform {
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline-strong);
+}
+
+.adplat__platform-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.adplat__platform-name {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.adplat__platform-head .cell-sub {
+  margin: 0;
+}
+
+.adplat__keys {
+  flex-basis: 100%;
+  margin-top: 8px;
+}
+
+/* Queued · Sent · Failed · Skipped: four figures in a row, each over its word. */
+.adplat__counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 12px;
+  margin: 16px 0 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.adplat__count dt {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.adplat__count dd {
+  margin: 4px 0 0;
+  font-size: var(--fs-lead);
+  font-variant-numeric: tabular-nums;
+}
+
+.adplat__facts .deflist__row {
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.adplat__platform-tools {
+  margin-top: 14px;
+}
+
+.adplat__error,
+.adplat__action {
+  overflow-wrap: anywhere;
+}
+
+.adplat__figure {
+  font-variant-numeric: tabular-nums;
+}
+
+/* SEND A TEST EVENT's answer: the platform's words as it gave them, kept within the dialog. */
+.adplat__result {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 12px;
+}
+
+.adplat__result .cell-sub {
+  margin: 0;
+}
+
+.adplat__answer {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* CHANNELS: a channel, its three tick boxes and Save, one row each, hairlines between. */
+.adplat__channels {
+  margin-top: 8px;
+}
+
+.adplat__channel {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px 32px;
+  min-height: var(--row-h);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.adplat__channel-name {
+  overflow-wrap: anywhere;
+}
+
+.adplat__channel-boxes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+}
+
+.adplat__channel-platforms {
+  grid-column: 2 / -1;
+  color: var(--ink-soft);
+}
+
+.adplat__events .filters {
+  margin-top: 12px;
+}
+
+/* On a phone, the panel heads wrap (their tools on their own line), a channel's boxes go under its name with Save. */
+@media (max-width: 599px) {
+  .view--ad-platforms > .panel > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .view--ad-platforms > .panel > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+
+  .adplat__channel {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .adplat__channel-boxes {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .adplat__channel-platforms {
+    grid-column: 2;
+  }
+
+  .adplat__facts .deflist__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
+/* EVENTS: an error keeps a readable width; the table scrolls within its frame before it is squeezed (1 024 px). */
+.adplat__events .table td.col--wide {
+  min-width: 260px;
+  overflow-wrap: anywhere;
+}

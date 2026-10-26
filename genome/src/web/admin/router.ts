@@ -67,6 +67,11 @@ export const ROUTES = [
    */
   { name: 'links', path: '/links' },
   { name: 'linkCollectors', path: '/links/collectors' },
+  /**
+   * Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5): the server-side conversions' switch and settings, from the
+   * Links page's Ad platforms, before a link's page so its path is never read as a link's id.
+   */
+  { name: 'adPlatforms', path: '/links/ads' },
   { name: 'link', path: '/links/:linkId' },
   /** The Founding list (plan MACRO M1 §3.2, F3, F4): theorbes.com's pre-registrations, under Links in Clients. */
   { name: 'founding', path: '/founding' },

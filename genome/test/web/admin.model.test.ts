@@ -3743,6 +3743,19 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
     expect([CAPABILITY_MIN_ROLE.managePartners, CAPABILITY_MIN_ROLE.invoicePartners]).toEqual(['OPERATOR', 'ADMIN']);
     expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'read'))).toEqual([false, false, true, true, true]);
   });
+
+  it('Links → Ad platforms (lot M4 plan §3.5, step M4.12): its route under Links, before a link\'s page, read by every reader of Links, changed by an ADMIN (manageAdPlatforms), as the server', () => {
+    expect(href('adPlatforms')).toBe('#/links/ads');
+    expect(['#/links/ads', '#/links/collectors', '#/links/l1'].map((x) => parseHash(x).name)).toEqual(['adPlatforms', 'linkCollectors', 'link']);
+    expect(CAPABILITY_MIN_ROLE.manageAdPlatforms).toBe('ADMIN');
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => [can(r, 'readLinks'), can(r, 'manageAdPlatforms')])).toEqual([
+      [false, false],
+      [false, false],
+      [true, false],
+      [true, false],
+      [true, true],
+    ]);
+  });
 });
 
 describe('the Sign-up page\'s answers (plan CUSTOMER INTELLIGENCE §3.1 P.10; model/sign-up.ts)', () => {

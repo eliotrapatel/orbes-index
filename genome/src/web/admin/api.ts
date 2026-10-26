@@ -16,6 +16,11 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  AdEventStatus,
+  AdEventView,
+  AdsPlatform,
+  AdsSettings,
+  AdsTestResult,
   SetInput,
   SetSizeMix,
   SetView,
@@ -2051,6 +2056,43 @@ export class AdminApi {
   /** OPERATOR+: removed while no link names it (409 CHANNEL_IN_USE otherwise). */
   async deleteLinkChannel(id: string): Promise<void> {
     await this.del(`/api/admin/link-channels/${encodeURIComponent(id)}`);
+  }
+
+  // ── Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5; routes/admin/ads.ts) ──
+
+  /** AUDITOR+: the switch, the three platforms (keys present or missing, never a key), the channels, the Google actions, this month's choices. */
+  adsSettings(): Promise<AdsSettings> {
+    return this.get('/api/admin/ads');
+  }
+
+  /** ADMIN: SWITCH ON / SWITCH OFF, the typed phrase (409 ADS_NO_PLATFORM: no platform has its keys). */
+  setAdsSwitch(on: boolean, phrase: string): Promise<AdsSettings> {
+    return this.request('PUT', '/api/admin/ads/switch', { body: { on, phrase } });
+  }
+
+  /** ADMIN: the platforms a link channel maps to (none: unmapped; 404 CHANNEL_NOT_FOUND). */
+  setAdsChannel(channelId: string, platforms: AdsPlatform[]): Promise<AdsSettings> {
+    return this.request('PUT', `/api/admin/ads/channels/${encodeURIComponent(channelId)}`, { body: { platforms } });
+  }
+
+  /** ADMIN: each act's Google Ads conversion action (null: not named). */
+  setAdsGoogleActions(actions: { signup: string | null; drawEntry: string | null; liveEntry: string | null; paidOrder: string | null }): Promise<AdsSettings> {
+    return this.request('PUT', '/api/admin/ads/google-actions', { body: actions });
+  }
+
+  /** ADMIN: Meta's and TikTok's test event codes (null: none). */
+  setAdsTestCodes(codes: { meta: string | null; tiktok: string | null }): Promise<AdsSettings> {
+    return this.request('PUT', '/api/admin/ads/test-codes', { body: codes });
+  }
+
+  /** ADMIN: SEND A TEST EVENT in the platform's test mode, its answer (409 ADS_OFF while off). */
+  sendAdsTest(platform: AdsPlatform): Promise<AdsTestResult> {
+    return this.post(`/api/admin/ads/test/${encodeURIComponent(platform.toLowerCase())}`);
+  }
+
+  /** AUDITOR+: the latest events, newest first, by status and platform; no account, no email. */
+  async adsEvents(q: { status?: AdEventStatus; platform?: AdsPlatform } = {}): Promise<AdEventView[]> {
+    return (await this.get<{ events: AdEventView[] }>('/api/admin/ads/events', { status: q.status, platform: q.platform })).events;
   }
 
   // ── A release's CAMPAIGN tab (plan MACRO M1 §2.1, C2) ──

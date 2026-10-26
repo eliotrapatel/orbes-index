@@ -8,7 +8,8 @@
  * ended, a returned piece archived, the settings of the
  * orders: their delays, the locations, the carriers and the shipping rates; a
  * conversation of the Messages board assigned; THE PROGRAM of the club's tiers; the defaults of THE HOUSE'S
- * GUARANTEE; a partner's invoice issued, its payment recorded, an invoiced experience cancelled). Every role
+ * GUARANTEE; a partner's invoice issued, its payment recorded, an invoiced experience cancelled; the ad platforms' switch,
+ * channels, Google actions, test codes and test event). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -181,6 +182,12 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   readLinks: 'AUDITOR',
   /** Links: New link, Edit, Archive and Unarchive, the Channels (added, renamed, moved, removed while unused). */
   manageLinks: 'OPERATOR',
+  /**
+   * Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5; routes/admin/ads.ts): SWITCH ON / SWITCH OFF with the typed
+   * phrase, a channel's platforms, the Google conversion actions, the test codes and SEND A TEST EVENT. Every reader of
+   * Links reads the page (keys present or missing, never a key; no account, no email).
+   */
+  manageAdPlatforms: 'ADMIN',
   /** The Founding list (plan MACRO M1 §3.2, F3): its figures and its people, the emails masked for an AUDITOR. */
   readFounding: 'AUDITOR',
   /** The Founding list's CSV, in a Shopify customers import's columns (server: OPERATOR). */
