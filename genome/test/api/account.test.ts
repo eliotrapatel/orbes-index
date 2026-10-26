@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hashSessionToken } from '../../src/server/services/sessions.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { ADS_TEXT_VERSION } from '../../src/server/services/ads.js';
+import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 describe('account API', () => {
   let h: Harness;
@@ -536,5 +537,53 @@ describe('CREATE ACCOUNT with its profile (plan CUSTOMER INTELLIGENCE §3.1 P.4.
     await h.ctx.db.updateTable('heard_options').set({ position: 1 }).where('id', '=', heard.get('Instagram')!).execute();
     const now = await h.ctx.db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     expect(Number(now.n)).toBe(Number(before.n));
+  });
+});
+
+describe('ADVERTISING MEASUREMENT (lot M4 plan §3.2, §3.4, K27 A4): GET / PUT /api/v1/account/ads-consent', () => {
+  let h: Harness;
+  let admin: { type: 'admin'; id: string };
+  beforeAll(async () => {
+    h = await createHarness({ config: { ads: { meta: { datasetId: '123456789012345', accessToken: 'META-SECRET-TOKEN-0123456789' }, tiktok: null, google: null } } });
+    admin = { type: 'admin', id: (await createAdmin(h.ctx, 'ADMIN')).id };
+  });
+  afterAll(() => h?.close());
+
+  const rowsOf = (accountId: string) => h.ctx.db.selectFrom('ad_consents').selectAll().where('account_id', '=', accountId).orderBy('id').execute();
+
+  it('is not offered while the conversions are off (409 ADS_OFF), as the release notices’ EMAIL_OFF; then reads, turns OFF and ON', async () => {
+    const { client: c, email } = await accountClient(h);
+    const account = (await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow()).id;
+    const offRead = await c.get('/api/v1/account/ads-consent');
+    expect([offRead.statusCode, errorOf(offRead).code]).toEqual([409, 'ADS_OFF']);
+    const offPut = await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'GRANTED' } });
+    expect([offPut.statusCode, errorOf(offPut).code]).toEqual([409, 'ADS_OFF']);
+    expect(await rowsOf(account)).toEqual([]);
+
+    await h.ctx.services.ads.setSwitch(true, 'SWITCH ON', admin);
+    const read = await c.get('/api/v1/account/ads-consent');
+    expect(read.statusCode).toBe(200);
+    expect(read.headers['cache-control']).toBe('no-store');
+    expect(safeJson(read)).toEqual({ ads: { on: true, choice: null, textVersion: ADS_TEXT_VERSION } });
+    const on = await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'GRANTED' } });
+    expect(on.statusCode).toBe(200);
+    expect(safeJson(on)).toEqual({ ads: { on: true, choice: 'GRANTED', textVersion: ADS_TEXT_VERSION } });
+    expect((await rowsOf(account)).at(-1)).toMatchObject({ choice: 'GRANTED', source: 'ACCOUNT', device_id: null, text_version: ADS_TEXT_VERSION, user_agent: expect.stringMatching(/^Mozilla\/5\.0/) });
+    // A click id the account holds goes when it turns OFF; the change needs the CSRF token, and a choice it knows.
+    const device = await h.ctx.db.selectFrom('tracking_devices').select('id').orderBy('id').executeTakeFirstOrThrow();
+    await h.ctx.db.insertInto('ad_clicks').values({ device_id: device.id, account_id: account, kind: 'FBCLID', click_id: 'IwAR0account', clicked_at: h.clock.now() }).execute();
+    const noToken = await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'DECLINED' }, noCsrf: true });
+    expect([noToken.statusCode, errorOf(noToken).code]).toEqual([403, 'CSRF_FAILED']);
+    expect((await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'NO' } })).statusCode).toBe(400);
+    h.clock.advance(1_000);
+    const off = await c.request('PUT', '/api/v1/account/ads-consent', { body: { choice: 'DECLINED' } });
+    expect(safeJson(off)).toEqual({ ads: { on: true, choice: 'DECLINED', textVersion: ADS_TEXT_VERSION } });
+    expect((await rowsOf(account)).at(-1)).toMatchObject({ choice: 'DECLINED', source: 'ACCOUNT', user_agent: null });
+    expect(await h.ctx.db.selectFrom('ad_clicks').select('id').where('account_id', '=', account).execute()).toEqual([]);
+    expect(safeJson(await c.get('/api/v1/account/ads-consent'))).toMatchObject({ ads: { choice: 'DECLINED' } });
+    // Signed out: the account's own route needs its session.
+    expect((await h.client().get('/api/v1/account/ads-consent')).statusCode).toBe(401);
+    // A choice is never audited: the row is the record.
+    expect(await h.ctx.db.selectFrom('audit_logs').select('action').where('action', 'like', '%consent%').execute()).toEqual([]);
   });
 });

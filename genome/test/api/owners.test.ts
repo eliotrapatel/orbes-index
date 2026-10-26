@@ -12,6 +12,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AD_RETENTION_WORDS } from '../../src/server/services/ads.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { holdPieces } from '../support/live.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
@@ -383,6 +384,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.claimCodes).toEqual([]);
       // Nothing of THE VAULT yet (the test below exports it).
       expect([x.vaults, x.invitation, x.invited, x.vaultGifts]).toEqual([[], null, { invitedBy: false, invitedAt: null }, []]);
+      // Lot M4 (K27): the advertising choices, click ids and events, each kept as the statements say; none while off.
+      expect(x.advertising).toEqual({ choices: [], clicks: [], events: [], retention: [...AD_RETENTION_WORDS] });
       // No email chosen nor written (the emails are off here; test/services/owners.test.ts exports them).
       expect(x.emailPreferences).toEqual({ releaseNotices: false, changedAt: null });
       expect(x.emails).toEqual([]);
@@ -416,7 +419,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, warrantyClaims: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, origin: 2, foundingList: 0, emails: 0, houseMessages: 0, wornPhotos: 0, claimCodes: 0, tierGrants: 0, vaults: 0, vaultGifts: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, warrantyClaims: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, origin: 2, foundingList: 0, emails: 0, houseMessages: 0, wornPhotos: 0, claimCodes: 0, tierGrants: 0, vaults: 0, vaultGifts: 0, advertising: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 

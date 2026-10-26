@@ -955,8 +955,8 @@ export class OwnerService {
         .returning('id')
         .execute();
       const recoveryCodesRevoked = revoked.length;
-      // Lot M1 step M1.17: nothing more is emailed to it (an email already sent stays in the outbox, its record).
-      const emailsCancelled = await cancelAccountEmails(tx, account.id, now);
+      // Lot M1 step M1.17, lot M4 (K27): nothing more is emailed to it nor reported to an ad platform (QUEUED cancelled).
+      const [emailsCancelled] = [await cancelAccountEmails(tx, account.id, now), await cancelAccountAdEvents(tx, account.id, now)];
       // Links to ownership certificates created by whoever held the account stop showing the record (THREAT-MODEL Y).
       const certificates = await withdrawAccountCertificates(tx, account.id, now);
       // Its entries in drops not drawn yet leave their draw (P-R03): the drops FOR SHARE, as ENTER and WITHDRAW take them.
@@ -1210,6 +1210,7 @@ export class OwnerService {
         invitation: vault.invitation,
         invited: vault.invited,
         vaultGifts: vault.vaultGifts,
+        advertising: await accountAdsData(tx, a.id),
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -1262,6 +1263,7 @@ export class OwnerService {
             tierGrants: out.tierGrants.length,
             vaults: out.vaults.length,
             vaultGifts: out.vaultGifts.length,
+            advertising: out.advertising.choices.length + out.advertising.clicks.length + out.advertising.events.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },
@@ -1398,4 +1400,18 @@ export class OwnerService {
     // Stable: the newest-first order holds within the current and the past pieces.
     return [...pieces.filter((p) => p.until === null), ...pieces.filter((p) => p.until !== null)];
   }
+}
+
+// ── Lot M4 (K27): the advertising choices, click ids and events ─────────────
+// Appended here, after every line docs/legal/TERMS-FACTS.md cites in this file, so that none of those lines moves: the
+// import (hoisted like any other) and the right of access's part, merged into AccountExport by its declaration.
+import { accountAdsData, cancelAccountAdEvents, type ExportedAdvertising } from './ads.js';
+
+export interface AccountExport {
+  /**
+   * The server-side conversions (lot M4 plan §3.2, K27 A4): the account's advertising choices (choice, source, time,
+   * text version), its click ids (kind, time; the id itself) and its events (platform, kind, status, times), oldest
+   * first, with how long each is kept.
+   */
+  advertising: ExportedAdvertising;
 }

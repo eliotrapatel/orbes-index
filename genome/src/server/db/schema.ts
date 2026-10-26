@@ -2900,7 +2900,7 @@ export interface PartnerInvoicesTable {
  * The conversions' switch and settings (migration 0065, K27 A1; one row, id 1, written at the console's first save; no
  * row reads as off). `events_from`: set at the first switch on, never moved after (no act before it is sent); on needs
  * it. `switched_at` / `switched_by`: the last switch, on or off. Each platform's test event code; the Google Ads
- * conversion action of each act (ADS_GOOGLE_ACTION_PATTERN). updated_at is stamped on every update.
+ * conversion action of each act (ADS_GOOGLE_ACTION_PATTERN); the sender's watermark. updated_at is stamped on every update.
  */
 export interface AdsSettingsTable {
   id: WithDefault<number>;             // smallint, always 1
@@ -2914,6 +2914,8 @@ export interface AdsSettingsTable {
   google_action_draw_entry: NullableText;
   google_action_live_entry: NullableText;
   google_action_paid_order: NullableText;
+  /** The sender's watermark: conversions written and orders paid up to it were judged (AdsService.enqueue). */
+  enqueued_until: TimestampNullable;
   updated_by: NullableAdmin;
   updated_at: TimestampDefault;
 }

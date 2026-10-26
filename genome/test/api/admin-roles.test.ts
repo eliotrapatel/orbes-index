@@ -41,7 +41,9 @@
  * (their contacts masked), recorded, changed, set aside and reinstated by an OPERATOR, their experiences read by an
  * AUDITOR, recorded, changed and (a DRAFT) cancelled by an OPERATOR, their invoice issued, payment recorded and an
  * invoiced one cancelled by an ADMIN, their guests counted for an AUDITOR and named, with their list, for an OPERATOR,
- * the partner invoices, their CSV and PDFs read by an AUDITOR);
+ * the partner invoices, their CSV and PDFs read by an AUDITOR; Links → Ad platforms, lot M4 plan §3.2, its switch,
+ * platforms, channels, Google actions, the month's choices and its events read by an AUDITOR, the switch, a channel's
+ * platforms, the Google actions, the test codes and a test event by an ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -482,6 +484,14 @@ const PROBES: Probe[] = [
   { group: 'partner-invoices', method: 'GET', url: '/api/admin/partner-invoices?month=2026-13', min: 'AUDITOR' },
   { group: 'partner-invoices', method: 'GET', url: '/api/admin/partner-invoices.csv', min: 'AUDITOR' },
   { group: 'partner-invoices', method: 'GET', url: `/api/admin/partner-invoices/${UUID}/pdf`, min: 'AUDITOR' },
+  // Lot M4 plan §3.2 (K27): Links → Ad platforms read by an AUDITOR; switched, mapped, named and tested by an ADMIN.
+  { group: 'ads', method: 'GET', url: '/api/admin/ads', min: 'AUDITOR' },
+  { group: 'ads', method: 'GET', url: '/api/admin/ads/events?status=LOST', min: 'AUDITOR' },
+  { group: 'ads', method: 'PUT', url: '/api/admin/ads/switch', body: INVALID, min: 'ADMIN' },
+  { group: 'ads', method: 'PUT', url: `/api/admin/ads/channels/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'ads', method: 'PUT', url: '/api/admin/ads/google-actions', body: INVALID, min: 'ADMIN' },
+  { group: 'ads', method: 'PUT', url: '/api/admin/ads/test-codes', body: INVALID, min: 'ADMIN' },
+  { group: 'ads', method: 'POST', url: '/api/admin/ads/test/SNAPCHAT', min: 'ADMIN' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },
@@ -673,6 +683,7 @@ describe('admin role enforcement', () => {
       'partners',
       'partner-experiences',
       'partner-invoices',
+      'ads',
       'system',
       'test-entrants',
       'suppliers',

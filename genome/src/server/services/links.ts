@@ -5,7 +5,8 @@
  *
  *   channels      the channels in their order, each with how many links name it (archived ones included).
  *   createChannel / updateChannel / deleteChannel   a name once whatever its case (409 CHANNEL_NAME_TAKEN), an order
- *                 0 to 999; removed only while no link names it (409 CHANNEL_IN_USE). Audited `link_channel.create`,
+ *                 0 to 999; removed only while no link names it (409 CHANNEL_IN_USE), its ad platforms' mapping with it
+ *                 (lot M4, K27). Audited `link_channel.create`,
  *                 `.update` (what changed, before and after), `.delete`.
  *   list / get    the links, the archived ones only when asked, each with its addresses: the short one and the direct
  *                 one « for places that refuse a redirect » (A.3), which counts the same.
@@ -260,6 +261,8 @@ export class LinkService {
       if (!row) throw channelNotFound();
       const used = await tx.selectFrom('links').select('id').where('channel_id', '=', channelId).limit(1).executeTakeFirst();
       if (used) throw channelInUse();
+      // Its ad platforms' mapping goes with it (lot M4, K27: Links → Ad platforms' CHANNELS).
+      await tx.deleteFrom('ads_channel_platforms').where('channel_id', '=', channelId).execute();
       await tx.deleteFrom('link_channels').where('id', '=', channelId).execute();
       await this.audit.record({ actor, action: 'link_channel.delete', targetType: 'link_channel', targetId: channelId, details: { channelId, name: row.name } }, tx);
     });

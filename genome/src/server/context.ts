@@ -80,6 +80,7 @@ import { GrowthService } from './services/growth.js';
 import { MarginService } from './services/margin.js';
 import { MarginSettingsService } from './services/margin-settings.js';
 import { PartnerService } from './services/partners.js';
+import { AdsService } from './services/ads.js';
 import { CollectorInsightsService } from './services/collector-insights.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
@@ -261,6 +262,11 @@ export interface AppServices {
   marginSettings: MarginSettingsService;
   /** Partner-paid experiences (plan M4 §2.2, K49 P1 to P4): the partners, their experiences, their invoices in the P- series and the guests shared with them. */
   partners: PartnerService;
+  /**
+   * The server-side conversions to Meta, TikTok and Google (plan M4 §3.2, K27 A1 to A5), built and switched off: the
+   * collectors' advertising choices, the console's switch and settings, the per-platform outbox and its 30 s sender.
+   */
+  ads: AdsService;
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6): the counted collectors' figures over a period, cached, two readings at once; reads only. */
   collectorInsights: CollectorInsightsService;
   /** What they like (plan CUSTOMER INTELLIGENCE §3.2 W.8): the Collectors page's panel `likes` (tastes, most wished, most viewed, pieces held); reads only. */
@@ -315,6 +321,11 @@ export interface ContextOverrides {
   ensureActiveKey?: boolean;
   /** Replace individual services (tests). */
   services?: Partial<AppServices>;
+  /**
+   * Tests only: the local fake ad platforms' origin (test/support/fake-ads.ts), where AdsService sends instead of Meta,
+   * TikTok and Google. Never set outside tests.
+   */
+  adsTestOrigin?: string;
   /**
    * The background workers' timers (the receptions' issuing worker, §3.5.6.5). Default: on, except with ORBES_ENV=test,
    * where tests drive `issuePending` themselves.
@@ -432,6 +443,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const campaign = new CampaignService({ db, audit, links, clock });
     const founding = new FoundingService({ db, audit, acquisition, clock });
     const intelligenceSizes = new IntelligenceSizes(db, clock, log);
+    // The conversions (plan M4 §3.2, K27): off by default; its choice carried to the account in the link's transaction.
+    const ads = new AdsService({ db, audit, keys: config.ads, cookieSecret: config.cookieSecret, publicOrigin: config.publicOrigin, clock, log, ...(overrides.adsTestOrigin ? { testOrigin: overrides.adsTestOrigin } : {}) });
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
     const tracking = new TrackingService({
@@ -443,6 +456,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       arrive: (input) => acquisition.arrive(input),
       attach: async (tx, deviceId, accountId, via, now) => {
         await acquisition.attach(tx, deviceId, accountId, via, now);
+        // At a sign-up or a sign-in, the device's advertising choice made signed out becomes the account's (K27 A4).
+        if (via !== 'SESSION') await ads.carry(tx, deviceId, accountId);
       },
     });
     const suppliers = new SupplierService({ db, audit, clock });
@@ -539,6 +554,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       margin,
       marginSettings,
       partners,
+      ads,
       collectorInsights,
       likes,
       claimRenewals,
@@ -568,6 +584,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
         await services.receptions.stop();
         await services.email.stop();
         await services.houseSender.stop();
+        await services.ads.stop();
         // The views still in memory are written before the database closes (§3.3 T.8.3).
         await services.tracking.stop();
         if (ownsDb) await closeDb(db);
@@ -611,6 +628,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     if (overrides.timers ?? config.env !== 'test') services.email.start();
     // The house messages' sender (plan MACRO M2 §1.3): a pass every 30 s, always on; tests drive deliverDue.
     if (overrides.timers ?? config.env !== 'test') services.houseSender.start();
+    // The ad events' sender (plan M4 §3.2, K27): a pass every 30 s once a platform has its keys, nothing while the
+    // console's switch is off; tests drive sendDue.
+    if (overrides.timers ?? config.env !== 'test') services.ads.start();
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});
@@ -632,6 +652,7 @@ export interface Housekeeping {
     houseMoments: number;
     vaults: number;
     acquisitionConversions: number;
+    adsEnqueue: number;
     viewStats: number;
     viewMonths: number;
     acquisitionDaily: number;
@@ -642,6 +663,7 @@ export interface Housekeeping {
     viewPurge: number;
     acquisitionPurge: number;
     wishHistory: number;
+    adsPurge: number;
     devicePurge: number;
     liveNetworks: number;
     careLabels: number;
@@ -692,6 +714,10 @@ export interface Housekeeping {
  *                since the recording started gets its conversion with its
  *                last link; once a Paris day in the window, its catch-up
  *                (services/acquisition-jobs.ts, §3.4 A.8);
+ *   adsEnqueue   every pass, right after, only while the conversions'
+ *                switch is on: the conversions written and the orders paid
+ *                since the last pass, each platform's event queued or skipped
+ *                (services/ads.ts AdsService.enqueue, plan M4 §3.2, K27);
  *   viewStats    each complete Paris day of the views not yet counted, into
  *                view_daily_stats, device_daily_stats and collector_places
  *                (services/tracking-jobs.ts, §3.3 T.10);
@@ -723,8 +749,12 @@ export interface Housekeeping {
  *                visits past their 13 months whose day is summarised;
  *   wishHistory  only when wishMonths succeeded in this pass, the removed
  *                wishes past their 13 months whose month is counted;
- *   devicePurge  the devices never linked, unseen for 13 months, with no view
- *                and no visit left (TrackingService.purgeDevices);
+ *   adsPurge     every pass: the ad events 90 days after they settled, the
+ *                click ids 90 days after the click, a device's advertising
+ *                choices made signed out after 13 months (AdsService.purge);
+ *   devicePurge  the devices never linked, unseen for 13 months, with no view,
+ *                no visit and no advertising choice or click id left
+ *                (TrackingService.purgeDevices);
  *   (liveNetworks, careLabels, packingPhotos, emailPurge, wornEnded, as above)
  *   sizes        once a Paris day, the `intelligence sizes` log line: the bytes
  *                of the lot's growing tables (the 50 MB backup watch, §8).
@@ -754,6 +784,7 @@ export function startHousekeeping(
       houseMoments: 0,
       vaults: 0,
       acquisitionConversions: 0,
+      adsEnqueue: 0,
       viewStats: 0,
       viewMonths: 0,
       acquisitionDaily: 0,
@@ -764,6 +795,7 @@ export function startHousekeeping(
       viewPurge: 0,
       acquisitionPurge: 0,
       wishHistory: 0,
+      adsPurge: 0,
       devicePurge: 0,
       liveNetworks: 0,
       careLabels: 0,
@@ -801,6 +833,12 @@ export function startHousekeeping(
     await job('acquisitionConversions', async () => {
       const r = await ctx.services.acquisition.recordConversions(ctx.clock());
       return r.written + r.caughtUp;
+    });
+    // Right after them, only while the console's switch is on (plan M4 §3.2, K27): the conversions written and the orders
+    // paid since the last pass judged, each platform's event QUEUED or SKIPPED (services/ads.ts).
+    await job('adsEnqueue', async () => {
+      const r = await ctx.services.ads.enqueue(ctx.clock());
+      return r.queued + r.skipped;
     });
     // The lot's morning window (plan CUSTOMER INTELLIGENCE §3.0 (f)): the views' days and months, then YOUR WISHLIST's
     // months, each counted before its purge.
@@ -842,6 +880,9 @@ export function startHousekeeping(
     if (visitsSummarised) await job('acquisitionPurge', () => ctx.services.acquisition.purge(ctx.clock()));
     // A pass where the months failed purges no wish: none leaves before its month is counted.
     if (wishesCounted) await job('wishHistory', () => purgeWishHistory(ctx.db, ctx.clock()));
+    // Every pass (plan M4 §3.2, K27): the ad events 90 days after they settled, the click ids 90 days after the click, a
+    // device's advertising choices made signed out after 13 months; before the devices, which keep any choice or click.
+    await job('adsPurge', () => ctx.services.ads.purge(ctx.clock()));
     // After both purges: a device a view or a visit still names is kept. A pass where a count failed purges no device.
     if (viewsCounted && visitsSummarised) await job('devicePurge', () => ctx.services.tracking.purgeDevices(ctx.clock()));
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));

@@ -16,6 +16,9 @@
  *  - `google_action_signup`, `google_action_draw_entry`, `google_action_live_entry`, `google_action_paid_order`: the
  *    Google Ads conversion action of each act, as its resource name (`customers/<id>/conversionActions/<id>`); NULL:
  *    not named;
+ *  - `enqueued_until`: the sender's watermark (services/ads.ts AdsService.enqueue): the conversions written and the orders
+ *    paid up to it were judged; set to the switch's time at each switch on (nothing done while off is ever queued) and
+ *    moved by each pass; NULL until the first switch on;
  *  - `updated_by` (the ADMIN; NULL for a script) and `updated_at` (stamped by `orbes_touch_updated_at`).
  *
  * `ads_channel_platforms`: a link channel (`link_channels`, 0043) mapped to a platform, META, TIKTOK or GOOGLE (A3: an act
@@ -93,6 +96,7 @@ export const UP: readonly string[] = [
      ${googleAction('draw_entry')},
      ${googleAction('live_entry')},
      ${googleAction('paid_order')},
+     enqueued_until         timestamptz NULL,
      updated_by             uuid        NULL CONSTRAINT ads_settings_updated_by_fkey REFERENCES admin_users (id) ON DELETE RESTRICT,
      updated_at             timestamptz NOT NULL DEFAULT now(),
      -- On only from a first switch on; a switch with its time; never before the first one.

@@ -15,7 +15,8 @@
  * sentinel fails, so it never passes on an empty house.
  *
  * Then it reads, as the collector:
- *  - every GET of routes/account.ts, public.ts, club.ts, live.ts, messages.ts and ownership.ts, and the lot's /api/v1
+ *  - every GET of routes/account.ts, public.ts, club.ts, live.ts, messages.ts, ownership.ts and consent.ts (lot M4:
+ *    the advertising choice), and the lot's /api/v1
  *    routes (GET /api/v1/account/sign-up, /profile, /wishlist; the replies of PUT /api/v1/account/profile and PUT
  *    /api/v1/account/wishlist/:slug; POST /api/v1/seen; GET /go/:code). The route files are read, so a GET added to them
  *    without being read here fails the sentinel; the few left out are named with their reason (a PDF, a stored photograph,
@@ -61,8 +62,8 @@ import { createLiveRelease, holdPieces, liveFixtureOn } from '../support/live.js
 import { openSse } from '../support/sse.js';
 
 const ROUTES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'server', 'routes');
-/** The collector's route files (§3.6 C.9) and the lot's (acquisition.ts: /go/:code). */
-const COLLECTOR_FILES = ['account.ts', 'public.ts', 'club.ts', 'live.ts', 'messages.ts', 'ownership.ts', 'acquisition.ts'] as const;
+/** The collector's route files (§3.6 C.9), the lot's (acquisition.ts: /go/:code) and lot M4's (consent.ts: the banner's choice). */
+const COLLECTOR_FILES = ['account.ts', 'public.ts', 'club.ts', 'live.ts', 'messages.ts', 'ownership.ts', 'acquisition.ts', 'consent.ts'] as const;
 
 /** The GETs not read here, each with why (none of them carries what staff hold). */
 const NOT_READ: Readonly<Record<string, string>> = Object.freeze({
@@ -258,6 +259,9 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       // Lot M1 step M1.17: whether RESET BY EMAIL is offered, and YOUR PROFILE's release notices (409 EMAIL_OFF here).
       '/api/v1/account/reset': '/api/v1/account/reset',
       '/api/v1/account/email-preferences': '/api/v1/account/email-preferences',
+      // Lot M4 (K27): the advertising choice, the banner's and ACCOUNT's (conversions off here: off, and 409 ADS_OFF).
+      '/api/v1/consent': '/api/v1/consent',
+      '/api/v1/account/ads-consent': '/api/v1/account/ads-consent',
       '/api/v1/account/session': '/api/v1/account/session',
       '/api/v1/account/me': '/api/v1/account/me',
       '/api/v1/account/products': '/api/v1/account/products',

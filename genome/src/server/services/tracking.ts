@@ -58,7 +58,8 @@
  *            their few views.
  *   purgeDevices  the housekeeping's job `devicePurge` (§3.3 T.10, after `viewPurge` and `acquisitionPurge`): the devices
  *            never linked, not marked staff, unseen for 13 months, with no row left and no visit left
- *            (`acquisition_touches`, §3.4 A.8), DEVICE_PURGE_MAX a pass, after the buffer is written; their cache
+ *            (`acquisition_touches`, §3.4 A.8) nor advertising choice or click id (`ad_consents`, `ad_clicks`, lot M4),
+ *            DEVICE_PURGE_MAX a pass, after the buffer is written; their cache
  *            entries go with them.
  *   reads    (§3.3 T.8.6, step 3.9) collectorBrowsing, viewsReport, devicesReport, placesReport, collectorsFor,
  *            activityOf, segmentCondition and exportColumns: the console's and the export's readings, written in
@@ -1198,7 +1199,8 @@ export class TrackingService {
    * Job `devicePurge` (§3.3 T.10; the housekeeping runs it after `viewPurge` and `acquisitionPurge`, in the morning
    * window, in a pass whose `viewStats` and `acquisitionDaily` succeeded): the devices never linked (no account, no row in `tracking_device_accounts`), not marked staff (the mark is
    * kept), unseen since the first day the views keep (viewHistoryCutoff), with no row left in `collector_views` and no
-   * visit left in `acquisition_touches` (§3.4 A.8: a visit not purged yet keeps its device), the longest unseen first,
+   * visit left in `acquisition_touches` (§3.4 A.8: a visit not purged yet keeps its device), no advertising choice nor
+   * click id left (lot M4, K27: AdsService.purge erases them first, in their time), the longest unseen first,
    * at most `max` a pass. The buffer is written first, so a device with views or a sight still in memory is kept; a
    * flush put off (the pool waiting) or failed purges nothing this pass. The deleted devices leave the cache. Returns how
    * many were deleted.
@@ -1215,6 +1217,8 @@ export class TrackingService {
            AND NOT EXISTS (SELECT 1 FROM tracking_device_accounts a WHERE a.device_id = d.id)
            AND NOT EXISTS (SELECT 1 FROM collector_views v WHERE v.device_id = d.id)
            AND NOT EXISTS (SELECT 1 FROM acquisition_touches t WHERE t.device_id = d.id)
+           AND NOT EXISTS (SELECT 1 FROM ad_consents c WHERE c.device_id = d.id)
+           AND NOT EXISTS (SELECT 1 FROM ad_clicks k WHERE k.device_id = d.id)
          ORDER BY d.last_seen_at
          LIMIT ${max})
       RETURNING device_hash`.execute(this.db);

@@ -13,7 +13,8 @@
  * founding announcement sent or cancelled, a house moment switched on or off, a house message sent, scheduled or
  * cancelled, THE VAULT's sources set, a vault given to a segment, the ENGRAVING add-on's prices and YOUR ORDERS switch
  * changed, the margin's settings: rates, shipping cost bands, unit costs and allowances, a partner's invoice issued, its
- * payment recorded and an invoiced partner experience cancelled); OPERATOR records the partners, their experiences and
+ * payment recorded and an invoiced partner experience cancelled, the ad platforms' switch, channels, Google actions,
+ * test codes and test event); OPERATOR records the partners, their experiences and
  * their invoices' drafts, and reads the guests' names shared with a partner; every
  * mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
@@ -43,6 +44,7 @@ import { adminFoundingRoutes } from './founding.js';
 import { adminAuthRoutes } from './auth.js';
 import { adminAuditRoutes } from './audit.js';
 import { adminAddonRoutes } from './addons.js';
+import { adminAdsRoutes } from './ads.js';
 import { adminSetRoutes } from './sets.js';
 import { adminBoxRoutes } from './boxes.js';
 import { adminCatalogRoutes } from './catalog.js';
@@ -143,5 +145,6 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminSaleRoutes, deps);
   await app.register(adminSignUpRoutes, deps);
   await app.register(adminLinkRoutes, deps);
+  await app.register(adminAdsRoutes, deps);
   await app.register(adminCollectorRoutes, deps);
 };

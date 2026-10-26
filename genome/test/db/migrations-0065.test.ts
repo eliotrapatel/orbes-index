@@ -103,6 +103,7 @@ function cases(state: { db: () => Db; schemaAt0064: () => Promise<string[] | nul
       'table ads_channel_platforms channel_id uuid NO ',
       'table ads_channel_platforms platform text NO ',
       'table ads_settings enabled boolean NO false',
+      'table ads_settings enqueued_until timestamp with time zone YES ',
       'table ads_settings events_from timestamp with time zone YES ',
       'table ads_settings google_action_draw_entry text YES ',
       'table ads_settings google_action_live_entry text YES ',

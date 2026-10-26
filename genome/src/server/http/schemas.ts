@@ -88,6 +88,12 @@ import {
   VAULT_REWARD_POSITION_MAX,
   MARGIN_COST_MINOR_MAX,
   MARGIN_UNIT_COST_KEYS,
+  AD_CLICK_ID_MAX,
+  AD_CONSENT_CHOICES,
+  AD_EVENT_STATUSES,
+  ADS_GOOGLE_ACTION_PATTERN,
+  ADS_PLATFORMS,
+  ADS_TEST_EVENT_CODE_MAX,
   SHIPMENT_WEIGHT_G_MAX,
   PARTNER_AMOUNT_MINOR_MAX,
   PARTNER_BILLING_ADDRESS_MAX,
@@ -3061,3 +3067,62 @@ export const partnerInvoiceListQuery = z.object({ month: queryOptional(invoiceMo
 
 /** GET /api/admin/partner-invoices.csv: the month's partner CSV for the accountant. */
 export const partnerInvoiceCsvQuery = z.object({ month: invoiceMonth });
+
+// ── The server-side conversions (routes/consent.ts, routes/account.ts, routes/admin/ads.ts; plan M4 §3.2, K27) ──
+
+/** A platform's click id as the address carried it: 1 to AD_CLICK_ID_MAX printable characters, no space. */
+const adClickId = z.string().min(1, 'Required').max(AD_CLICK_ID_MAX, `At most ${AD_CLICK_ID_MAX} characters`).regex(/^[!-~]+$/, 'Printable characters, no space');
+
+/**
+ * POST /api/v1/consent: the banner's choice (GRANTED: ACCEPT, DECLINED: DECLINE) and the click ids the address carried,
+ * by their parameter, kept only with GRANTED (services/ads.ts).
+ */
+export const consentBody = body({
+  choice: z.enum(AD_CONSENT_CHOICES, { message: `Must be one of ${AD_CONSENT_CHOICES.join(', ')}` }),
+  clicks: z
+    .strictObject({ fbclid: adClickId.optional(), ttclid: adClickId.optional(), gclid: adClickId.optional(), gbraid: adClickId.optional(), wbraid: adClickId.optional() })
+    .optional(),
+});
+
+/** PUT /api/v1/account/ads-consent: ACCOUNT's ADVERTISING MEASUREMENT, ON (GRANTED) or OFF (DECLINED). */
+export const adsConsentBody = body({ choice: z.enum(AD_CONSENT_CHOICES, { message: `Must be one of ${AD_CONSENT_CHOICES.join(', ')}` }) });
+
+/** PUT /api/admin/ads/switch: on or off, and the typed phrase (SWITCH ON / SWITCH OFF; AdsService checks it). */
+export const adsSwitchBody = body({ on: z.boolean(), phrase: z.string().max(40, 'At most 40 characters') });
+
+/** A link channel in the path (/api/admin/ads/channels/:channelId). */
+export const adsChannelParams = z.object({ channelId: uuid });
+
+/** PUT /api/admin/ads/channels/:channelId: the platforms the channel maps to (none: unmapped). */
+export const adsChannelBody = body({ platforms: z.array(z.enum(ADS_PLATFORMS, { message: `Must be one of ${ADS_PLATFORMS.join(', ')}` })).max(ADS_PLATFORMS.length, `At most ${ADS_PLATFORMS.length} platforms`) });
+
+const adsGoogleAction = z.preprocess(
+  emptyToNull,
+  z.string().trim().max(80, 'At most 80 characters').regex(ADS_GOOGLE_ACTION_PATTERN, 'Must read customers/<id>/conversionActions/<id>').nullable().optional(),
+);
+
+/** PUT /api/admin/ads/google-actions: each act's Google Ads conversion action ('' or null: not named); at least one. */
+export const adsGoogleActionsBody = body({ signup: adsGoogleAction, drawEntry: adsGoogleAction, liveEntry: adsGoogleAction, paidOrder: adsGoogleAction }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one conversion action',
+);
+
+const adsTestCode = z.preprocess(emptyToNull, text(ADS_TEST_EVENT_CODE_MAX).nullable().optional());
+
+/** PUT /api/admin/ads/test-codes: Meta's and TikTok's test event codes ('' or null: none); at least one. */
+export const adsTestCodesBody = body({ meta: adsTestCode, tiktok: adsTestCode }).refine((b) => b.meta !== undefined || b.tiktok !== undefined, 'Send at least one test code');
+
+const adsPlatform = z
+  .string()
+  .trim()
+  .transform((v) => v.toUpperCase())
+  .pipe(z.enum(ADS_PLATFORMS, { message: `Must be one of ${ADS_PLATFORMS.join(', ')}` }));
+
+/** A platform in the path (/api/admin/ads/test/:platform), any case. */
+export const adsPlatformParams = z.object({ platform: adsPlatform });
+
+/** GET /api/admin/ads/events: by status and platform. */
+export const adsEventsQuery = z.object({
+  status: queryOptional(z.enum(AD_EVENT_STATUSES, { message: `Must be one of ${AD_EVENT_STATUSES.join(', ')}` })),
+  platform: queryOptional(adsPlatform),
+});

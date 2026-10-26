@@ -23,7 +23,7 @@ export interface AdEvent {
   /** `orbes-<conversion id>` (adEventId). */
   id: string;
   kind: AdEventKind;
-  /** When the act happened: the conversion's time. */
+  /** When the act happened: the conversion's time; a paid order's, its payment (services/ads.ts). */
   at: Date;
   /** SHA-256 (hex) of the account's email, trimmed and in lower case (hashEmail). */
   emailSha256: string;
