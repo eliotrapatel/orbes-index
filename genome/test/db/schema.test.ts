@@ -1767,6 +1767,64 @@ describe('schema', () => {
     for (const list of [S.ORDER_CHANNELS, S.TIER_GRANT_KINDS, S.ORDER_ADDON_ADDED_BY] as const) expect(list.at(-1)).toBe('VAULT');
   });
 
+  it('margin settings (0063): every bound is schema.ts\'s, the unit costs\' keys the pouch, the card, THE VAULT CARD, a care service and CLAIM_ with each of WARRANTY_CLAIM_OUTCOMES; the mirror at work: a euro rate read as its decimal text, a shipping cost band per country and one for ALL OTHER COUNTRIES, a unit cost, a category\'s allowance', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    expect(await def('currency_rates', 'currency_rates_eur_rate_check')).toContain(`<= (${S.CURRENCY_RATE_MAX})::numeric`);
+    expect(await def('currency_rates', 'currency_rates_not_eur')).toBe(`CHECK ((currency <> '${S.MARGIN_CURRENCY}'::text))`);
+    expect(
+      (await sql<{ scale: number }>`SELECT numeric_scale AS scale FROM information_schema.columns WHERE table_name = 'currency_rates' AND column_name = 'eur_rate'`.execute(t.db)).rows[0].scale,
+    ).toBe(S.CURRENCY_RATE_DECIMALS);
+    expect(await def('shipping_cost_rates', 'shipping_cost_rates_max_weight_g_check')).toContain(`<= ${S.SHIPMENT_WEIGHT_G_MAX}`);
+    expect(await def('shipping_cost_rates', 'shipping_cost_rates_cost_minor_check')).toContain(`<= ${S.MARGIN_COST_MINOR_MAX}`);
+    expect(await def('margin_unit_costs', 'margin_unit_costs_cost_minor_check')).toContain(`<= ${S.MARGIN_COST_MINOR_MAX}`);
+    expect(await def('category_allowances', 'category_allowances_allowance_bp_check')).toContain(`<= ${S.ALLOWANCE_BP_MAX}`);
+    // The unit costs' keys: the CHECK's, THE VAULT CARD's (D61) among them, and one per warranty claim outcome, in its order.
+    expect(await checkValues(t.db, 'margin_unit_costs', 'key')).toEqual(sorted(S.MARGIN_UNIT_COST_KEYS));
+    expect(S.MARGIN_UNIT_COST_KEYS).toEqual(['POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE', ...S.WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}`)]);
+
+    const { category } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'margin-s0063@orbes.test', email_normalized: 'margin-s0063@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    // A rate written as a number or a string, read as its decimal text with six decimals.
+    expect(await t.db.insertInto('currency_rates').values({ currency: 'GBP', eur_rate: 1.15, updated_by: admin.id }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      currency: 'GBP', eur_rate: '1.150000', updated_by: admin.id, updated_at: expect.any(Date),
+    });
+    expect(await t.db.insertInto('currency_rates').values({ currency: 'USD', eur_rate: '0.921234' }).returning(['eur_rate', 'updated_by']).executeTakeFirstOrThrow()).toEqual({ eur_rate: '0.921234', updated_by: null });
+    await expect(t.db.insertInto('currency_rates').values({ currency: 'EUR', eur_rate: 1 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'currency_rates_not_eur'));
+    // A band for a country and one for ALL OTHER COUNTRIES at the same limit; the same twice refused.
+    const bands = await t.db
+      .insertInto('shipping_cost_rates')
+      .values([
+        { country: 'FR', max_weight_g: 500, cost_minor: 690, currency: 'EUR', updated_by: admin.id },
+        { country: null, max_weight_g: 500, cost_minor: 1290, currency: 'EUR' },
+      ])
+      .returningAll()
+      .execute();
+    expect(bands).toEqual([
+      { id: expect.any(String), country: 'FR', max_weight_g: 500, cost_minor: 690, currency: 'EUR', updated_by: admin.id, updated_at: expect.any(Date) },
+      { id: expect.any(String), country: null, max_weight_g: 500, cost_minor: 1290, currency: 'EUR', updated_by: null, updated_at: expect.any(Date) },
+    ]);
+    await expect(t.db.insertInto('shipping_cost_rates').values({ country: null, max_weight_g: 500, cost_minor: 1, currency: 'EUR' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'shipping_cost_rates_band_key'));
+    // A unit cost (THE VAULT CARD's, D61) and an allowance.
+    expect(await t.db.insertInto('margin_unit_costs').values({ key: 'CLAIM_REPAIR', cost_minor: 2500, currency: 'EUR', updated_by: admin.id }).returning(['key', 'cost_minor', 'currency']).executeTakeFirstOrThrow()).toEqual({
+      key: 'CLAIM_REPAIR', cost_minor: 2500, currency: 'EUR',
+    });
+    expect(await t.db.insertInto('margin_unit_costs').values({ key: 'VAULT_CARD', cost_minor: 45, currency: 'GBP' }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      key: 'VAULT_CARD', cost_minor: 45, currency: 'GBP', updated_by: null, updated_at: expect.any(Date),
+    });
+    expect(await t.db.insertInto('category_allowances').values({ category_id: category.id, allowance_bp: 350 }).returningAll().executeTakeFirstOrThrow()).toEqual({
+      category_id: category.id, allowance_bp: 350, updated_by: null, updated_at: expect.any(Date),
+    });
+    await expect(sql`UPDATE currency_rates SET currency = 'CHF' WHERE currency = 'GBP'`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+    // Cleared: the rows deleted (absent rows read as not set).
+    await t.db.deleteFrom('currency_rates').execute();
+    await t.db.deleteFrom('shipping_cost_rates').execute();
+    await t.db.deleteFrom('margin_unit_costs').execute();
+    await t.db.deleteFrom('category_allowances').execute();
+    await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
+  });
+
   it('sets (0057): every bound is schema.ts\'s; the mirror at work: a set of two models, its draw with sizes per piece, an entry\'s size per piece, a set sale with one order per piece, a grouped return', async () => {
     const def = async (table: string, constraint: string) =>
       (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;

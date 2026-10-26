@@ -419,6 +419,22 @@ export const SET_PIECES_MAX = 4;
 export const SET_PRICE_MINOR_MAX = 100_000_000;
 export const DROP_SIZE_POSITION_MAX = 96;
 
+/**
+ * The margin's settings (currency_rates, shipping_cost_rates, margin_unit_costs, category_allowances, migration 0063,
+ * macro scope K43 N1 and N2, D61): a currency's euro rate, above 0 and at most 100 000, six decimals, EUR never set; a
+ * shipping cost band's upper limit, a parcel's weight at most; a band's and a unit cost's amount, at most; an allowance in
+ * hundredths of a percent (100 %, at most); the unit costs' keys: the pouch, the card, THE VAULT CARD, a PRIVATE CARE
+ * service and each warranty claim outcome.
+ */
+export const CURRENCY_RATE_MAX = 100_000;
+export const CURRENCY_RATE_DECIMALS = 6;
+export const SHIPMENT_WEIGHT_G_MAX = 100_000;
+export const MARGIN_COST_MINOR_MAX = 100_000_000;
+export const ALLOWANCE_BP_MAX = 10_000;
+export const MARGIN_CURRENCY = 'EUR';
+export const MARGIN_UNIT_COST_KEYS = ['POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE', ...WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}` as const)] as const;
+export type MarginUnitCostKey = (typeof MARGIN_UNIT_COST_KEYS)[number];
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

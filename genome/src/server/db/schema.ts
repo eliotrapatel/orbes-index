@@ -869,6 +869,30 @@ export const VAULT_GIFT_DAYS = 30;
 /** A credit to give's one-time code, stored as its HMAC-SHA256 only (vault_gifts.code_hash). */
 export const VAULT_GIFT_CODE_HASH_BYTES = 32;
 
+/**
+ * The margin's settings (migration 0063, macro scope K43 N1 and N2; lot M4 plan §1.2): a currency's euro rate, above 0
+ * and at most CURRENCY_RATE_MAX, with CURRENCY_RATE_DECIMALS decimals (numeric(14,6)); EUR is 1 and never set
+ * (`currency_rates_not_eur`). A shipping cost band's upper limit is a parcel's weight at most (SHIPMENT_WEIGHT_G_MAX); a
+ * band's and a unit cost's amount at most MARGIN_COST_MINOR_MAX minor units; a category's returns and claims allowance in
+ * hundredths of a percent, 0 to ALLOWANCE_BP_MAX (100 %).
+ */
+export const CURRENCY_RATE_MAX = 100_000;
+export const CURRENCY_RATE_DECIMALS = 6;
+export const MARGIN_COST_MINOR_MAX = 100_000_000;
+export const ALLOWANCE_BP_MAX = 10_000;
+/** The currency every margin figure is in, never given a rate (N2). */
+export const MARGIN_CURRENCY = 'EUR';
+/**
+ * The owner's unit costs (margin_unit_costs.key, migration 0063, N1 and D61): the pouch and the card (per piece), THE
+ * VAULT CARD (per card packed, THE VAULT's cost), one PRIVATE CARE service, and what each warranty claim outcome costs
+ * (CLAIM_ and each of WARRANTY_CLAIM_OUTCOMES, in its order).
+ */
+export const MARGIN_UNIT_COST_KEYS = [
+  'POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE',
+  ...WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}` as const),
+] as const;
+export type MarginUnitCostKey = (typeof MARGIN_UNIT_COST_KEYS)[number];
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -2672,6 +2696,62 @@ export interface BoxesTable {
 }
 
 /**
+ * A currency's euro rate (migration 0063, macro scope K43 N2; lot M4 plan §1.2): one unit of `currency` is worth
+ * `eur_rate` euros, applied to every amount in it at reading time, the whole history included. EUR is never set. The
+ * rate is numeric(14,6), read as its decimal text ('1.150000'), written as a string or a number. Deleted when cleared.
+ * The currency never changes; updated_at is stamped on every update.
+ */
+export interface CurrencyRatesTable {
+  currency: ColumnType<string, string, never>; // ^[A-Z]{3}$, never 'EUR'
+  eur_rate: ColumnType<string, string | number, string | number>; // > 0, <= CURRENCY_RATE_MAX
+  /** admin_users.id of the ADMIN who set it last; NULL for a script. */
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A band of the outbound shipping cost table (migration 0063, K43 N1): what ORBES pays the carrier for a parcel of
+ * `country` (NULL: ALL OTHER COUNTRIES) weighing up to `max_weight_g`; a parcel takes the smallest band that holds its
+ * weight. One per country (or ALL OTHER COUNTRIES) and limit (`shipping_cost_rates_band_key`). Never a buyer's price
+ * (`shipping_rates`). Its id never changes; updated_at is stamped on every update.
+ */
+export interface ShippingCostRatesTable {
+  id: Generated<string>;
+  country: ColumnType<string | null, string | null | undefined, string | null>; // ^[A-Z]{2}$; NULL: ALL OTHER COUNTRIES
+  max_weight_g: number; // 1..SHIPMENT_WEIGHT_G_MAX
+  cost_minor: number; // bigint 0..MARGIN_COST_MINOR_MAX
+  /** An ISO 4217 code (^[A-Z]{3}$). */
+  currency: string;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * An owner's unit cost (migration 0063, K43 N1, D61): the pouch or the card per piece, THE VAULT CARD per card packed,
+ * one PRIVATE CARE service, or a warranty claim's outcome (MARGIN_UNIT_COST_KEYS). Deleted when cleared. The key never
+ * changes.
+ */
+export interface MarginUnitCostsTable {
+  key: ColumnType<MarginUnitCostKey, MarginUnitCostKey, never>;
+  cost_minor: number; // bigint 0..MARGIN_COST_MINOR_MAX
+  /** An ISO 4217 code (^[A-Z]{3}$). */
+  currency: string;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A category's returns and claims allowance (migration 0063, K43 N1): `allowance_bp` hundredths of a percent of an
+ * order's revenue (0..ALLOWANCE_BP_MAX). Deleted when cleared. The category never changes.
+ */
+export interface CategoryAllowancesTable {
+  category_id: ColumnType<number, number, never>; // categories.id
+  allowance_bp: number; // 0..ALLOWANCE_BP_MAX
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
  * An add-on (migration 0056, macro scope K48 D1; lot M3 plan §4.1): a catalogue item with real stock, sold with a piece,
  * its name (1..40, unique whatever the case, as the collector reads it) and line (1..120), its supplier and weight
  * (1..30 000 g), the order it is offered in, `active` (set aside when false, never deleted) and its Shopify product (S5).
@@ -3801,6 +3881,10 @@ export interface Database {
   order_alert_settings: OrderAlertSettingsTable;
   club_program_settings: ClubProgramSettingsTable;
   shipping_rates: ShippingRatesTable;
+  currency_rates: CurrencyRatesTable;
+  shipping_cost_rates: ShippingCostRatesTable;
+  margin_unit_costs: MarginUnitCostsTable;
+  category_allowances: CategoryAllowancesTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;

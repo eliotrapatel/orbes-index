@@ -30,6 +30,8 @@ import { createAccount, createLiveRelease, liveFixture } from '../support/live.j
 
 const BEFORE = '0061_the_vault';
 const NAME = '0062_vault_rewards';
+/** The migration after it (lot M4, step M4.1: the margin's settings), taken down first and applied again with it. */
+const LATER = '0063_margin';
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -53,7 +55,7 @@ async function guardOf(db: Kysely<any>): Promise<string> {
   return (await sql<{ src: string }>`SELECT prosrc AS src FROM pg_proc WHERE proname = 'orbes_vaults_guard'`.execute(db)).rows[0]!.src;
 }
 
-/** Down to 0061 (0062 reverted). */
+/** Down to 0061 (0063, then 0062, reverted). */
 async function downTo0061(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -105,6 +107,10 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
     const latest = await snapshotOf(db());
     const latestGuard = await guardOf(db());
     expect(latestGuard).toContain('offer_until');
+    // 0063 down first: the schema 0062 left, which this case reads.
+    const rs = await createMigrator(db()).migrateTo(NAME);
+    if (rs.error) throw rs.error;
+    const at0062 = await snapshotOf(db());
     expect(await downTo0061(db())).toEqual([NAME]);
     const without = await snapshotOf(db());
     expect(without.filter((o) => /vault_gifts|offer_until|offer_used_at|claim_by|usable_while_no_piece/.test(o))).toEqual([]);
@@ -115,7 +121,7 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
       expect(await guardOf(db())).toEqual(at0061.guard);
     }
     // What 0062 added beside its own table: its columns on the four systems that deliver a reward and on vaults.
-    const added = latest.filter((o) => !without.includes(o));
+    const added = at0062.filter((o) => !without.includes(o));
     expect(added.filter((o) => o.startsWith('table ') && !o.startsWith('table vault_gifts ')).sort()).toEqual([
       'table house_guarantees vault_id uuid YES ',
       'table order_addon_items vault_id uuid YES ',
@@ -159,7 +165,7 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
       'vaults vaults_offer',
       'vaults vaults_outcome',
     ]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
     expect(await snapshotOf(db())).toEqual(latest);
     expect(await guardOf(db())).toEqual(latestGuard);
   });
@@ -367,7 +373,7 @@ function cases(state: { db: () => Db; schemaAt0061: () => Promise<{ schema: stri
     await expect(downTo0061(db())).rejects.toThrow(
       `migration 0062_vault_rewards cannot be rolled back: ${counts[0]} vault credits, ${counts[1]} vault orders, ${counts[2]} LIVE guarantees, ${counts[3]} vault add-on units, ${counts[4]} credits to give and ${counts[5]} vault offers exist`,
     );
-    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(NAME);
+    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(LATER);
   });
 }
 

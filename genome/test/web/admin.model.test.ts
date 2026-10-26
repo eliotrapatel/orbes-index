@@ -510,6 +510,10 @@ describe('admin enums mirror the server', () => {
     // THE SET's bounds (macro scope K44, migration 0057), as the server holds them.
     for (const name of ['SET_NAME_MAX', 'SET_PIECES_MIN', 'SET_PIECES_MAX', 'SET_PRICE_MINOR_MAX', 'DROP_SIZE_POSITION_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect(web.SET_CODE_PATTERN.source).toBe(serverSchema.SET_CODE_PATTERN.source);
+    // The margin's settings (macro scope K43, migration 0063): a rate's, a band's, a cost's and an allowance's bounds, the
+    // margin's currency and the unit costs' keys (THE VAULT CARD among them, D61), as the server holds them.
+    for (const name of ['CURRENCY_RATE_MAX', 'CURRENCY_RATE_DECIMALS', 'SHIPMENT_WEIGHT_G_MAX', 'MARGIN_COST_MINOR_MAX', 'ALLOWANCE_BP_MAX', 'MARGIN_CURRENCY'] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect([...web.MARGIN_UNIT_COST_KEYS]).toEqual([...serverSchema.MARGIN_UNIT_COST_KEYS]);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

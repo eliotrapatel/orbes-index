@@ -74,6 +74,7 @@ import * as m0059 from './migrations/0059_addons_one_system.js';
 import * as m0060 from './migrations/0060_release_addons_converted.js';
 import * as m0061 from './migrations/0061_the_vault.js';
 import * as m0062 from './migrations/0062_vault_rewards.js';
+import * as m0063 from './migrations/0063_margin.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -140,6 +141,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0060_release_addons_converted': m0060,
   '0061_the_vault': m0061,
   '0062_vault_rewards': m0062,
+  '0063_margin': m0063,
 });
 
 class StaticMigrationProvider implements MigrationProvider {
