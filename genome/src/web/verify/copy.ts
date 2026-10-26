@@ -2756,6 +2756,30 @@ export const RELEASE_NOTICES = Object.freeze({
 });
 
 /**
+ * The advertising choice (lot M4 plan §3.4; macro scope K27 A4), shown only while conversions are switched on: the consent
+ * banner (views/consent-banner.ts), a band at the foot of the screen with ACCEPT and DECLINE of equal weight and the
+ * privacy policy's Advertising measurement, and YOUR PROFILE's ADVERTISING MEASUREMENT under its EMAILS (views/account.ts,
+ * the same on a computer's page). No line names a tap: the phone and the computer read the same words.
+ */
+export const CONSENT = Object.freeze({
+  /** The banner's region, for a screen reader. */
+  region: 'Advertising measurement',
+  text: 'ORBES can tell Meta, TikTok and Google when you join, enter a release or pay an order after one of their ads, to measure those ads. Only if you agree. No advertising cookie.',
+  accept: 'ACCEPT',
+  decline: 'DECLINE',
+  /** The privacy policy's Advertising measurement (web/legal: its `#ads` section). */
+  privacy: 'PRIVACY',
+  privacyHref: '/legal/privacy#ads',
+  saving: 'ONE MOMENT…',
+  failed: 'Your choice could not be saved. Try again.',
+  /** YOUR PROFILE's group, its switch and its line (as EMAIL ME WHEN A RELEASE IS ANNOUNCED). */
+  group: 'ADVERTISING',
+  label: 'ADVERTISING MEASUREMENT',
+  hint: 'ORBES tells the ad platform that brought you when you join, enter or pay. Turn it off at any time.',
+  rowFailed: 'Your choice could not be saved just now.',
+});
+
+/**
  * The house messages' words (macro scope D24 M1; lot M2 plan §1.2, step M2.2): each moment's default title and words,
  * shared with the server, which renders and stores them at delivery (src/shared/house-words.ts), so every collector word
  * still lives here.

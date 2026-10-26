@@ -1167,6 +1167,10 @@ body.nocturne .pieces__empty {
   .n-story__open.is-rising {
     animation-name: n-story-fade;
   }
+  /* The consent banner (lot M4) is there at once. */
+  .n-consent {
+    animation: none;
+  }
 }
 
 /* Folded (C16), the sentence is the row's second line: 4 px under the question, as `.acc .sm`. */
@@ -4334,6 +4338,37 @@ body.nocturne[data-screen="live"] {
 
 .n-profile__notices-error {
   margin-top: 10px;
+}
+
+/* ── The consent banner (lot M4 plan §3.4; K27 A4), only while conversions are switched on and no choice is held: a band
+   at the foot of the screen, NOCTURNE's ground and a hairline above, the words in ivory at reading size and PRIVACY
+   after them, ACCEPT and DECLINE of equal weight; the SCAN ring stays over its foot. Never modal; no motion but a fade
+   (none when motion is reduced, below). In English, the browser's hyphenation never applied (`lang`, hyphens manual). ── */
+.n-consent {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 19;
+  max-width: var(--n-column);
+  margin: 0 auto;
+  padding: 20px 22px calc(var(--n-foot) + var(--safe-bottom) - 2px);
+  border-top: 1px solid var(--vault-hairline-strong);
+  background: var(--vault-ground);
+  animation: n-story-fade 240ms ease-out both;
+}
+
+.n-consent[hidden] {
+  display: none;
+}
+
+.n-consent__side {
+  margin-top: 16px;
+}
+
+/* The page's end scrolls into view above the band (its height measured: views/consent-banner.ts). */
+body.nocturne.n-consent-on .n-column {
+  padding-bottom: max(calc(var(--n-foot) + var(--safe-bottom)), var(--n-consent-h, 0px));
 }
 
 /* INSTAGRAM: a fixed @ before the username, on the field's line. */

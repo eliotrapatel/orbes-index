@@ -126,6 +126,10 @@
  *                     PALLADIUM's as THE PROGRAM says; four PALLADIUM collectors: Camille Durand, YES, her name shared;
  *                     Inès Laurent, YES to both, her name not shared; Léo, YES, no last name (the number of guests only);
  *                     Hugo Marchand, not answered. No other stage holds a partner
+ *   ads               the full story, then conversions switched on (lot M4, step M4.13, K27 A4; seedAds): the switch row
+ *                     on since NOW (no platform's keys: nothing is ever sent), so the consent banner shows to whoever holds
+ *                     no choice (you, a visitor); two PALLADIUM collectors who chose in YOUR PROFILE: Margaux Lefèvre,
+ *                     ADVERTISING MEASUREMENT on, and Théo Bernard, off. Every other stage keeps conversions off
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
  */
@@ -185,7 +189,8 @@ export type DemoVariant =
   | 'set'
   | 'set-live'
   | 'vault'
-  | 'partner';
+  | 'partner'
+  | 'ads';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -223,6 +228,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'set-live',
   'vault',
   'partner',
+  'ads',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -328,7 +334,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
   // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
-  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live', 'partner'] as const;
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live', 'partner', 'ads'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
   // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons); THE VAULT's (lot
   // Q3, step Q3.10) the live story too, then its own after the deployment (seedVault).
@@ -367,6 +373,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
       if (variant === 'set') await seedSet(w);
       if (variant === 'set-live') await seedSetLive(w);
       if (variant === 'partner') await seedPartner(w);
+      if (variant === 'ads') await seedAds(w);
     }
   });
   // THE VAULT's stage (lot Q3, step Q3.10): its vaults given after the deployment, as in production.
@@ -3028,4 +3035,28 @@ async function seedPartner(w: World): Promise<void> {
   await circle.rsvp(a.partnerOff!.id, main.id, 'YES', a.partnerOff!.actor);
   await circle.rsvp(a.partnerOff!.id, second.id, 'YES', a.partnerOff!.actor);
   await circle.rsvp(a.partnerNoName!.id, main.id, 'YES', a.partnerNoName!.actor);
+}
+
+/**
+ * The stage `ads` (lot M4, step M4.13; K27 A4): after the full story, conversions switched on as the console's SWITCH ON
+ * writes it (the switch row, events from the switch's time), with no platform's keys: the server sends nothing, its
+ * sender never started. The banner shows to whoever holds no choice (you, a visitor). Two PALLADIUM collectors (ten
+ * pieces each) chose in YOUR PROFILE: adsOn (Margaux Lefèvre) turned ADVERTISING MEASUREMENT on, adsOff (Théo Bernard)
+ * off. No other stage switches conversions on.
+ */
+async function seedAds(w: World): Promise<void> {
+  const { ctx, admin, clock } = w;
+  clock.set(at('2026-10-05T08:00:00Z'));
+  const now = clock.now();
+  await ctx.db.insertInto('ads_settings').values({ id: 1, enabled: true, events_from: now, switched_at: now, switched_by: admin.id, enqueued_until: now, updated_by: admin.id }).execute();
+  const chosen: readonly { key: string; email: string; first: string; last: string; choice: 'GRANTED' | 'DECLINED' }[] = [
+    { key: 'adsOn', email: 'm.lefevre@example.com', first: 'Margaux', last: 'Lefèvre', choice: 'GRANTED' },
+    { key: 'adsOff', email: 't.bernard@example.com', first: 'Théo', last: 'Bernard', choice: 'DECLINED' },
+  ];
+  clock.set(at('2026-10-05T09:00:00Z'));
+  for (const c of chosen) {
+    const a = await account(w, c.key, c.email, 10);
+    await ctx.db.insertInto('account_profiles').values({ account_id: a.id, first_name: c.first, last_name: c.last }).execute();
+    await ctx.services.ads.choose({ deviceId: null, accountId: a.id, choice: c.choice, source: 'ACCOUNT', userAgent: c.choice === 'GRANTED' ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' : null });
+  }
 }

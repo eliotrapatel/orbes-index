@@ -141,6 +141,20 @@ export interface EmailPreferences {
   changedAt: string | null;
 }
 
+/** A collector's advertising choice (lot M4 plan §3.3, K27 A4): GRANTED (ACCEPT, ON) or DECLINED (DECLINE, OFF). */
+export type AdsChoice = 'GRANTED' | 'DECLINED';
+
+/**
+ * The advertising choice as the server holds it (GET and POST /api/v1/consent, GET and PUT /api/v1/account/ads-consent):
+ * whether conversions are switched on, the choice held (the account's when signed in, else the device's; null: none, the
+ * banner shows) and the advertising text's version. Off: nothing more is shown or read.
+ */
+export interface AdsConsentState {
+  on: boolean;
+  choice: AdsChoice | null;
+  textVersion: string;
+}
+
 /** What a STOP THESE EMAILS link stops (lot M1, E1 and E2; GET /api/v1/email/unsubscribe), null for a link the server does not recognise. */
 export type UnsubscribeKind = 'FOUNDING_ANNOUNCEMENT' | 'RELEASE_NOTICE';
 

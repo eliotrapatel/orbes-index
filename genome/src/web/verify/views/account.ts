@@ -75,7 +75,8 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
 import { countryName } from '../../../shared/countries.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, FROM_ORBES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, VAULT, WISHLIST } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, CONSENT, FROM_ORBES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, VAULT, WISHLIST } from '../copy.js';
+import { adsConsent } from '../consent.js';
 import { CLUB_PATH } from '../club-model.js';
 import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
@@ -150,6 +151,8 @@ export interface AccountSheetDeps {
     | 'vaultsWaiting'
     | 'emailPreferences'
     | 'setReleaseNotices'
+    | 'accountAdsConsent'
+    | 'setAccountAdsConsent'
   >;
   session: SessionStore;
   sound: SoundSwitch;
@@ -274,6 +277,13 @@ export class AccountSheet {
    */
   protected notices: { on: boolean; error: string | null } | null = null;
   protected noticesGen = 0;
+  /**
+   * ADVERTISING MEASUREMENT (lot M4 plan §3.4; K27 A4), under EMAILS: the choice as read for this opening; null while
+   * unread, unreadable, or while conversions are switched off (409 ADS_OFF): the group is then not drawn. Forgotten as
+   * the sheet closes, as the profile is.
+   */
+  protected ads: { on: boolean; error: string | null } | null = null;
+  protected adsGen = 0;
   /** YOUR WISHLIST's line (3 MODELS, NONE YET), read as the sheet opens; null until read, or unreadable (no line). */
   protected wishCount: string | null = null;
   /** THE VAULT's quiet number (lot Q3 §3.6, D18): how many vaults wait; null when none (or unread: no number). */
@@ -396,6 +406,8 @@ export class AccountSheet {
     this.profileConfirm = false;
     this.noticesGen++;
     this.notices = null;
+    this.adsGen++;
+    this.ads = null;
     this.wishCount = null;
     this.vaultCount = null;
     // The sheet's view ends as it closes; the page under it counts again.
@@ -1037,6 +1049,7 @@ export class AccountSheet {
     // Not read yet (or unreadable): read it before the fields show, ONE MOMENT… meanwhile.
     if (this.profile === null) void this.readProfile();
     if (this.notices === null) void this.readNotices();
+    if (this.ads === null) void this.readAds();
   }
 
   /**
@@ -1100,6 +1113,79 @@ export class AccountSheet {
     } finally {
       if (input.isConnected) {
         input.checked = n.on;
+        input.disabled = false;
+        input.focus({ preventScroll: true });
+      }
+    }
+  }
+
+  /**
+   * ADVERTISING MEASUREMENT, read beside the profile (as the release notices): drawn once read, the focus kept where it
+   * is; not drawn while conversions are switched off (not even asked: the app's own reading says so, consent.ts; the
+   * server's 409 ADS_OFF otherwise) or when it cannot be read.
+   */
+  protected async readAds(): Promise<void> {
+    const gen = ++this.adsGen;
+    await adsConsent.ready;
+    if (gen !== this.adsGen || !adsConsent.on) return;
+    try {
+      const a = await this.deps.api.accountAdsConsent();
+      if (gen !== this.adsGen || !this.isOpen) return;
+      if (!a.on) return;
+      this.ads = { on: a.choice === 'GRANTED', error: null };
+    } catch (e) {
+      this.deps.session.noteError(e);
+      return;
+    }
+    if (this.view !== 'profile' || this.profile === null) return;
+    const key = this.panel.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : undefined;
+    this.showProfile(key ? `[data-key="${key}"]` : undefined);
+  }
+
+  /**
+   * YOUR PROFILE's ADVERTISING: ADVERTISING MEASUREMENT, ON or OFF, a switch saved as it is switched (apart from SAVE),
+   * its line, and the sentence of a switch that could not be saved (the switch back as it was). Shown only while
+   * conversions are switched on.
+   */
+  protected adsGroup(): HTMLElement | null {
+    const a = this.ads;
+    if (!a) return null;
+    const C = CONSENT;
+    const error = h('p', { class: 'n-err n-profile__notices-error n-profile__ads-error', attrs: { role: 'alert', hidden: !a.error }, text: a.error ?? '' });
+    const sw = switchControl({ label: C.label, checked: a.on, onChange: (on) => void this.switchAds(on, sw.input, error) });
+    sw.input.dataset.key = 'profile-ads';
+    sw.input.setAttribute('aria-describedby', 'profile-ads-hint');
+    return this.profileGroup(
+      'profile-group-ads',
+      C.group,
+      h('label', { class: 'n-profile__notices n-profile__ads' }, h('span', { class: 'n-g n-lab n-profile__notices-label', text: C.label }), sw.el),
+      h('p', { class: 'n-sm n-fld__hint', id: 'profile-ads-hint', text: C.hint }),
+      error,
+    );
+  }
+
+  /** The switch saved at once: the choice as the server keeps it (the banner then gone), or the switch back with the sentence. */
+  protected async switchAds(on: boolean, input: HTMLInputElement, error: HTMLElement): Promise<void> {
+    const a = this.ads;
+    if (!a) return;
+    const gen = this.adsGen;
+    input.disabled = true;
+    error.hidden = true;
+    a.error = null;
+    try {
+      const saved = await this.deps.api.setAccountAdsConsent(on ? 'GRANTED' : 'DECLINED');
+      if (gen !== this.adsGen) return;
+      a.on = saved.choice === 'GRANTED';
+      if (saved.choice) adsConsent.chosen(saved.choice);
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.adsGen) return;
+      a.error = CONSENT.rowFailed;
+      error.textContent = a.error;
+      error.hidden = false;
+    } finally {
+      if (input.isConnected) {
+        input.checked = a.on;
         input.disabled = false;
         input.focus({ preventScroll: true });
       }
@@ -1396,6 +1482,7 @@ export class AccountSheet {
         tastes,
         this.profileGroup('profile-group-found', P.groups.found, heard.el, other.el),
         this.noticesGroup(),
+        this.adsGroup(),
         confirmLine,
       ].filter((x): x is HTMLElement => x !== null),
       this.profileConfirm ? P.birthConfirm : P.save,

@@ -777,6 +777,137 @@ const PARTNER_STATES: readonly UiState[] = [
   },
 ];
 
+/** The consent banner (lot M4, step M4.13): its band at the foot of the screen, in its state. */
+const CONSENT_BAND = '.n-consent:not([hidden])';
+/** The banner's POST /api/v1/consent alone (its GET passes): `answer` holds it or answers it. */
+const consentPost = (page: Page, answer: (route: Route) => Promise<void>) =>
+  page.route('**/api/v1/consent', (route) => (route.request().method() === 'POST' ? answer(route) : route.continue()));
+/** NOW drawn, then the banner shown on it. */
+async function bannerOnNow(run: StateRun): Promise<void> {
+  await run.page.locator('.view--now[data-ready]').waitFor({ timeout: 20_000 });
+  await run.page.locator(`${CONSENT_BAND}[data-state="shown"]`).waitFor({ timeout: 20_000 });
+}
+/**
+ * The banner as plan M4 §3.4 draws it: never modal (no dialog, nothing made inert under it), in English whatever the
+ * browser's language, ACCEPT and DECLINE of equal weight (the same size and look), PRIVACY to the privacy policy's
+ * Advertising measurement, at the foot of the window.
+ */
+async function consentBandHolds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const band = document.querySelector<HTMLElement>('.n-consent:not([hidden])');
+    if (!band) return ['no banner'];
+    const problems: string[] = [];
+    if (band.getAttribute('role') === 'dialog' || band.getAttribute('aria-modal') === 'true') problems.push('the banner is modal');
+    if (document.querySelector('.n-column')?.hasAttribute('inert')) problems.push('the page under the banner is inert');
+    if (band.lang !== 'en') problems.push(`the banner's language is «${band.lang}»`);
+    const [a, d] = [...band.querySelectorAll<HTMLButtonElement>('.n-consent__button')];
+    if (!a || !d) return [...problems, 'ACCEPT or DECLINE missing'];
+    const ra = a.getBoundingClientRect();
+    const rd = d.getBoundingClientRect();
+    if (Math.round(ra.width) !== Math.round(rd.width) || Math.round(ra.height) !== Math.round(rd.height) || a.className !== d.className) problems.push('ACCEPT and DECLINE are not of equal weight');
+    if (band.querySelector('a.n-consent__privacy')?.getAttribute('href') !== '/legal/privacy#ads') problems.push('PRIVACY does not lead to /legal/privacy#ads');
+    if (Math.abs(band.getBoundingClientRect().bottom - innerHeight) > 1) problems.push('the banner is not at the foot of the window');
+    return problems;
+  });
+}
+
+/** ACCEPT on the banner. */
+const accept = (run: StateRun) => run.page.locator(CONSENT_BAND).getByRole('button', { name: 'ACCEPT', exact: true }).click();
+/** YOUR PROFILE opened, its ADVERTISING group in view. */
+async function openAdsRow(run: StateRun): Promise<void> {
+  await openProfile(run);
+  const group = run.page.locator(`${ACCT} #profile-group-ads`);
+  await group.waitFor({ timeout: 20_000 });
+  await group.scrollIntoViewIfNeeded();
+}
+
+/**
+ * Conversions switched on (lot M4, step M4.13; K27 A4; plan M4 §3.4, §7) on the stage `ads`: the consent banner on NOW for
+ * an account that holds no choice (shown, in light, ONE MOMENT… while ACCEPT is saved, refused); YOUR PROFILE's ADVERTISING
+ * MEASUREMENT on (also in light), off, and refused. With the switch off (every other stage) none of them shows.
+ */
+const ADS_STATES: readonly UiState[] = [
+  {
+    id: 'ads-banner',
+    title: 'Conversions on, no choice held: the consent banner at the foot of NOW, ACCEPT · DECLINE, PRIVACY',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: you,
+    path: at('/verify'),
+    act: bannerOnNow,
+    ready: `${CONSENT_BAND}[data-state="shown"]`,
+    check: consentBandHolds,
+  },
+  { id: 'ads-banner-light', title: 'The consent banner, in light mode', refs: ['M4 A4'], variant: 'ads', as: you, path: at('/verify'), light: true, act: bannerOnNow, ready: `${CONSENT_BAND}[data-state="shown"]` },
+  {
+    id: 'ads-banner-saving',
+    title: 'ACCEPT pressed, while it is saved: ONE MOMENT…, both buttons held',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: you,
+    path: at('/verify'),
+    // The choice held on its way, never let through (the states after this one read the banner as shown).
+    routes: (page) => consentPost(page, () => new Promise<void>(() => {})),
+    act: async (run) => {
+      await bannerOnNow(run);
+      await accept(run);
+    },
+    ready: `${CONSENT_BAND}[data-state="saving"]`,
+  },
+  {
+    id: 'ads-banner-error',
+    title: 'ACCEPT refused: Your choice could not be saved. Try again., both buttons again',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: you,
+    path: at('/verify'),
+    routes: (page) => consentPost(page, (route) => route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'The service is unavailable.' } } })),
+    act: async (run) => {
+      await bannerOnNow(run);
+      await accept(run);
+    },
+    ready: `${CONSENT_BAND}[data-state="error"]`,
+  },
+  {
+    id: 'ads-account-on',
+    title: 'YOUR PROFILE, conversions on: ADVERTISING, ADVERTISING MEASUREMENT (on) and its line',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: 'adsOn',
+    path: at('/verify'),
+    act: openAdsRow,
+    ready: `${ACCT} .n-profile__ads .n-sw__input:checked`,
+    viewport: true,
+  },
+  { id: 'ads-account-on-light', title: 'ADVERTISING MEASUREMENT (on), in light mode', refs: ['M4 A4'], variant: 'ads', as: 'adsOn', path: at('/verify'), light: true, act: openAdsRow, ready: `${ACCT} .n-profile__ads .n-sw__input:checked`, viewport: true },
+  {
+    id: 'ads-account-off',
+    title: 'YOUR PROFILE, conversions on: ADVERTISING MEASUREMENT (off)',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: 'adsOff',
+    path: at('/verify'),
+    act: openAdsRow,
+    ready: `${ACCT} .n-profile__ads .n-sw__input:not(:checked)`,
+    viewport: true,
+  },
+  {
+    id: 'ads-account-error',
+    title: 'ADVERTISING MEASUREMENT switched on, refused: the switch back off, Your choice could not be saved just now.',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: 'adsOff',
+    path: at('/verify'),
+    routes: (page) => page.route('**/api/v1/account/ads-consent', (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'The service is unavailable.' } } }) : route.continue())),
+    act: async (run) => {
+      await openAdsRow(run);
+      await run.page.locator(`${ACCT} .n-profile__ads`).click();
+    },
+    ready: `${ACCT} .n-profile__ads-error:not([hidden])`,
+    viewport: true,
+  },
+];
+
 /** The states of the phone (and the boutique board's screen): those of the NOCTURNE baseline at c3d25c2. */
 export const PHONE_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
@@ -2597,6 +2728,9 @@ export const PHONE_STATES: readonly UiState[] = [
   // ── THE CIRCLE, an invitation for a partner's experience (lot M4, step M4.8; K49 P2 and P3) on its stage (partner) ──
   ...PARTNER_STATES,
 
+  // ── Conversions switched on (lot M4, step M4.13; K27 A4): the consent banner and ADVERTISING MEASUREMENT (ads) ──
+  ...ADS_STATES,
+
   // ── The legal pages ──
   { id: 'legal-privacy', title: 'The legal pages: PRIVACY', refs: ['C23'], variant: 'full', path: at('/legal/privacy'), ready: '.legal__section' },
   { id: 'legal-terms', title: 'The legal pages: TERMS', refs: ['C23'], variant: 'full', path: at('/legal/terms'), ready: '.legal__section' },
@@ -3899,6 +4033,13 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ),
     onDesk(phoneState('orders-vault-claim'), 1440, { extra: { act: (run) => openOrderPage(run, /MONOLITHE/), ready: '.view--order .n-vault-claim .n-vault-claim__claim' } }),
     onDesk(phoneState('vault-join'), 1440, { extra: { ready: '.view--signin' } }),
+    // ── Conversions switched on (lot M4, step M4.13; K27 A4; Rule-2: the phone's information) on their stage (ads): the
+    // consent banner across the foot of the window (shown, ONE MOMENT…, refused; also in light and at 1024 × 768) and
+    // YOUR PROFILE's page with ADVERTISING MEASUREMENT on (also in light), off and refused. Nothing here writes ──
+    ...desk(1440, 'ads-banner', 'ads-banner-saving', 'ads-banner-error', 'ads-account-on', 'ads-account-off', 'ads-account-error'),
+    onDesk(phoneState('ads-banner-light'), 1440, { light: true, name: 'ads-banner' }),
+    onDesk(phoneState('ads-account-on-light'), 1440, { light: true, name: 'ads-account-on' }),
+    ...desk(1024, 'ads-banner'),
   ],
 });
 

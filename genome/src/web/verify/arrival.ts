@@ -22,6 +22,15 @@
  * The recording is off in an automated browser (seen.ts): its arrival is then never sent. The tab flag is the lot's one
  * value written by script (§3.3 T.9). Location, document, storage and history are parameters, so it is tested with plain
  * stubs (test/web/verify-arrival.test.ts).
+ *
+ * The ad platforms' click ids (lot M4 plan §3.3, K27 A4), apart from the arrival and never sent with it:
+ *   readClicks   reads `fbclid`, `ttclid`, `gclid`, `gbraid` and `wbraid` (CLICK_PARAMS) from the address into memory
+ *                only: nothing is written to storage and the address is left exactly as it is (ARRIVAL_PARAMS and `a`
+ *                unchanged). What happens to them is the advertising choice's (consent.ts): dropped while conversions
+ *                are switched off (the address untouched, today's behaviour); sent with the choice and taken out of the
+ *                address once GRANTED; dropped and taken out once DECLINED; held until the banner's answer otherwise.
+ *   cleanClicks  takes exactly those five out of the address as it stands then (history.replaceState, as the tags: the
+ *                path, the other parameters and the fragment kept byte for byte), nothing rewritten when none is there.
  */
 import type { SeenArrival } from './seen-model.js';
 
@@ -31,6 +40,14 @@ export const ARRIVED_KEY = 'orbes.arrived';
 export const ARRIVAL_PARAMS = ['o', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const;
 /** Where requestIdleCallback is missing: the arrival waits this long after the first screen. */
 export const ARRIVAL_DELAY_MS = 1_500;
+/** The ad platforms' click ids (lot M4 plan §3.3): read into memory only, taken out of the address only once the switch is on and a choice made. */
+export const CLICK_PARAMS = ['fbclid', 'ttclid', 'gclid', 'gbraid', 'wbraid'] as const;
+export type ClickParam = (typeof CLICK_PARAMS)[number];
+/** The click ids an address carried, by their parameter (POST /api/v1/consent's `clicks`). */
+export type AdClicks = Partial<Record<ClickParam, string>>;
+/** A click id the server keeps: 1 to CLICK_ID_MAX printable characters, no space (the server's AD_CLICK_ID_MAX). */
+export const CLICK_ID_MAX = 500;
+const CLICK_ID_RE = /^[!-~]+$/;
 
 /** The app's addresses (the server's arrivalShape `path`). */
 const PATH_RE = /^\/verify(\/[^?#]{0,200})?$/;
@@ -182,6 +199,69 @@ export function readArrival(location: ArrivalLocation, document: ArrivalDocument
     // Never thrown: whatever was read is sent.
   }
   return { arrival, address };
+}
+
+/** The query's parts (no `?`), each kept byte for byte. */
+const partsOf = (search: string): string[] =>
+  String(search ?? '')
+    .replace(/^\?/, '')
+    .split('&')
+    .filter((p) => p !== '');
+
+/** The parameter a query part names, decoded (null: undecodable). */
+const keyOf = (part: string): string | null => {
+  const i = part.indexOf('=');
+  return decode(i < 0 ? part : part.slice(0, i));
+};
+
+/**
+ * The click ids the address carries (their first value each), held in memory by the caller; one the server would refuse
+ * (empty, over CLICK_ID_MAX, a space or a control character) is left out. Reads only: the address is not touched, nothing
+ * is stored. Never thrown.
+ */
+export function readClicks(location: Pick<ArrivalLocation, 'search'>): AdClicks {
+  const clicks: AdClicks = {};
+  try {
+    for (const part of partsOf(location.search)) {
+      const key = keyOf(part);
+      if (key === null || !(CLICK_PARAMS as readonly string[]).includes(key)) continue;
+      const k = key as ClickParam;
+      if (k in clicks) continue;
+      const i = part.indexOf('=');
+      const value = decode(i < 0 ? '' : part.slice(i + 1))?.trim() ?? '';
+      if (value.length >= 1 && value.length <= CLICK_ID_MAX && CLICK_ID_RE.test(value)) clicks[k] = value;
+    }
+  } catch {
+    // Nothing read: nothing held.
+  }
+  return clicks;
+}
+
+/** Whether `clicks` holds any click id. */
+export const hasClicks = (clicks: AdClicks | null): clicks is AdClicks => clicks !== null && Object.keys(clicks).length > 0;
+
+/**
+ * The address without the five click ids (the path, the other parameters and the fragment byte for byte), or null when
+ * it carries none.
+ */
+export function withoutClicks(location: Pick<ArrivalLocation, 'pathname' | 'search' | 'hash'>): string | null {
+  const parts = partsOf(location.search);
+  const kept = parts.filter((p) => {
+    const key = keyOf(p);
+    return key === null || !(CLICK_PARAMS as readonly string[]).includes(key);
+  });
+  if (kept.length === parts.length) return null;
+  return `${String(location.pathname ?? '')}${kept.length ? `?${kept.join('&')}` : ''}${String(location.hash ?? '')}`;
+}
+
+/** The click ids taken out of the address as it stands now (history.replaceState, its entry's state kept); nothing rewritten when none is there. Never thrown. */
+export function cleanClicks(location: Pick<ArrivalLocation, 'pathname' | 'search' | 'hash'>, history: ArrivalHistory): void {
+  try {
+    const address = withoutClicks(location);
+    if (address !== null) history.replaceState(history.state, '', address);
+  } catch {
+    // The address could not be rewritten: the click ids are dropped all the same.
+  }
 }
 
 /** Where the arrival waits for the first screen: the page's own timers and its prerendering. */

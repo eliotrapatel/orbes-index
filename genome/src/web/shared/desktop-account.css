@@ -1375,3 +1375,41 @@
     justify-content: flex-start;
   }
 }
+
+/* ── The consent banner on a computer (lot M4 plan §3.4; K27 A4; views/consent-banner.ts), only while conversions are
+   switched on and no choice is held: a band at the foot of the window across CINEMA's stage, on the page's edges, a
+   hairline above; the words and PRIVACY (34 em at most) on the left at reading size, ACCEPT · DECLINE of equal weight on
+   the right, the line of a choice being saved or refused under them. Never modal: the page scrolls under it, its end
+   above it. ── */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  html:not(.d-touch) body.nocturne .n-consent {
+    max-width: none;
+    padding: var(--d-s6) var(--d-edge);
+  }
+
+  html:not(.d-touch) body.nocturne .n-consent__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--d-s7);
+  }
+
+  html:not(.d-touch) body.nocturne .n-consent__text {
+    max-width: 34em;
+    font-size: var(--d-fs-text);
+  }
+
+  html:not(.d-touch) body.nocturne .n-consent__side {
+    flex: none;
+    width: var(--d-button);
+    margin-top: 0;
+  }
+
+  html:not(.d-touch) body.nocturne .n-consent__line {
+    margin-top: var(--d-s3);
+  }
+
+  html:not(.d-touch) body.nocturne.n-consent-on .n-column {
+    padding-bottom: var(--n-consent-h, 0px);
+  }
+}

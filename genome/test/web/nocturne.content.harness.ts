@@ -340,14 +340,16 @@ const PHONE_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.f
   // The queue of a paced release (macro scope of 2026-10-20, W2, W5, W6; lot M1, step M1.5; the one queue in every state,
   // lot Q1), on its own stage: the room's shard holds its limit of states; THE SET's LIVE RELEASE (lot M3, K44), on its own.
   queue: (s) => s.variant === 'queue' || s.variant === 'set-live',
-  // The emails' screens (lot M1, step M1.19, E1–E3), on their own stage (the emails' channel on), their writes last.
-  email: (s) => s.variant === 'email',
+  // The emails' screens (lot M1, step M1.19, E1–E3), on their own stage (the emails' channel on), their writes last;
+  // then, on theirs, conversions switched on (lot M4, step M4.13, K27 A4: ads): the consent banner, and YOUR PROFILE's
+  // ADVERTISING MEASUREMENT beside its release notices. Nothing of it writes.
+  email: (s) => s.variant === 'email' || s.variant === 'ads',
   // WORN (lot M2, D31), on its own stage: a piece's block in each state (the pieces' shard holds its limit of states);
   // the catalogue add-ons (lot M3, D2), on theirs: the hold, a place held, the salon, YOUR ORDERS and ADD AN ADD-ON.
   worn: (s) => s.variant === 'worn' || s.variant === 'addons',
   // THE VAULT (lot Q3, step Q3.10) on its stage: its door on SOLD OUT for your size and the end page, closed then opened.
   vault: (s) => s.variant === 'vault',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'vault' && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'house' && s.variant !== 'worn' && s.variant !== 'addons' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'set' && s.variant !== 'set-live' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !partner(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'vault' && s.variant !== 'queue' && s.variant !== 'email' && s.variant !== 'ads' && s.variant !== 'house' && s.variant !== 'worn' && s.variant !== 'addons' && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'draw-selected' && s.variant !== 'set' && s.variant !== 'set-live' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !partner(s) && !wishlist(s) && !birthday(s) && !careUsed(s) && !orbesCare(s),
 });
 
 /** A computer's state (desktop: test/support/nocturne-states.ts DESK_STATES), never in a phone's shard. */
