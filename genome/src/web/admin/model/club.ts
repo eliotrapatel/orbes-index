@@ -67,6 +67,8 @@ export const CLUB_TABS = [
   { id: 'circle', label: 'Circle' },
   { id: 'tiers', label: 'Tiers' },
   { id: 'requests', label: 'Requests' },
+  // Lot Q3, step Q3.12 (E12): CLUB > THE VAULT, views/vault.ts.
+  { id: 'vault', label: 'THE VAULT' },
 ] as const;
 export type ClubTab = (typeof CLUB_TABS)[number]['id'];
 

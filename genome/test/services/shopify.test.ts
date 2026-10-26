@@ -21,9 +21,12 @@
  *    another model's product, another size's variant; nothing written when nothing changes;
  *  - the order CSV: the priced orders reserved in a period (UTC days), the piece then each add-on as line items, the
  *    steps as Shopify's statuses and dates, the buyer as billing and shipping, the collector's email (masked as the
- *    caller's view says), no tax, no shipping fee; the period's bounds.
+ *    caller's view says), no tax, no shipping fee; the period's bounds;
+ *  - THE VAULT (lot Q3, step Q3.8; plan §8, S2-S5): a vault-only model never one of the store's sellable lines, its ids
+ *    still pasted back (an unpublished product); a VAULT order exported as any platform order (Source orbes-vault), bought
+ *    under its right to buy at its usual price, a VAULT EDITION won free at 0, PAID once claimed.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
@@ -42,11 +45,12 @@ import {
   shopifyIdOf,
 } from '../../src/server/services/shopify.js';
 import { ensureSku } from '../../src/server/services/stock.js';
+import { VaultService } from '../../src/server/services/vault.js';
 import { createManualClock, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { giveSizes } from '../support/draws.js';
 import { countPiecesIn, packAndShip } from '../support/fulfil.js';
-import { accountOfTier, createAccount, createLiveRelease, createModel, legacyLiveAddons, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, legacyLiveAddons, liveFixtureOn, sizedModel, type LiveFixture } from '../support/live.js';
 
 /**
  * Shopify's product CSV columns as its help center publishes them (« Using CSV files to import and export products »,
@@ -796,5 +800,57 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     ]);
     expect(lines[0]!.Subtotal).toBe('3015.00');
     await ctx.services.addons.setAside(wrap.id, f.admin);
+  });
+
+  it('THE VAULT (lot Q3, §8, S2-S5): a vault-only model is never a sellable line yet takes its ids back; a VAULT order is a platform order, bought under its right to buy at its price, won free at 0', async () => {
+    clock.set('2026-12-12T10:00:00.000Z');
+    const house = (await t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    // Every opening lands on the table's first row above the floor.
+    const opener = new VaultService({ db: t.db, audit: ctx.audit, profiles: ctx.services.profiles, clock: clock.now, random: () => 0, giftKey: new Uint8Array(32).fill(7) });
+    const stocked = async (name: string) => {
+      const id = await sizedModel(t.db, name, ['52']);
+      await price(id, 120_000);
+      const sku = await t.db.selectFrom('skus').select(['id', 'code']).where('model_id', '=', id).executeTakeFirstOrThrow();
+      await ctx.services.stock.adjust({ skuId: sku.id, locationId: house, delta: 2, note: 'Counted.' }, f.admin);
+      return { id, sku };
+    };
+    const only = async (row: Record<string, unknown>) => {
+      for (const r of (await ctx.services.vault.settings()).rewards) if (r.kind !== 'I_WAS_THERE' && r.active) await ctx.services.vault.deactivateReward(r.id, f.admin);
+      await ctx.services.vault.createReward({ oddsIn: 2, quantity: 1_000, ...row }, f.admin);
+    };
+    const opened = async () => {
+      const a = await createAccount(t.db);
+      const v = (await ctx.services.vault.give({ source: 'HOUSE', accountId: a.id, giftId: randomUUID(), givenBy: f.admin.id! })).vaults[0]!;
+      await opener.open(a.id, v.id);
+      return { a, v };
+    };
+
+    // S4/S5: a VAULT EDITION's model is never pushed as sellable; its SKUs still map to a Shopify product (unpublished).
+    const edition = await stocked('ARCANE');
+    expect((await shopify().productCsv('EUR')).body).toContain(edition.sku.code);
+    await t.db.updateTable('models').set({ vault_only: true }).where('id', '=', edition.id).execute();
+    const sealed = records((await shopify().productCsv('EUR')).body);
+    expect(sealed.some((r) => r.SKU === edition.sku.code)).toBe(false);
+    const linked = await shopify().link(edition.id, { productId: '8800000001', variants: [{ size: '52', variantId: '9900000001' }] }, f.admin);
+    expect(linked).toMatchObject({ productId: '8800000001', variants: [expect.objectContaining({ size: '52', variantId: '9900000001' })] });
+
+    // S2: a right to buy is an order of the platform, at its usual price, paid like every platform order.
+    const sold = await stocked('SOLSTICE');
+    await only({ kind: 'PRODUCT', modelId: sold.id, mode: 'RIGHT_TO_BUY' });
+    const buyer = await opened();
+    clock.advance(60_000);
+    const { orderId: bought } = await ctx.services.vault.buy(buyer.a.id, buyer.v.id, { size: '52' });
+    // S3: a VAULT EDITION won free is a platform order at 0 (no checkout), claimed then packed by the platform.
+    await only({ kind: 'VAULT_EDITION', modelId: edition.id, line: 'Made only for the vault, never sold.' });
+    clock.advance(60_000);
+    const winner = await opened();
+    const free = (await t.db.selectFrom('vaults').select('order_id').where('id', '=', winner.v.id).executeTakeFirstOrThrow()).order_id!;
+    clock.advance(60_000);
+    await ctx.services.vault.claim(winner.a.id, free, { address: { address: { name: 'Camille Martin', address: '12 rue de Rivoli\n75004 Paris', country: 'FR', phone: '+33 6 12 34 56 78' } } });
+
+    const rows = records((await shopify().orderCsv({ from: '2026-12-12', to: '2026-12-12' }, asStored)).body);
+    expect(rows.map((r) => r.Name)).toEqual([orderReference(bought), orderReference(free)]);
+    expect(rows[0]).toMatchObject({ Email: buyer.a.email, 'Financial Status': 'pending', 'Lineitem price': '1200.00', 'Lineitem SKU': sold.sku.code, Subtotal: '1200.00', Total: expect.any(String), Id: '', Source: 'orbes-vault' });
+    expect(rows[1]).toMatchObject({ Email: winner.a.email, 'Financial Status': 'paid', 'Lineitem price': '0.00', 'Lineitem SKU': edition.sku.code, Subtotal: '0.00', Shipping: '0.00', Total: '0.00', 'Shipping Name': 'Camille Martin', Id: '', Source: 'orbes-vault' });
   });
 });

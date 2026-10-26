@@ -196,6 +196,19 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
    * (server: OPERATOR). An AUDITOR reads the page, the owners' emails masked.
    */
   reviewWorn: 'OPERATOR',
+  /**
+   * CLUB > THE VAULT (lot Q3, step Q3.12; routes/admin/vault.ts): the house table's rows added, changed, deactivated and
+   * ordered. An AUDITOR reads the tab, the report and a client's vaults.
+   */
+  manageVaultTable: 'OPERATOR',
+  /** THE VAULT's sources: each one's switch, vaults per occasion and cap (D27). */
+  manageVaultSources: 'ADMIN',
+  /** GIVE A VAULT to one collector (from the tab or the client sheet). */
+  giveVault: 'OPERATOR',
+  /** GIVE A VAULT to a segment, one to each member (as the house messages' audience). */
+  giveVaultToSegment: 'ADMIN',
+  /** The amendment of 25 Oct (lot Q3): the ENGRAVING add-on's prices and its YOUR ORDERS switch (routes/admin/addons.ts). */
+  editEngravingPrices: 'ADMIN',
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1, C.9): the counted collectors' figures over a period. */
   readCollectors: 'AUDITOR',
   /** The Collectors page's Export (CSV) (§3.6 C.7): one row per collector with everything held, audited. */

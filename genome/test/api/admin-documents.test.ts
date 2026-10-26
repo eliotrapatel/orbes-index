@@ -14,10 +14,10 @@ describe('admin documents', () => {
   });
   afterAll(() => h?.close());
 
-  it('lists the playbook and the kit', async () => {
+  it('lists the playbook, the kit and THE VAULT CARD', async () => {
     const res = await auditor.get('/api/admin/documents');
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body).documents.map((d: { id: string }) => d.id)).toEqual(['sales-playbook', 'packaging-kit']);
+    expect(JSON.parse(res.body).documents.map((d: { id: string }) => d.id)).toEqual(['sales-playbook', 'packaging-kit', 'vault-card']);
   });
 
   it('serves a document as Markdown', async () => {
@@ -35,6 +35,16 @@ describe('admin documents', () => {
     const png = await auditor.get('/api/admin/documents/assets/admin-02-product.png');
     expect(png.statusCode).toBe(200);
     expect(png.headers['content-type']).toMatch(/^image\/png/);
+    // THE VAULT CARD's print files: PDFs shown inline and named, under the same sandbox.
+    for (const name of ['vault-card-sheet.pdf', 'vault-card-single.pdf']) {
+      const pdf = await auditor.get(`/api/admin/documents/assets/${name}`);
+      expect(pdf.statusCode, name).toBe(200);
+      expect(pdf.headers['content-type']).toBe('application/pdf');
+      expect(pdf.headers['content-disposition']).toBe(`inline; filename="${name}"`);
+      expect(pdf.headers['content-security-policy']).toContain('sandbox');
+      expect(pdf.rawPayload.subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
+    }
+    expect((await auditor.get('/api/admin/documents/vault-card')).statusCode).toBe(200);
     for (const url of ['/api/admin/documents/assets/..%2F..%2Fconfig.ts', '/api/admin/documents/assets/SALES-PLAYBOOK.md', '/api/admin/documents/nope', '/api/admin/documents/__proto__']) {
       expect((await auditor.get(url)).statusCode, url).toBe(404);
     }

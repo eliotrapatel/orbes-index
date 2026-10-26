@@ -35,7 +35,7 @@ import {
   DROP_ENTRY_STATUSES,
   EMAIL_KINDS,
   EMAIL_STATUSES,
-  GUARANTEE_SCOPES,
+  GRANTED_GUARANTEE_SCOPES,
   INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
   LOOKBOOK_STATES,
@@ -77,6 +77,15 @@ import {
   PACKED_WEIGHT_G_MAX,
   SET_NAME_MAX,
   SET_PIECES_MAX,
+  VAULT_AMOUNT_MINOR_MAX,
+  VAULT_CAP,
+  VAULT_NOTE_MAX,
+  VAULT_ODDS_IN_MAX,
+  VAULT_PER_OCCASION,
+  VAULT_REWARD_KINDS,
+  VAULT_REWARD_LINE_MAX,
+  VAULT_REWARD_MODES,
+  VAULT_REWARD_POSITION_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -556,6 +565,9 @@ export const registerAccountBody = body({
     .strictObject({ optionId: z.string().max(64, 'At most 64 characters'), other: z.string().max(1000, 'At most 1000 characters').nullable().optional() }, { error: 'The answer is an object' })
     .nullable()
     .optional(),
+  // THE VAULT's A FRIEND (N10): a friend's personal invitation code, kept on the device from /verify/join/<code>; an
+  // unknown one is ignored, never a refusal.
+  invite: z.string().max(64, 'At most 64 characters').nullable().optional(),
 });
 
 /**
@@ -2292,7 +2304,7 @@ export const guaranteeParams = z.object({ id: uuid });
  * it, and a note for Client Services (optional).
  */
 export const grantGuaranteeBody = body({
-  scope: z.enum(GUARANTEE_SCOPES),
+  scope: z.enum(GRANTED_GUARANTEE_SCOPES),
   targetId: uuid,
   pieces: guaranteePieces,
   validUntil: isoDate,
@@ -2836,3 +2848,94 @@ export const updateSetBody = body({
 
 /** PUT /api/admin/sets/:id/shopify: its Shopify product, pasted back; null clears it. */
 export const setShopifyBody = body({ productId: shopifyPasted });
+
+// ── THE VAULT (lot Q3, step Q3.9; plan §2.9) ─────────────────────────────
+
+/** /api/v1/account/vaults/:id/…: one of the account's vaults (another account's answers 404 VAULT_NOT_FOUND). */
+export const vaultParams = z.object({ id: uuid });
+
+/** GET /api/v1/account/vaults/live/:dropId: the entry's own vault of a LIVE release. */
+export const vaultLiveParams = z.object({ dropId: uuid });
+
+/** /api/v1/account/vaults/gifts/:code…: a credit to give's one-time code, as its link carries it (checked by its hash). */
+export const vaultGiftParams = z.object({ code: z.string().trim().min(1, 'Required').max(32, 'Invalid code') });
+
+/** An order's address as YOUR ORDERS sends it: one of YOUR ADDRESSES, or a new one (saved too when `save`). */
+const vaultOrderAddress = z.union([z.strictObject({ addressId: uuid }), z.strictObject({ address: z.strictObject(deliveryAddressShape, { error: 'An address is an object' }), save: z.boolean().optional() })], {
+  error: 'Send a saved address or a new one',
+});
+
+/**
+ * POST /api/v1/account/orders/:id/claim (a piece won free, D20) and POST /api/v1/account/vaults/:id/buy (a right to buy):
+ * its size (a claim's change of size only to one with a unit: 409 VAULT_SIZE_NONE_LEFT) and its address (the order's,
+ * or the default one, when none is sent). The rules and their words are VaultService's.
+ */
+export const vaultClaimBody = optionalBody({ size: z.string().trim().max(16, 'At most 16 characters').nullable().optional(), address: vaultOrderAddress.nullable().optional() });
+export const vaultBuyBody = vaultClaimBody;
+
+/** /api/admin/vault/sources/:source: one of the seven (an unknown one answers 404 VAULT_SOURCE_NOT_FOUND). */
+export const vaultSourceParams = z.object({ source: z.string().trim().max(16, 'Unknown source') });
+
+/** PUT /api/admin/vault/sources/:source (ADMIN; D27): its switch, vaults per occasion and its cap (null: none, THE HOUSE always). */
+export const vaultSourceBody = body({
+  enabled: z.boolean(),
+  perOccasion: whole(VAULT_PER_OCCASION.min, VAULT_PER_OCCASION.max, 'vaults'),
+  cap: whole(VAULT_CAP.min, VAULT_CAP.max, 'occasions').nullable(),
+});
+
+/** /api/admin/vault/rewards/:id…: a row of the house table. */
+export const vaultRewardParams = z.object({ id: uuid });
+
+const vaultRewardFields = {
+  oddsIn: z.number().int('The odds are 1 IN a whole number').min(1, 'At least 1 IN 1').max(VAULT_ODDS_IN_MAX, `At most 1 IN ${VAULT_ODDS_IN_MAX}`),
+  quantity: whole(0, 100_000_000, 'rewards'),
+  amountMinor: whole(1, VAULT_AMOUNT_MINOR_MAX, 'cents').nullable().optional(),
+  currency: z.enum(HOUSE_CURRENCIES).nullable().optional(),
+  modelId: uuid.nullable().optional(),
+  addonId: uuid.nullable().optional(),
+  mode: z.enum(VAULT_REWARD_MODES).nullable().optional(),
+  line: z.preprocess(emptyToNull, text(VAULT_REWARD_LINE_MAX).nullable().optional()),
+  position: whole(0, VAULT_REWARD_POSITION_MAX, 'places').optional(),
+};
+
+/**
+ * POST /api/admin/vault/rewards (OPERATOR; D2, D19, D28): a row of its kind with its odds ("1 IN N") and quantity, and
+ * its own fields (a credit's amount and currency; an add-on, or a model FREE or RIGHT_TO_BUY; a VAULT EDITION's model and
+ * line). I WAS THERE is the floor (409 VAULT_FLOOR_FIXED); a SERVICE add-on is refused (409 VAULT_REWARD_SERVICE).
+ */
+export const vaultRewardBody = body({ kind: z.enum(VAULT_REWARD_KINDS), ...vaultRewardFields });
+
+/**
+ * PUT /api/admin/vault/rewards/:id (OPERATOR): the row whole for its kind (which never changes), active or not; once it
+ * has given, its model, add-on and mode never change (409 VAULT_REWARD_GIVEN).
+ */
+export const vaultRewardUpdateBody = body({ kind: z.enum(VAULT_REWARD_KINDS).optional(), ...vaultRewardFields, active: z.boolean().optional() });
+
+/** POST /api/admin/vault/rewards/order (OPERATOR): every row of the table once, in its new order. */
+export const vaultRewardOrderBody = body({ ids: z.array(uuid).min(1, 'Name every reward once, in order').max(VAULT_REWARD_POSITION_MAX + 1, 'Too many rows') });
+
+/**
+ * POST /api/admin/vault/give (GIVE A VAULT; D3 (7), N25): one collector (`accountId` or `email`, OPERATOR) or a segment
+ * (`segmentId`, ADMIN), a note for Client Services (never shown to the collector, never audited), `dryRun` for the
+ * reach alone, `giftId` the press's own id (sent again after a failure: the members reached are skipped).
+ */
+export const vaultGiveBody = body({
+  accountId: uuid.optional(),
+  email: email.optional(),
+  segmentId: uuid.optional(),
+  note: optionalText(VAULT_NOTE_MAX),
+  dryRun: z.boolean().optional(),
+  giftId: uuid.optional(),
+}).refine((b) => [b.accountId !== undefined || b.email !== undefined, b.segmentId !== undefined].filter(Boolean).length === 1 && !(b.accountId !== undefined && b.email !== undefined), 'Choose a collector or a segment');
+
+/** GET /api/admin/vault/report: the period's Paris days `from` and `to`, both or neither (the last 30 days). */
+export const vaultReportQuery = z.object({ from: queryOptional(isoDate), to: queryOptional(isoDate) });
+
+/** GET /api/admin/vault/vaults?account=: a client's vaults, read-only (N36: no revoke). */
+export const adminVaultsQuery = z.object({ account: uuid });
+
+/** PUT /api/admin/live/:id/vault (OPERATOR; D4): THE VAULT on or off for the release, until its end. */
+export const liveVaultBody = body({ on: z.boolean() });
+
+/** PUT /api/admin/models/:id/vault-only (OPERATOR; §4.5): VAULT ONLY on or off. */
+export const modelVaultOnlyBody = body({ vaultOnly: z.boolean() });

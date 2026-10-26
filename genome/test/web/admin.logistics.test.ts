@@ -221,8 +221,8 @@ const PARCEL: ShippingOrderView = {
   readySince: '2026-11-03T09:00:00.000Z',
   late: false,
   orders: [
-    { orderId: ID, reference: 'OR-0F0E0D0C', status: 'PAID', model: 'MONOLITHE', variant: 'BLUE', sizeLabel: '52', skuCode: 'MNL-BLU-52', addons: ['INITIALS'], addonItems: [], engraving: 'A. & L.', surprise: null, piece: { productId: 'O26-J-00184', scanned: true } },
-    { orderId: OTHER, reference: 'OR-2F0E0D0C', status: 'PAID', model: 'ORBITE', variant: null, sizeLabel: null, skuCode: 'ORB', addons: [], addonItems: [], engraving: null, surprise: 'A silk pouch', piece: null },
+    { orderId: ID, reference: 'OR-0F0E0D0C', status: 'PAID', model: 'MONOLITHE', variant: 'BLUE', sizeLabel: '52', skuCode: 'MNL-BLU-52', addons: ['INITIALS'], addonItems: [], engraving: 'A. & L.', surprise: null, piece: { productId: 'O26-J-00184', scanned: true }, vaultCard: true },
+    { orderId: OTHER, reference: 'OR-2F0E0D0C', status: 'PAID', model: 'ORBITE', variant: null, sizeLabel: null, skuCode: 'ORB', addons: [], addonItems: [], engraving: null, surprise: 'A silk pouch', piece: null, vaultCard: false },
   ],
   shipTo: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: null },
   addressChanged: null,
@@ -240,6 +240,7 @@ const PARCEL: ShippingOrderView = {
   checklist: [
     { key: `piece:${ID}`, label: 'The right piece: its card scanned (1 of 2)', byScan: true, ticked: true },
     { key: `card:${ID}`, label: 'The card, its claim code visible (1 of 2)', byScan: false, ticked: false },
+    { key: `vault-card:${ID}`, label: 'THE VAULT CARD (1 of 2)', byScan: false, ticked: false },
     { key: 'box', label: 'The box and the pouch', byScan: false, ticked: false },
   ],
   history: [],
@@ -272,11 +273,13 @@ describe('To ship and a parcel', () => {
     expect(parcelActions(PARCEL, false)).toMatchObject({ start: false, scan: false, photo: false, check: false });
     expect(parcelActions({ step: 'PACKED', shipment: { ...PARCEL.shipment!, status: 'PACKED' } }, true)).toMatchObject({ ship: true, scan: false });
     expect(parcelActions({ step: 'SHIPPED', shipment: { ...PARCEL.shipment!, status: 'SHIPPED' } }, true)).toMatchObject({ deliver: true, report: true });
-    const all = new Set([`card:${ID}`, 'box']);
+    const all = new Set([`card:${ID}`, `vault-card:${ID}`, 'box']);
     expect(checklistComplete(PARCEL, all)).toBe(false); // no photo
     const withPhoto = { ...PARCEL, shipment: { ...PARCEL.shipment!, photo: true } };
     expect(checklistComplete(withPhoto, all)).toBe(true);
     expect(checklistComplete(withPhoto, new Set(['box']))).toBe(false);
+    // Lot Q3 (§2.8): THE VAULT CARD is ticked by hand like the card line.
+    expect(checklistComplete(withPhoto, new Set([`card:${ID}`, 'box']))).toBe(false);
     // A card's line is ticked by its scan, never by hand.
     expect(checklistComplete({ ...withPhoto, checklist: withPhoto.checklist.map((l) => ({ ...l, ticked: false })) }, new Set([...all, `piece:${ID}`]))).toBe(false);
   });
@@ -306,8 +309,9 @@ describe('To ship and a parcel', () => {
       // Plan MACRO M3 §1.3: the box with its inside sides and the parcel's weight; never a cost.
       parcel: { box: 'CUBE 80 · 120 × 90 × 40 mm', weight: '1\u2009240 g' },
       pieces: [
-        { reference: 'OR-0F0E0D0C', piece: 'MONOLITHE · BLUE', serial: 'O26-J-00184', size: '52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null },
-        { reference: 'OR-2F0E0D0C', piece: 'ORBITE', serial: null, size: 'ONE SIZE', addons: [], engraving: null, surprise: 'A silk pouch' },
+        // Lot Q3 (§2.8): THE VAULT CARD under the piece whose box holds it.
+        { reference: 'OR-0F0E0D0C', piece: 'MONOLITHE · BLUE', serial: 'O26-J-00184', size: '52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null, vaultCard: true },
+        { reference: 'OR-2F0E0D0C', piece: 'ORBITE', serial: null, size: 'ONE SIZE', addons: [], engraving: null, surprise: 'A silk pouch', vaultCard: false },
       ],
     });
     expect(Object.keys(slip)).not.toEqual(expect.arrayContaining(['channel', 'release', 'sourceReference']));

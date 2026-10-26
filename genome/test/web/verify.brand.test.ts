@@ -248,8 +248,15 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
   const RULEBOOK_RULE: Readonly<Record<string, string>> = { '.live-banner': 'body.nocturne .live-banner', '.n-own__link': '.n-lb' };
   const legacy = interactive.filter((sel) => !sel.startsWith('.n-'));
 
+  /**
+   * THE VAULT page's text links (lot Q3, step Q3.11; N33): SEND A PHOTOGRAPH, INVITE A FRIEND, SAVE THE IMAGE, GIVE IT at
+   * MK V's 9 px (the owner's mockup, binding for the look, as the rulebook's 9.5 px controls are his canvas), each with its
+   * 44 px zone.
+   */
+  const MOCKUP_TYPE: Readonly<Record<string, number>> = { '.vp-link': 9 };
+
   it('finds every control of the app by its pointer', () => {
-    expect(legacy).toEqual(['.auth__option', '.btn', '.tabs__tab', '.textlink']);
+    expect(legacy).toEqual(['.auth__option', '.btn', '.tabs__tab', '.textlink', '.vp-link']);
     expect(interactive.filter((sel) => sel.startsWith('.n-'))).toEqual(NOCTURNE_CONTROLS);
   });
 
@@ -271,7 +278,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
       // No variant, state, descendant or media rule takes either below its floor.
       for (const r of about(sel)) {
         const where = `${sel} (${r.selectors.join(', ')})`;
-        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(10);
+        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(MOCKUP_TYPE[sel] ?? 10);
         for (const p of ['min-height', 'height', 'max-height']) if (r.decls[p]) expect(px(r.decls[p]), where).toBeGreaterThanOrEqual(44);
       }
     }
@@ -944,8 +951,12 @@ describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-h
     const ownPage = new Set([...linesOf(verifyCopy.PIECES), verifyCopy.WORN.status]);
     expect(ownPage.size).toBeGreaterThan(20);
     expect(findForbidden([...ownPage].join('\n'), terms.filter((t) => t !== 'STOLEN'))).toEqual([]);
+    // THE VAULT page's grid (lot Q3, step Q3.11): A PIECE's line is MK V's word for word, the owner's mockup binding for
+    // the words ("A product from the collection, free or yours to buy."); its one use of "product", recorded.
+    const mockup = verifyCopy.VAULT.grid.PRODUCT.line;
+    expect(mockup).toBe('A product from the collection, free or yours to buy.');
     // §4.5 forbids GENUINE as a verdict: the footnote's one use is the limitation itself (§4.6).
-    expect(findForbidden(lines.filter((l) => l !== verifyCopy.ASSURANCE_NOTE && !ownPage.has(l)).join('\n'), terms)).toEqual([]);
+    expect(findForbidden(lines.filter((l) => l !== verifyCopy.ASSURANCE_NOTE && l !== mockup && !ownPage.has(l)).join('\n'), terms)).toEqual([]);
     expect(findForbidden(verifyCopy.ASSURANCE_NOTE, terms)).toEqual([expect.stringContaining('"GENUINE"')]);
     expect(verifyCopy.ASSURANCE_NOTE).toMatch(/cannot prove that an object is genuine/);
     expect(lines.join('\n')).not.toContain('!');

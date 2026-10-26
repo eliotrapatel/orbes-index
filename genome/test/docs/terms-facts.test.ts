@@ -49,7 +49,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.js';
-import { ADDON_UNITS_MAX, EMAIL_KINDS, SET_PIECES_MAX, SET_PIECES_MIN, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
+import { ADDON_UNITS_MAX, EMAIL_KINDS, SET_PIECES_MAX, SET_PIECES_MIN, VAULT_WAIT_DAYS, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
 import { CARE_CONDITIONS_VERSION } from '../../src/server/render/care-conditions.js';
 import { RECOVERY_ATTEMPT_LIMIT, RECOVERY_ATTEMPT_WINDOW_MS, RECOVERY_CODE_TTL_MS, RESET_REQUEST_LIMIT, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
@@ -200,6 +200,12 @@ const minutes = (ms: number): number => ms / MIN;
 const sameIn = (phrase: string) => ({ fr: [phrase], en: [phrase] });
 
 const CONSTANTS: Record<string, ConstantSpec> = {
+  // R195 (lot Q3, THE VAULT, D17): a vault is kept 30 days of 24 hours from its giving (`vaults_waits`), then expires.
+  VAULT_WAIT_DAYS: {
+    value: `${VAULT_WAIT_DAYS} jours`,
+    fr: [`Un coffre est gardé ${VAULT_WAIT_DAYS} jours dans votre compte.`],
+    en: [`A vault is kept ${VAULT_WAIT_DAYS} days in your account.`],
+  },
   // R154 (plan NEXT LOT §3.6.D): the collector's return or size exchange, within 14 days of the delivery (fixed, never a setting).
   RETURN_WINDOW_DAYS: {
     value: `${RETURN_WINDOW_DAYS} jours`,
@@ -687,6 +693,22 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'each piece its own order and identity, its share on its invoice (T1, T2)': 'export const setLineWords = (name: string): string =>',
   'a set cancelled whole (T3)': 'throw setShipped();',
   'a set returned whole, a piece\'s size still exchanged (T3)': 'if (o.set_sale_id !== null) throw setReturnWhole();',
+  // Lot Q3, THE VAULT (D22, D23, D59, L2; plan §6, step Q3.14): article 13's THE VAULT and the privacy policy's invitation.
+  'a vault on the occasions THE VAULT shows, each source and LIVE release switched, never a test entrant (D3, D4, D9)': "if (!source?.enabled) return none('SOURCE_OFF');",
+  'the vaults each occasion gives an account limited, one per LIVE release (D4, OP-29)': 'const most = source.cap === null ? VAULT_OCCASION_INDEX_MAX : Math.min(VAULT_OCCASION_INDEX_MAX, source.cap * source.per_occasion);',
+  'a vault kept 30 days (D17)': 'const waitsUntil = new Date(now.getTime() + VAULT_WAIT_MS);',
+  'opening free, no purchase (round 1 "free, no purchase")': "app.post('/api/v1/account/vaults/:id/open'",
+  'one reward drawn by chance by the server, its odds shown with it (D2, D15)': 'const drawn = drawRow(others, this.random(VAULT_DRAW_PARTS));',
+  'a reward run out gives its chance to the I WAS THERE card (D25)': 'pick = await rewardPick(tx, floor, v);',
+  'rewards expire as each states (D22)': 'return birthdayExpiry(parisDay(at), VAULT_REWARD_DAYS);',
+  'a credit to give, once, to a friend without a piece (N10)': 'if ((await tierOf(tx, me, now)).pieces > 0) throw vaultGiftNotForYou(false);',
+  'a returned piece takes back its unopened vault (D5)': "revoked_reason: 'RETURNED'",
+  'the invitation link kept with the invited account (N22)': 'invited_by: invitedBy,',
+  // The review of lot Q3 (L2): article 14 names THE VAULT's orders, a piece won free claimed within 30 days (PAID at no
+  // cost, cancelled unclaimed) and one bought at its usual price under its 24-hour right to buy.
+  'a piece won free claimed within 30 days, PAID at no cost (D20, N12)': "const paid = await step(tx, o, { to: 'PAID', note: null }, actor, at, notes, this.mail);",
+  'a piece won free not claimed cancelled (D20)': "await step(tx, o, { to: 'CANCELLED', note: VAULT_NOT_CLAIMED }, SYSTEM_ACTOR, now, notes, this.mail);",
+  'a right to buy within 24 hours at its usual price (round 2)': 'throw vaultOfferEnded(VAULT_BUY_ENDED);',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────
@@ -787,7 +809,8 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   N5: () => {
     // The first and last name and the country are required by the route since the customer intelligence lot (plan §3.1
     // P.4.2), `heard` optional, `displayName` still accepted and ignored with the names: no date of birth, no identity.
-    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'firstName', 'heard', 'lastName', 'password']);
+    // `invite` (THE VAULT, lot Q3) is no question asked: a friend's invitation code the link carries, never shown.
+    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'firstName', 'heard', 'invite', 'lastName', 'password']);
   },
   N6: () => {
     // The vote of the circle (P-X01) writes its row and nothing in the audit log; no audit action names a vote.
@@ -890,6 +913,21 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(customer.sort()).toEqual(['get /api/v1/account/house-messages', 'post /api/v1/account/house-messages/read']);
     expect(ROUTES.filter((r) => /push|notification/i.test(r.path))).toEqual([]);
     expect(matches(/\bPushManager\b|\bpushManager\b|showNotification|Notification\.requestPermission/g).map((m) => m.file)).toEqual([]);
+  },
+  N13: () => {
+    // THE VAULT (lot Q3; round 1 "free, no purchase"): a vault is written only where its sources give it, and opening one
+    // reads an empty body, so nothing is bought to open it (R196).
+    expect(matches(/\.insertInto\(\s*'vaults'\s*\)/g).map((m) => m.file)).toEqual([join('src', 'server', 'services', 'vault.ts'), join('src', 'server', 'services', 'vault.ts')]);
+    expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/account/vaults/:id/open' });
+    const account = readDoc('genome/src/server/routes/account.ts');
+    const open = account.slice(account.indexOf("app.post('/api/v1/account/vaults/:id/open'"));
+    expect(open.slice(0, open.indexOf('\n  });'))).toContain('parse(emptyBody, request.body);');
+  },
+  N14: () => {
+    // THE VAULT (lot Q3, N36): no staff revoke; the only taking-back written is a returned piece's (R201).
+    expect(matches(/revoked_reason:\s*'(\w+)'/g).map((m) => m.match[1])).toEqual(['RETURNED']);
+    expect(ROUTES.filter((r) => /vault/i.test(r.path) && /revoke/i.test(r.path))).toEqual([]);
+    expect(ROUTES.filter((r) => r.path.startsWith('/api/admin/vault/')).length).toBeGreaterThan(3);
   },
 };
 

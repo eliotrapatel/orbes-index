@@ -139,6 +139,8 @@ export interface ModelRecord {
   products: number;
   /** Plan ORBES CARE (answer 12): the lifetime warranty; false: the 2-year warranty (its category's months). Changed by `setWarranty` (ADMIN). */
   warrantyLifetime: boolean;
+  /** THE VAULT (lot Q3, D19): a VAULT EDITION, never sold (every sales path refuses it); set by VaultService.setVaultOnly. */
+  vaultOnly: boolean;
   /** Its pieces whose warranty has started and is not VOID: what a change of its warranty reaches among the pieces sold. */
   soldPieces: number;
   /** Its place in the lookbook (P-R02): HIDDEN, PUBLIC (everyone) or RESERVED (the owners of a piece). */
@@ -1188,6 +1190,7 @@ export class CatalogService {
         'col.name as collection_name',
         'issued.n as products',
         'm.warranty_lifetime',
+        'm.vault_only',
         'sold.n as sold_pieces',
       ])
       // N2: the model's Shopify product (one id on all its SKUs, services/shopify.ts) and how many sizes have their variant;
@@ -1333,6 +1336,7 @@ type ModelQueryRow = {
   collection_name: string | null;
   products: number | string | null;
   warranty_lifetime: boolean;
+  vault_only: boolean;
   sold_pieces: number | string | null;
 };
 
@@ -1386,6 +1390,7 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: 
     imageUrl: mediaUrl(r.image_sha256),
     products: Number(r.products ?? 0),
     warrantyLifetime: r.warranty_lifetime,
+    vaultOnly: r.vault_only,
     soldPieces: Number(r.sold_pieces ?? 0),
     lookbook: r.lookbook,
     slug: r.slug,

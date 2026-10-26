@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertCspSafeHtml, buildWeb, discoverApps, entryOutName, rewriteHtml, WebBuildError, type BuildWebResult } from '../../scripts/build-web.js';
 import { cacheControlFor, HASHED_ASSET_RE, IMMUTABLE_CACHE } from '../../src/server/http/static.js';
 import { DESKTOP_QUERY } from '../../src/web/shared/desktop.js';
-import { LIVE_SOUNDS } from '../../src/web/verify/live-sound.js';
+import { ALL_SOUNDS, VAULT_SOUNDS } from '../../src/web/verify/live-sound.js';
 
 const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/shared/fonts/gravesend-sans-500.woff2');
 const FONT_REF = '../shared/fonts/gravesend-sans-500.woff2';
@@ -109,9 +109,11 @@ describe('build-web: production build of the real apps', () => {
     // step Q1.8: the queue's and SOLD OUT's lines under the name and SOLD OUT's passage, ported from the mockup, took it
     // to 25.2 KB; 26 KB until step Q1.9: the room's horizon door, the draw in place and THE OPENING, ported from the
     // mockup, took it to 26.6 KB; 28 KB until step Q1.11: CONFIRMED in the vault with its monogram on the horizon and its
-    // moment, and the after-room's open horizon door with its passage, ported from the mockup, took it to 28.7 KB); a
-    // computer's two more at most 45 KB together.
-    expect(gz(phone)).toBeLessThanOrEqual(30 * 1024);
+    // moment, and the after-room's open horizon door with its passage, ported from the mockup, took it to 28.7 KB; 30 KB
+    // until lot Q3, step Q3.10: THE VAULT's box, its float and its opening, ported from the vault reference as published
+    // (its rules in their order, kept where they reach the door-open box), took it to 38.4 KB); a computer's two more at
+    // most 45 KB together.
+    expect(gz(phone)).toBeLessThanOrEqual(40 * 1024);
     expect(gz(pointer) + gz(layout)).toBeLessThanOrEqual(45 * 1024);
   });
 
@@ -151,12 +153,13 @@ describe('build-web: production build of the real apps', () => {
     for (const r of refs) expect(r, r).toMatch(/^(data:|\/assets\/)/);
   });
 
-  it('publishes exactly the eleven LIVE sounds as hashed /assets/*.mp3, byte for byte, cached as immutable, each URL in the bundle (lot Q1 §3.10)', () => {
+  it('publishes exactly the sixteen designed sounds as hashed /assets/*.mp3, byte for byte, cached as immutable, each URL in the bundle (lot Q1 §3.10; THE VAULT\'s five, lot Q3, step Q3.10)', () => {
     const app = result.apps.find((a) => a.name === 'verify')!;
     const main = readFileSync(asset(app.assets['main.ts']), 'utf8');
     const mp3 = readdirSync(join(result.outDir, 'assets')).filter((f) => f.endsWith('.mp3')).sort();
-    // The LIVE flow's eleven of the sixteen chosen: the five vault-* come with lot Q3, welcome.prev-confident never.
-    expect(mp3.map((f) => f.replace(/-[A-Z0-9]{8}\.mp3$/, '')).sort()).toEqual([...LIVE_SOUNDS].sort());
+    // The sixteen chosen: the LIVE flow's eleven and THE VAULT's five (D58); welcome.prev-confident never.
+    expect(mp3).toHaveLength(16);
+    expect(mp3.map((f) => f.replace(/-[A-Z0-9]{8}\.mp3$/, '')).sort()).toEqual([...ALL_SOUNDS].sort());
     for (const file of mp3) {
       const url = `/assets/${file}`;
       expect(file).toMatch(/^[a-z-]+-[A-Z0-9]{8}\.mp3$/);
@@ -166,7 +169,8 @@ describe('build-web: production build of the real apps', () => {
       expect(readFileSync(asset(url)).equals(readFileSync(join(SOUNDS_SRC, `${name}.mp3`))), file).toBe(true);
       expect(main, file).toContain(`"${url}"`);
     }
-    expect(mp3.some((f) => /^vault-|prev-confident/.test(f))).toBe(false);
+    expect(mp3.filter((f) => /^vault-/.test(f))).toHaveLength(VAULT_SOUNDS.length);
+    expect(mp3.some((f) => /prev-confident/.test(f))).toBe(false);
   });
 
   it('writes a manifest of published names', () => {
@@ -230,8 +234,8 @@ describe('build-web: the display font, preloaded by both shells', () => {
     expect(urls.size).toBe(1);
   });
 
-  it('publishes the eleven LIVE sounds once for the whole build, only the verify bundle naming them (lot Q1 §3.10)', () => {
-    expect(readdirSync(join(result.outDir, 'assets')).filter((f) => f.endsWith('.mp3'))).toHaveLength(LIVE_SOUNDS.length);
+  it('publishes the sixteen sounds once for the whole build, only the verify bundle naming them (lot Q1 §3.10, lot Q3)', () => {
+    expect(readdirSync(join(result.outDir, 'assets')).filter((f) => f.endsWith('.mp3'))).toHaveLength(ALL_SOUNDS.length);
     for (const app of result.apps) {
       const js = read(app.assets['main.ts']).toString('utf8');
       expect(/\/assets\/[a-z-]+-[A-Z0-9]{8}\.mp3/.test(js), app.name).toBe(app.name === 'verify');

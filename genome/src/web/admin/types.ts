@@ -134,10 +134,10 @@ export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
 export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 
 /**
- * A credit taken off an order: a tier's, the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3)
- * or a warranty credit (plan ORBES CARE).
+ * A credit taken off an order: a tier's, the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3),
+ * a warranty credit (plan ORBES CARE) or a vault's (THE VAULT).
  */
-export type CreditKind = 'CREDIT' | 'BIRTHDAY' | 'WARRANTY';
+export type CreditKind = 'CREDIT' | 'BIRTHDAY' | 'WARRANTY' | 'VAULT';
 
 /** Why a credit taken off an order was given back (credit_uses.released_reason, BP-19 T5). */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
@@ -179,8 +179,11 @@ export const WARRANTY_CLAIM_REFUSALS_BY_BASIS: Readonly<Record<WarrantyClaimBasi
   LEGAL: Object.freeze(['DAMAGED_ON_PURPOSE', 'DAMAGED_BY_SOMEONE_ELSE', 'NO_FAULT_FOUND'] as const),
 });
 
-/** What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, IN-01): a chosen release, the next of a model, of a collection. */
-export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const;
+/**
+ * What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, IN-01): a chosen release, the next of a model, of a
+ * collection; a vault's piece at the next LIVE release, any model (LIVE, THE VAULT).
+ */
+export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION', 'LIVE'] as const;
 export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
 
 /** A guarantee as stored (house_guarantees.status, IN-01). */
@@ -207,8 +210,11 @@ export type ClaimRenewalWithdrawnReason = (typeof CLAIM_RENEWAL_WITHDRAWN_REASON
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
-/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5), a size exchange (plan NEXT LOT §3.5). */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'] as const;
+/**
+ * Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5), a size
+ * exchange (plan NEXT LOT §3.5), a vault's product (THE VAULT: won free or bought under its right to buy).
+ */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE', 'VAULT'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /** The steps of an order (orders.status): RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
@@ -388,7 +394,7 @@ export const ADDON_PRICE_MINOR_MAX = 100_000_000;
 export const ADDON_UNITS_MAX = 3;
 export const ORDER_ADDON_STATUSES = ['HELD', 'SHIPPED', 'REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type OrderAddonStatus = (typeof ORDER_ADDON_STATUSES)[number];
-export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF'] as const;
+export const ORDER_ADDON_ADDED_BY = ['PURCHASE', 'COLLECTOR', 'STAFF', 'VAULT'] as const;
 export type OrderAddonAddedBy = (typeof ORDER_ADDON_ADDED_BY)[number];
 /**
  * ADD-ONS ONE SYSTEM (migration 0059, lot Q2): an add-on's kind, PRODUCT (real stock) or SERVICE (no stock, no supplier,
@@ -759,6 +765,8 @@ export interface Model {
    * main model's; `inherited` says which of the two come from the main model (services/catalog.ts ModelPacking).
    */
   packing: ModelPacking;
+  /** THE VAULT (lot Q3, §4.5): VAULT ONLY, never sold (every sales path refuses it), given as a VAULT EDITION. */
+  vaultOnly?: boolean;
   /** Plan NEXT LOT §3.3: its size type (null: to give), and how many of its declared sizes are offered. */
   sizeType: SizeType | null;
   sizesOffered: number;
@@ -2324,6 +2332,8 @@ export interface LiveRelease extends LiveCard {
   description: string | null;
   /** Its settings still change: neither announced nor cancelled. */
   editable: boolean;
+  /** THE VAULT (lot Q3, D4): on, a size sold out gives its line a vault; off by default, never on an after-room. */
+  vaultOn?: boolean;
   roomOpensMinutes: number;
   /** ONE QUEUE (D1): X people per batch every Y minutes; null on an after-room (no pace). */
   pace?: LivePace | null;
@@ -2881,6 +2891,8 @@ export interface LiveReleaseReport {
   next: { quantity: number; sizes: { label: string; pieces: number }[] };
   /** ONE QUEUE (D11): the longest wait, the turns given by the pace, the people who left the queue. */
   queue?: { longestWaitMs: number | null; turnsByPace: number; leftQueue: number };
+  /** THE VAULT (lot Q3, §4.2): the release's switch and the vaults it gave and those opened; null on an after-room. */
+  vaults?: { on: boolean; given: number; opened: number } | null;
   reasoning: string[];
 }
 
@@ -4108,6 +4120,8 @@ export interface ParcelPiece {
   surprise: string | null;
   /** The piece bound by its packing scan, and whether it is scanned in the current shipment. */
   piece: { productId: string; scanned: boolean } | null;
+  /** Lot Q3 (§2.8): THE VAULT CARD goes in the box with this piece (its checklist line `vault-card:<order>`). */
+  vaultCard: boolean;
 }
 
 /** A line of the packing checklist: ticked by hand, or (`byScan`) only by the card's scan. */
@@ -5472,4 +5486,151 @@ export interface ReturnsReportQuery {
   to?: string | null;
   all?: boolean;
   test?: boolean;
+}
+
+// ── THE VAULT (lot Q3, step Q3.12; server services/vault.ts, routes/admin/vault.ts) ──────────────────────────────
+
+/** The seven occasions a vault is given on (server VAULT_SOURCES), in the console's order. */
+export const VAULT_SOURCES = ['LIVE', 'PIECE', 'TIER', 'WORN', 'FRIEND', 'PROFILE', 'HOUSE'] as const;
+export type VaultSource = (typeof VAULT_SOURCES)[number];
+
+/** The house table's kinds (server VAULT_REWARD_KINDS): no access, status or service reward (D64). */
+export const VAULT_REWARD_KINDS = ['CREDIT', 'ADDON', 'GUARANTEED', 'PRODUCT', 'VAULT_EDITION', 'THE_PIECE', 'CREDIT_TO_GIVE', 'I_WAS_THERE'] as const;
+export type VaultRewardKind = (typeof VAULT_REWARD_KINDS)[number];
+
+/** A PRODUCT reward: FREE (a VAULT order at 0) or RIGHT_TO_BUY (24 hours at its usual price). */
+export const VAULT_REWARD_MODES = ['FREE', 'RIGHT_TO_BUY'] as const;
+export type VaultRewardMode = (typeof VAULT_REWARD_MODES)[number];
+
+/** A vault's state, computed by the server (never stored). */
+export type VaultState = 'WAITING' | 'OPENED' | 'EXPIRED' | 'REVOKED';
+
+/** A source's settings (D27, OP-29): its switch, the vaults one occasion gives, the occasions an account receives (null: no cap). */
+export interface VaultSourceSetting {
+  source: VaultSource;
+  enabled: boolean;
+  perOccasion: number;
+  cap: number | null;
+  updatedAt: Iso;
+  updatedBy: { id: string; email: string } | null;
+}
+
+/** A row of the house table. */
+export interface VaultRewardSetting {
+  id: string;
+  kind: VaultRewardKind;
+  /** "1 IN N"; null on the floor (I WAS THERE: the rest). */
+  oddsIn: number | null;
+  oddsText: string | null;
+  /** The draw's parts it holds, of 1 000 000. */
+  parts: number;
+  quantity: number | null;
+  given: number;
+  left: number | null;
+  amountMinor: number | null;
+  currency: string | null;
+  modelId: string | null;
+  modelName: string | null;
+  addonId: string | null;
+  addonName: string | null;
+  mode: VaultRewardMode | null;
+  line: string | null;
+  active: boolean;
+  position: number;
+  rare: boolean;
+}
+
+/** CLUB > THE VAULT's settings: the sources, the table in its order, the parts given (of 1 000 000) and the floor's published odds. */
+export interface VaultSettings {
+  sources: VaultSourceSetting[];
+  rewards: VaultRewardSetting[];
+  partsGiven: number;
+  floor: { id: string; parts: number; oddsIn: number | null; oddsText: string | null };
+}
+
+/** A row of the house table as New reward and Edit send it (the whole row for its kind). */
+export interface VaultRewardInput {
+  kind?: VaultRewardKind;
+  oddsIn: number;
+  quantity: number;
+  amountMinor?: number | null;
+  currency?: string | null;
+  modelId?: string | null;
+  addonId?: string | null;
+  mode?: VaultRewardMode | null;
+  line?: string | null;
+  active?: boolean;
+}
+
+/** GIVE A VAULT's request: one collector (OPERATOR) or a segment (ADMIN); `dryRun` for the reach alone. */
+export interface VaultGiveInput {
+  accountId?: string;
+  email?: string;
+  segmentId?: string;
+  note?: string;
+  dryRun?: boolean;
+  giftId?: string;
+}
+
+/** What GIVE A VAULT did, or would do. */
+export interface VaultGiven {
+  giftId: string | null;
+  dryRun: boolean;
+  reach: number;
+  accounts: number;
+  vaults: number;
+  leftOut: { testEntrants: number; inactive: number };
+}
+
+/** A sum in one currency. */
+export interface VaultMoney {
+  currency: string;
+  minor: number;
+}
+
+/** What a kind or a row gave over the period: how many were won, their value and cost (costUnknown: no supplier price). */
+export interface VaultWonFigures {
+  won: number;
+  value: VaultMoney[];
+  cost: VaultMoney[];
+  costUnknown: number;
+}
+
+/** THE VAULT's report for a period of Paris days (§4.3). */
+export interface VaultReport {
+  from: string;
+  to: string;
+  given: { source: VaultSource; count: number }[];
+  givenTotal: number;
+  opened: number;
+  waiting: number;
+  expired: number;
+  revoked: number;
+  byKind: ({ kind: VaultRewardKind } & VaultWonFigures)[];
+  rows: (VaultRewardSetting & VaultWonFigures)[];
+  credits: { given: VaultMoney[]; used: VaultMoney[] };
+  totalCost: VaultMoney[];
+  costUnknown: number;
+}
+
+/** A client's vault on the client sheet, read-only (N36: no revoke). */
+export interface AdminVault {
+  id: string;
+  source: VaultSource;
+  label: string;
+  detail: string | null;
+  line: string;
+  givenAt: Iso;
+  waitsUntil: Iso;
+  state: VaultState;
+  openedAt: Iso | null;
+  revokedAt: Iso | null;
+  revokedReason: 'RETURNED' | null;
+  kind: VaultRewardKind | null;
+  held: string | null;
+  odds: string | null;
+  rare: boolean | null;
+  orderId: string | null;
+  givenBy: { id: string; email: string } | null;
+  note: string | null;
 }

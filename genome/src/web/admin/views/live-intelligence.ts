@@ -23,6 +23,7 @@ import {
   type LiveReading,
 } from '../model/live-intelligence.js';
 import { formatMoney, liveEntryActions, tierLabel } from '../model/live.js';
+import { liveVaultReportFigures } from '../model/vault.js';
 import { pieceSizeLabel } from '../model/sets.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
@@ -293,6 +294,8 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
           ),
           // ONE QUEUE (D11, added rows): the longest wait, the turns given by the pace, the people who left the queue.
           rep.queue ? [subtitle('The queue'), figures(...queueReportFigures(rep.queue, r.afterRoomOf !== null))] : null,
+          // THE VAULT (lot Q3, §4.2, added rows): the vaults the release gave and those opened; never an after-room's.
+          rep.vaults ? [subtitle('THE VAULT'), figures(...liveVaultReportFigures(rep.vaults))] : null,
           subtitle('The funnel'),
           h('div', { data: { testid: 'live-report-funnel' } }, barList(funnelBars(rep.funnel))),
           subtitle('By size'),

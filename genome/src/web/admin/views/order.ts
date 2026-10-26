@@ -52,6 +52,7 @@ import {
   countryOptions,
   engravingLine,
   CHANNEL_LABELS,
+  orderOrigin,
   APPLY_CREDIT_TEXT,
   creditActions,
   creditAppliedLine,
@@ -333,7 +334,12 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then(done('Credit removed.'));
   const orderRows: DefRow[] = [
-    { label: 'Channel', value: CHANNEL_LABELS[o.channel] },
+    {
+      label: 'Channel',
+      value: CHANNEL_LABELS[o.channel],
+      // Lot Q3 (§4.5): a vault's order says where it comes from, won free (at 0) or bought under its right to buy.
+      ...(o.channel === 'VAULT' ? { note: `${orderOrigin(o)} · ${o.priceMinor === 0 ? 'won free' : 'bought under its right to buy'}` } : {}),
+    },
     ...(o.channel === 'GIFT' && o.withOrder
       ? [{ label: 'Travels with', value: h('a', { class: 'idlink', attrs: { href: href('order', { orderId: o.withOrder.id }) }, data: { testid: 'order-gift-parent' } }, o.withOrder.reference) }]
       : []),
@@ -583,7 +589,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Clients · Orders',
       title: o.reference,
       identifier: true,
-      lead: giftHeaderLine(o) ?? `${o.release?.title ?? CHANNEL_LABELS[o.channel]} · ${o.model.name} · ${d.account.email}`,
+      lead: giftHeaderLine(o) ?? `${orderOrigin(o)} · ${o.model.name} · ${d.account.email}`,
       actions: [linkButton('Packing slip', href('packingSlip', { orderId: o.id }), 'secondary'), linkButton('All orders', href('orders'), 'ghost')],
     }),
     ...sections,

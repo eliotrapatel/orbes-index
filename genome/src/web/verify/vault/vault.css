@@ -1,0 +1,564 @@
+/*
+ * THE VAULT's object (lot Q3, step Q3.10; plan §3.1, §3.2; D30–D40, D69): the vault reference's door-open box as published
+ * (vault/the-vault.html: version 60 with its rounded corners 6 px on a computer, 4.8 px on a phone, the lid 4 px; the
+ * satin finish and its varnish coat with grain; FOR YOU on the lid; the lit niche; the lid resting open on its rim), its
+ * rules read from the reference's stylesheet in their order (each layer of its history kept, the later winning) and kept
+ * where they reach the door-open markup (vault/vault-box.ts) in one of its states; the rules of its other objects,
+ * its demo frame, its SOUND toggle and its page dim are not ported (the dim is the page's: house.css, desktop-room.css).
+ * Read for the house's brand rules (BRAND-DESIGN-SYSTEM §8): its pure dark (shadows, masks) is the ink #0a0a0a;
+ * its display face asks for no tabular figures (Gravesend has proportional ones only: no change); the reward's line keeps
+ * --font by the rule's own weight, not by !important.
+ * Scoped to `.vault-box` (the reference's frame `.fx`); a phone's box is `.vault-box--phone` (the reference's
+ * `.fx--phone`: the box at 0.8). Its timeline runs on --k (1; 1.4 for a rare reward, D15) from the server's answer; --p is
+ * the hold's progress. Motion restraint (D37): nothing here the reference does not do.
+ */
+/* The box's own column, centred wherever its slot stands (the reference set it in the screen's centred column). */
+.vault-box { display: flex; flex-direction: column; align-items: center; width: 100%; }
+@keyframes vlt-breath {
+  0%, 100% { opacity: 0.36; transform: scale(0.74); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+.vault-box .vlt__again { pointer-events: auto; }
+.vault-box .vlt { --k: 1; position: relative; display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 326px; margin-top: 34px; text-align: center; }
+.vault-box .vlt.is-rare { --k: 1.4; }
+/* The vault's threshold: a hairline horizon dissolving at its ends. */
+.vault-box .vlt__rule { display: block; align-self: stretch; height: 1px; margin: 0 -32px; background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 30%, rgba(246, 242, 234, 0.42) 50%, rgba(246, 242, 234, 0.3) 70%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt__lead { margin-top: 10px; color: var(--ink-soft); }
+.vault-box .vlt__stage { position: relative; align-self: stretch; height: 276px; margin-top: 6px; }
+/* The seam: a faint light behind the sealed seal (6 %). */
+.vault-box .vlt__seam { position: absolute; left: 50%; top: 123px; width: 220px; height: 160px; margin: -80px 0 0 -110px; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, rgba(246, 242, 234, 0.06) 0, rgba(246, 242, 234, 0.025) 50%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt__hint { position: absolute; left: 0; right: 0; top: 238px; margin: 0; }
+/* The horizon through the seal's centre: hidden while sealed; open (parted, its points, the light) with the reward. */
+.vault-box .vlt__hz { position: absolute; left: -32px; right: -32px; top: 123px; height: 1px; pointer-events: none; opacity: 0; }
+.vault-box .vlt__hz > span { position: absolute; display: block; }
+.vault-box .vlt__line { top: -0.5px; height: 1px; }
+.vault-box .vlt__line--l { left: 0; right: 70%; background: linear-gradient(90deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 40%, rgba(246, 242, 234, 0.78) 100%); }
+.vault-box .vlt__line--r { left: 70%; right: 0; background: linear-gradient(270deg, rgba(246, 242, 234, 0) 0, rgba(246, 242, 234, 0.3) 40%, rgba(246, 242, 234, 0.78) 100%); }
+.vault-box .vlt__pt { top: 0; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%; background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%); animation: vlt-breath 4.8s ease-in-out infinite !important; }
+.vault-box .vlt__pt--l { left: 30%; animation-delay: -2.4s !important; }
+.vault-box .vlt__pt--r { left: 70%; }
+.vault-box .vlt__gap { left: 0; right: 0; bottom: 0.5px; height: 170px; transform-origin: 50% 100%; background: radial-gradient(ellipse 26% 100% at 50% 100%, rgba(246, 242, 234, 0.1) 0, rgba(246, 242, 234, 0.045) 40%, rgba(246, 242, 234, 0.012) 72%, rgba(246, 242, 234, 0) 100%); -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(10, 10, 10, 0.4) 40%, #0a0a0a 100%); mask-image: linear-gradient(180deg, transparent 0%, rgba(10, 10, 10, 0.4) 40%, #0a0a0a 100%); }
+.vault-box .vlt.is-rare .vlt__gap { height: 200px; background: radial-gradient(ellipse 30% 100% at 50% 100%, rgba(246, 242, 234, 0.14) 0, rgba(246, 242, 234, 0.06) 40%, rgba(246, 242, 234, 0.016) 72%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt__reflect { left: 34%; right: 34%; top: 0.5px; height: 12px; background: radial-gradient(ellipse 50% 100% at 50% 0, rgba(246, 242, 234, 0.07), rgba(246, 242, 234, 0)); }
+.vault-box .vlt__glow { position: absolute; left: 50%; top: 123px; width: 160px; height: 116px; margin: -58px 0 0 -80px; border-radius: 50%; pointer-events: none; opacity: 0; background: radial-gradient(closest-side, rgba(246, 242, 234, 0.06) 0, rgba(246, 242, 234, 0.02) 46%, rgba(246, 242, 234, 0) 100%); }
+/* The reward, in place of the seal: FROM THE VAULT and the reward above the line, in its light; its line under it. */
+.vault-box .vlt__reward { display: none; }
+.vault-box .vlt__above { position: absolute; left: 0; right: 0; top: 0; height: 107px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.vault-box .vlt__from { margin: 0; }
+.vault-box .vlt__prize { margin: 12px 0 0; font-family: var(--font-display); font-weight: 400; font-size: 40px; line-height: 1.05; letter-spacing: 0.16em; text-indent: 0.16em; white-space: nowrap; color: var(--ink); }
+.vault-box .vlt__prize[data-len="m"] { font-size: 30px; letter-spacing: 0.22em; text-indent: 0.22em; }
+.vault-box .vlt__prize[data-len="l"] { font-size: 25px; letter-spacing: 0.2em; text-indent: 0.2em; }
+.vault-box .vlt__prize[data-len="xl"] { font-size: 19px; letter-spacing: 0.2em; text-indent: 0.2em; }
+.vault-box .vlt__prize > span { display: inline-block; }
+.vault-box .vlt__what { position: absolute; left: 0; right: 0; top: 142px; width: auto; max-width: none; margin: 0; padding: 0; text-indent: 0; text-align: center; color: var(--ink-soft); }
+.vault-box .vlt__again { position: absolute; left: 50%; top: 196px; transform: translateX(-50%); margin: 0; white-space: nowrap; }
+/* Open: the seal, its rings and the hint gone; the horizon open; the reward. */
+.vault-box .vlt.is-open :is(.live-hold__rings, .live-hold__seal, .vlt__seam, .vlt__hint) { opacity: 0; }
+.vault-box .vlt.is-open .vlt__hz { opacity: 1; }
+.vault-box .vlt.is-open .vlt__reward { display: block; }
+/* ── The passage (the CONFIRMED grammar): the seal dissolves into a faint glow at its centre; the horizon draws out from
+   the centre and parts, a point going to each parted end; a low light rises through the gap; the reward resolves. ── */
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing .vlt__hint { animation: vlt-out calc(var(--k) * 0.4s) ease calc(var(--k) * 0s) both !important; }
+  .vault-box .vlt.is-playing .vlt__seam { animation: vlt-out calc(var(--k) * 0.7s) ease calc(var(--k) * 0.2s) both !important; }
+  .vault-box .vlt.is-playing .vlt__glow { animation: vlt-glow calc(var(--k) * 1.7s) cubic-bezier(0.45, 0, 0.3, 1) calc(var(--k) * 0.2s) both !important; }
+  .vault-box .vlt.is-playing .vlt__hz { animation: vlt-on calc(var(--k) * 0.01s) linear calc(var(--k) * 0.5s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__line--l { animation: vlt-draw-l calc(var(--k) * 1s) cubic-bezier(0.33, 0, 0.15, 1) calc(var(--k) * 0.55s) backwards, vlt-part-l calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 1.55s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__line--r { animation: vlt-draw-r calc(var(--k) * 1s) cubic-bezier(0.33, 0, 0.15, 1) calc(var(--k) * 0.55s) backwards, vlt-part-r calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 1.55s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__pt--l { animation: vlt-breath 4.8s ease-in-out -2.4s infinite, vlt-fin calc(var(--k) * 0.5s) ease calc(var(--k) * 1.2s) backwards, vlt-pt calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 1.55s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__pt--r { animation: vlt-breath 4.8s ease-in-out 0s infinite, vlt-fin calc(var(--k) * 0.5s) ease calc(var(--k) * 1.2s) backwards, vlt-pt calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 1.55s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__gap { animation: vlt-gap calc(var(--k) * 1.6s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 1.75s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__reflect { animation: vlt-in calc(var(--k) * 1.2s) ease calc(var(--k) * 1.9s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__from { animation: vlt-resolve calc(var(--k) * 0.9s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 2.35s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__prize > span { animation: vlt-morph calc(var(--k) * 0.8s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 2.55s + var(--i) * 0.045s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__what { animation: vlt-resolve calc(var(--k) * 0.9s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 3.2s) backwards !important; }
+  .vault-box .vlt.is-playing .vlt__again { animation: vlt-in calc(var(--k) * 0.8s) ease calc(var(--k) * 3.6s) backwards !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-box .vlt :is(.vlt__pt, .vlt__edge) { animation: none !important; }
+}
+.vault-box .vlt__odds { display: block; margin-top: 10px; font-family: var(--font-display); font-size: 8px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--ink-soft); opacity: 0.72; }
+.vault-box .vlt__stage { height: 304px; }
+.vault-box .vlt__lead { position: absolute; left: 0; right: 0; top: 234px; margin: 0; color: var(--ink-soft); }
+.vault-box .vlt__hint { top: 268px; }
+.vault-box .vlt.is-open .vlt__lead { opacity: 0; }
+.vault-box .vlt.is-playing .vlt__lead { animation: vlt-out calc(var(--k) * 0.4s) ease calc(var(--k) * 0s) both !important; }
+/* ═══ THE VAULT v2 · the object and its gesture (the reference's door-open variant) ═══ */
+.vault-box .vlt { --p: 0; }
+.vault-box .vo { display: none; }
+.vault-box .vlt:not([data-variant="seal"]) :is(.vlt__seal, .vlt__seam, .vlt__hz, .vlt__glow) { display: none; }
+.vault-box .vlt:not([data-variant="seal"]) .vlt__stage { height: 316px; }
+.vault-box .vlt:not([data-variant="seal"]) .vlt__lead { top: 262px; }
+.vault-box .vlt:not([data-variant="seal"]) .vlt__hint { top: 294px; }
+.vault-box .vo, .vault-box .vo * { box-sizing: border-box; }
+.vault-box button.vo-dopen__front { margin: 0; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; letter-spacing: 0; text-indent: 0; min-height: 0; min-width: 0; border-radius: 0; cursor: grab; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+.vault-box .vlt.is-open :is(button.vo, .vo-dr--mine, .vo-dopen__front) { pointer-events: none; cursor: default; }
+.vault-box :is(button.vo, .vo-dr--mine, .vo-dopen__front):focus-visible { outline: 1px solid rgba(246, 242, 234, 0.5); outline-offset: 6px; }
+.vault-box .vo span { display: block; }
+.vault-box .vo-emb { display: block; color: #f6f2ea; overflow: visible; }
+/* The progress of a hold, for the objects: a hairline drawing out from the centre over PRESS AND HOLD. */
+.vault-box .vlt__prog { position: absolute; left: 50%; top: 288px; width: 120px; height: 1px; margin-left: -60px; transform: scaleX(var(--p)); background: linear-gradient(90deg, rgba(246, 242, 234, 0), rgba(246, 242, 234, 0.7) 50%, rgba(246, 242, 234, 0)); opacity: 0; pointer-events: none; }
+.vault-box .vlt:not([data-variant="seal"]).is-holding .vlt__prog { opacity: 1; }
+/* ── 1 · THE DOOR: two heavy halves across the vault, meeting on the horizon; THE VAULT engraved across the seam. ── */
+.vault-box .vo-door__half { position: absolute; left: 0; right: 0; height: 123px; overflow: hidden; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px), linear-gradient(180deg, #151516 0%, #0e0e0f 46%, #0b0b0c 100%); }
+.vault-box .vo-door__half--up { top: 0; transform: translateY(calc(var(--p) * -3px)); box-shadow: inset 0 -1px 0 rgba(246, 242, 234, 0.1), inset 0 -2px 0 rgba(10, 10, 10, 0.7); }
+.vault-box .vo-door__half--down { top: 123px; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px), linear-gradient(180deg, #121213 0%, #0d0d0e 52%, #0a0a0b 100%); transform: translateY(calc(var(--p) * 20px)); box-shadow: inset 0 1px 0 rgba(246, 242, 234, 0.2), inset 0 2px 0 rgba(10, 10, 10, 0.6), 0 -1px 0 rgba(10, 10, 10, 0.8); }
+/* The plates' engraved panels: a fine inset frame dissolving at the sides; the outer edges of the door, horizons. */
+.vault-box .vo-door__half::before { content: ""; position: absolute; left: 22px; right: 22px; border: 1px solid rgba(246, 242, 234, 0.06); pointer-events: none; }
+.vault-box .vo-door__half--up::before { top: 14px; bottom: -1px; border-bottom: 0; }
+.vault-box .vo-door__half--down::before { top: -1px; bottom: 14px; border-top: 0; }
+.vault-box .vo-door__half::after { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, rgba(246, 242, 234, 0), rgba(246, 242, 234, 0.22) 30%, rgba(246, 242, 234, 0.3) 50%, rgba(246, 242, 234, 0.22) 70%, rgba(246, 242, 234, 0)); }
+.vault-box .vo-door__half--up::after { top: 0; }
+.vault-box .vo-door__half--down::after { bottom: 0; }
+.vault-box .vo-door__face { position: absolute; left: 0; right: 0; height: 246px; }
+.vault-box .vo-door__half--up .vo-door__face { top: 0; }
+.vault-box .vo-door__half--down .vo-door__face { top: -123px; }
+.vault-box .vo-door__emb { position: absolute; left: 50%; top: 108px; width: 236px; height: 236px; margin: -118px 0 0 -118px; }
+/* The grip: a short engraved bar on the lower half, where the hand draws it down. */
+.vault-box .vo-door__grip { position: absolute; left: 50%; bottom: 26px; width: 44px; height: 3px; margin-left: -22px; border-radius: 2px; background: linear-gradient(180deg, rgba(246, 242, 234, 0.16), rgba(10, 10, 10, 0.6)); box-shadow: 0 1px 0 rgba(246, 242, 234, 0.05); }
+/* The seam: the horizon where the halves meet, its point breathing; the light that comes through as it parts. */
+.vault-box .vo-door__seam { position: absolute; left: 0; right: 0; top: 122.5px; height: 1px; background: linear-gradient(90deg, rgba(246, 242, 234, 0), rgba(246, 242, 234, 0.3) 26%, rgba(246, 242, 234, 0.55) 50%, rgba(246, 242, 234, 0.3) 74%, rgba(246, 242, 234, 0)); }
+.vault-box .vo-door__pt { position: absolute; left: 50%; top: 0; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%; background: radial-gradient(closest-side, #fffdf8 0, rgba(255, 253, 248, 0.92) 24%, rgba(246, 242, 234, 0.32) 58%, rgba(246, 242, 234, 0) 100%); animation: vlt-breath 4.8s ease-in-out infinite !important; }
+.vault-box .vo-door__light { position: absolute; left: 0; right: 0; top: 0; height: 246px; opacity: calc(var(--p) * 0.6); transform: scaleY(calc(0.05 + var(--p) * 0.08)); transform-origin: 50% 50%; background: radial-gradient(ellipse 46% 50% at 50% 50%, rgba(246, 242, 234, 0.13) 0, rgba(246, 242, 234, 0.055) 40%, rgba(246, 242, 234, 0.012) 72%, rgba(246, 242, 234, 0) 100%); }
+/* ── 1b · THE DOOR IN TWO MOVEMENTS: the halves part as THE DOOR's (the hand draws the lower one down); behind them the
+   inner lid, which then comes towards the viewer, the screen around dimming, and lifts away tilting back over the lit
+   tray (THE DRAWER's motion and timings). ── */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen { display: block; }
+.vault-box .vo-dopen { position: absolute; left: -32px; right: -32px; top: 0; height: 246px; }
+.vault-box .vo-dopen > .vo-door__light { z-index: 1; }
+.vault-box .vo-dopen__box { position: absolute; inset: 0; perspective: 900px; }
+.vault-box .vo-dopen__box > .vo-out__tray { box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.32), 0 0 40px rgba(246, 242, 234, 0.04); }
+/* The inner lid: an engraved dark panel, a fine ivory edge, the monogram engraved. */
+.vault-box .vo-dopen__lid { position: absolute; inset: 0; transform-origin: 50% 0; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px), linear-gradient(180deg, #161617 0%, #0f0f10 50%, #0b0b0c 100%); box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.5), inset 0 0 0 9px #0d0d0e, inset 0 0 0 10px rgba(246, 242, 234, 0.08), inset 0 1px 0 1px rgba(246, 242, 234, 0.12); }
+.vault-box .vo-dopen__mono { position: absolute; left: 50%; top: 50%; width: 236px; height: 236px; margin: -118px 0 0 -118px; }
+.vault-box .vo-dopen__mark { position: absolute; bottom: 20px; font-family: var(--font-display); font-size: 7px; line-height: 1; letter-spacing: 0.4em; color: rgba(246, 242, 234, 0.42); text-shadow: 0 -0.5px 0 rgba(10, 10, 10, 0.9); white-space: nowrap; }
+.vault-box .vo-dopen__mark { right: 44px; }
+.vault-box button.vo-dopen__front { position: absolute; inset: 0; z-index: 2; display: block; overflow: hidden; background: none; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-door__half--up { transform: translateY(-108px); opacity: 0; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-door__half--down { transform: translateY(108px); opacity: 0; }
+.vault-box .vlt[data-variant="door-open"].is-open :is(.vo-door__seam, .vo-door__emb, .vo-door__light) { opacity: 0; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__box { transform: scale(1.06); box-shadow: 0 30px 60px rgba(10, 10, 10, 0.85), 0 0 40px rgba(246, 242, 234, 0.04); }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__lid { opacity: 0; transform: translateY(-40px) rotateX(58deg); }
+.vault-box .vlt[data-variant="door-open"].is-rare .vo-out__light { background: radial-gradient(ellipse 56% 66% at 50% 54%, rgba(246, 242, 234, 0.14) 0, rgba(246, 242, 234, 0.065) 42%, rgba(246, 242, 234, 0.016) 74%, rgba(246, 242, 234, 0) 100%); }
+/* ── 2 · (the reference's drawer variant): the wall rule its inside floor still reads. ── */
+.vault-box .vo-wall { position: absolute; left: 0; right: 0; top: 46px; display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 6px; transition: none; }
+/* Pulled out: the drawer comes towards the viewer, its front lifts away, the light inside. */
+.vault-box .vo-out__tray { position: absolute; inset: 0; background: linear-gradient(180deg, #060607 0%, #0b0b0c 100%); box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.32), 0 30px 60px rgba(10, 10, 10, 0.85), 0 0 40px rgba(246, 242, 234, 0.04); }
+.vault-box .vo-out__floor { position: absolute; inset: 16px; box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.07), inset 0 18px 30px rgba(10, 10, 10, 0.9); }
+.vault-box .vo-out__light { position: absolute; inset: 0; background: radial-gradient(ellipse 52% 62% at 50% 54%, rgba(246, 242, 234, 0.12) 0, rgba(246, 242, 234, 0.05) 42%, rgba(246, 242, 234, 0.012) 74%, rgba(246, 242, 234, 0) 100%); }
+/* ── The passages (the CONFIRMED grammar; eased, no bounce beyond a few px of weight; glows ≤ 14 %) ── */
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__seam { animation: vo-fade calc(var(--k) * 0.45s) ease calc(var(--k) * 0.05s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__half--up { animation: vo-door-up calc(var(--k) * 1.7s) linear calc(var(--k) * 0.1s) backwards, vo-fade calc(var(--k) * 0.6s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 1.75s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__half--down { animation: vo-door-down calc(var(--k) * 1.7s) linear calc(var(--k) * 0.1s) backwards, vo-fade calc(var(--k) * 0.6s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 1.75s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__emb { animation: vo-fade calc(var(--k) * 0.9s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 0.9s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__light { animation: vo-door-light calc(var(--k) * 1.9s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 0.3s) backwards, vo-fade calc(var(--k) * 0.8s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 1.7s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__box { animation: vo-dopen-out calc(var(--k) * 1.25s) cubic-bezier(0.16, 1, 0.3, 1) calc(var(--k) * 1.7s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__lid { animation: vo-front calc(var(--k) * 1s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 2.9s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-out__light { animation: vo-light calc(var(--k) * 1.6s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 3.15s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-out__floor { animation: vlt-in calc(var(--k) * 0.9s) ease calc(var(--k) * 3s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__from { animation: vlt-resolve calc(var(--k) * 0.9s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 3.95s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__prize > span { animation: vlt-morph calc(var(--k) * 0.8s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 4.15s + var(--i) * 0.045s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__what { animation: vlt-resolve calc(var(--k) * 0.9s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 4.8s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__again { animation: vlt-in calc(var(--k) * 0.8s) ease calc(var(--k) * 5.2s) backwards !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-box .vo :is(.vo-door__pt, .vo-card__sweep) { animation: none !important; }
+}
+/* ═══ THE VAULT · door-open (22 Oct): the halves retract fully (their gap becomes the lid's edges); the lid, smoked and
+   slightly translucent, comes forward from its own rect (the page dim on the same curve), then swings outward from its
+   top edge, aligned to the opening (a long perspective: no growth past it), quickly, fading once past ~78°; behind it no
+   box: the vault's own dark, and the reward composed in ORBES's grammar, centred: FROM THE VAULT, the prize growing
+   from the monogram's centre, the horizon with its point, the line, the odds. ═══ */
+.vault-box .vlt[data-variant="door-open"] :is(.vo-out__floor, .vo-out__light) { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-out__tray { background: none; box-shadow: none; }
+/* The swing seen square to the opening (no perspective growth): the lid keeps the opening's exact width, its hinge on the opening's top edge. */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__box { perspective: none; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__box { box-shadow: none; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-door__half--up { transform: translateY(-123px); opacity: 0; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-door__half--down { transform: translateY(123px); opacity: 0; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__lid { opacity: 0; transform: rotateX(90deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen .vo-door__pt { top: 0.5px; }
+/* The door's focus ring (a keyboard opening) leaves with the lid: it would otherwise frame the reward. */
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__front { outline-color: transparent; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__seam { animation: vo-fade calc(var(--k) * 0.8s) ease calc(var(--k) * 0.3s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__half--up { animation: vo-gap-up calc(var(--k) * 1.7s) linear calc(var(--k) * 0.1s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-door__half--down { animation: vo-gap-down calc(var(--k) * 1.7s) linear calc(var(--k) * 0.1s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__box { animation: vo-lift-out calc(var(--k) * 1.25s) cubic-bezier(0.16, 1, 0.3, 1) calc(var(--k) * 1.8s) backwards, vo-shadow-off calc(var(--k) * 0.75s) ease calc(var(--k) * 2.95s) forwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__front { animation: vo-ring-off calc(var(--k) * 0.75s) ease calc(var(--k) * 2.95s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__lid { animation: vo-swing calc(var(--k) * 0.75s) linear calc(var(--k) * 2.95s) both !important; }
+}
+/* ═══ door-open · THE LID as THE DRAWER's front (as published v30): its face is the drawer front's (brushed dark, the
+   ivory edge, the top light), its engraving kept; it lifts away as the drawer front does (vo-front: 1 s, EZ.io, hinged at
+   its top edge, perspective 700 px). ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__box { perspective: 700px; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__lid { opacity: 0; transform: translateY(-40px) rotateX(58deg); }
+/* ═══ What the lid uncovers: THE SEAL's own reveal, on the vault dark, in the seal's positions, sizes and levels: the
+   horizon (at the lid's centre line, where the seam was) draws out and parts from the centre with its two points, the low
+   light rises through the gap, then FROM THE VAULT, the prize with the letter morph, its line, the odds, OPEN ANOTHER.
+   It starts as the lid lifts: the seal's timeline shifted by SEAL_T0 (its horizon draws at the lift's start). ═══ */
+.vault-box .vlt[data-variant="door-open"] :is(.vlt__hz, .vlt__glow) { display: block; }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen { z-index: 2; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__under { animation: vo-under-hinge calc(var(--k) * 1.4s) linear calc(var(--k) * 2s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-lid-edge { animation: vo-edge-hinge calc(var(--k) * 1.4s) linear calc(var(--k) * 2s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__lid { animation: vo-lid-hinge calc(var(--k) * 1.4s) linear calc(var(--k) * 2s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__glow { animation: vlt-glow calc(var(--k) * 1.7s) cubic-bezier(0.45, 0, 0.3, 1) calc(var(--k) * 2.25s) both !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__hz { animation: vlt-on calc(var(--k) * 0.01s) linear calc(var(--k) * 2.55s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__line--l { animation: vlt-draw-l calc(var(--k) * 1s) cubic-bezier(0.33, 0, 0.15, 1) calc(var(--k) * 2.60s) backwards, vlt-part-l calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 3.60s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__line--r { animation: vlt-draw-r calc(var(--k) * 1s) cubic-bezier(0.33, 0, 0.15, 1) calc(var(--k) * 2.60s) backwards, vlt-part-r calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 3.60s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__pt--l { animation: vlt-breath 4.8s ease-in-out -2.4s infinite, vlt-fin calc(var(--k) * 0.5s) ease calc(var(--k) * 3.25s) backwards, vlt-pt calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 3.60s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__pt--r { animation: vlt-breath 4.8s ease-in-out 0s infinite, vlt-fin calc(var(--k) * 0.5s) ease calc(var(--k) * 3.25s) backwards, vlt-pt calc(var(--k) * 1.2s) cubic-bezier(0.45, 0, 0.2, 1) calc(var(--k) * 3.60s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__gap { animation: vlt-gap calc(var(--k) * 1.6s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 3.80s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__reflect { animation: vlt-in calc(var(--k) * 1.2s) ease calc(var(--k) * 3.95s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__from { animation: vlt-resolve calc(var(--k) * 0.9s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 4.40s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__prize > span { animation: vlt-morph calc(var(--k) * 0.8s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 4.60s + var(--i) * 0.045s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__what { animation: vlt-resolve calc(var(--k) * 0.9s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 5.25s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vlt__again { animation: vlt-in calc(var(--k) * 0.8s) ease calc(var(--k) * 5.65s) backwards !important; }
+}
+/* ═══ door-open · THE BOX, a real object in space (23 Oct, owner: 'not spatial enough', 'the sides should have the same
+   effect as the front', 'the opening in the same 3D'): the box turns about its own centre (perspective 1250 px; 1000 px on a
+   phone, the closest at which its sides still open at this tilt; where it is 80 % of the frame), lifting 12 px off the ground as it floats; its four sides are the
+   front's own metal (the same base, brushed grain wrapping round: vertical on the left and right, horizontal on the top
+   and bottom), the same bevel, each lit from its own angle (vault-float.js: --shade, --spec). It opens in a calm held pose
+   (40 % of its tilt): the halves part in the front plane, the recessed lid comes forward through the opening on its own
+   depth and lifts away hinged at its top edge, and the reveal sits inside the box at its back, seen through the opening;
+   the sides and its shadow stay: an open box. ═══ */
+.vault-box .vlt[data-variant="door-open"] .vlt__stage { perspective: 1250px; perspective-origin: 50% 123px; }
+.vault-box--phone .vlt[data-variant="door-open"] .vlt__stage { perspective: 1000px; }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen { transform-style: preserve-3d; transform: translateZ(calc(var(--eye, 0) * 12px)) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); will-change: transform; }
+.vault-box .vo-side, .vault-box .vo-sheen, .vault-box .vo-ground, .vault-box .vo-in { display: none; }
+/* The sides: 100 px deep (80 on a phone), the front's metal and bevel, lit from their own angle. */
+.vault-box .vlt[data-variant="door-open"] .vo-side { display: block; position: absolute; pointer-events: none; background-color: #151516; box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.3), inset 1px 1px 0 1px rgba(246, 242, 234, 0.12), inset -1px -1px 0 1px rgba(10, 10, 10, 0.6), inset 0 0 0 3px rgba(10, 10, 10, 0.35); }
+.vault-box .vlt[data-variant="door-open"] .vo-side::before, .vault-box .vlt[data-variant="door-open"] .vo-side::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-side::before { background: #0a0a0a; opacity: var(--shade, 0.3); }
+.vault-box .vlt[data-variant="door-open"] .vo-side::after { background: #f6f2ea; opacity: var(--spec, 0); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--t { left: 0; right: 0; top: 0; height: 100px; transform-origin: 50% 0; transform: rotateX(-90deg); background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--b { left: 0; right: 0; bottom: 0; height: 100px; transform-origin: 50% 100%; transform: rotateX(90deg); background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--l { left: 0; top: 0; bottom: 0; width: 100px; transform-origin: 0 50%; transform: rotateY(90deg); background-image: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--r { right: 0; top: 0; bottom: 0; width: 100px; transform-origin: 100% 50%; transform: rotateY(-90deg); background-image: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px); }
+/* The front's outer frame, bevelled, so it reads as a thick door; it stays as the rim of the open box. */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__front::after { content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(246, 242, 234, 0.3), inset 1px 1px 0 1px rgba(246, 242, 234, 0.12), inset -1px -1px 0 1px rgba(10, 10, 10, 0.6), inset 0 0 0 3px rgba(10, 10, 10, 0.35); }
+/* The engraving a hair in front of the brushed face, the seam on its own plane: the front itself has depth as it turns. */
+.vault-box .vlt[data-variant="door-open"] .vo-door__emb { translate: calc(var(--ryn, 0) * 0.045px) calc(var(--rxn, 0) * -0.045px); }
+.vault-box .vlt[data-variant="door-open"] .vo-door__seam { translate: calc(var(--ryn, 0) * -0.02px) calc(var(--rxn, 0) * 0.02px); }
+/* The contact shadow on the ground, opposite to the tilt, wider and softer as the box lifts (at most 35 % dark). */
+.vault-box .vlt[data-variant="door-open"] .vo-ground { display: block; position: absolute; left: 50%; top: 226px; width: 340px; height: 34px; margin-left: -170px; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, rgba(10, 10, 10, 0.35), rgba(10, 10, 10, 0.18) 55%, rgba(10, 10, 10, 0)); filter: blur(6px); opacity: calc(1 - var(--eye, 0) * 0.3); transform: translate(calc(var(--ryn, 0) * -1.4px), calc(var(--rxn, 0) * 0.8px + var(--eye, 0) * 4px)) scale(calc(1 + var(--eye, 0) * 0.14)); will-change: transform; }
+.vault-box--phone .vlt[data-variant="door-open"] .vo-ground { scale: 0.8; transform-origin: 50% -103px; }
+/* The recessed lid: 8 px behind the halves, no larger than the front; in the scene's own 3D (no perspective of its own). */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__box { transform: translateZ(-8px); transform-style: preserve-3d; perspective: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half::after { display: none; }
+/* The lid: hinged on the box's top rim (its top edge, at the front plane, 8 px in front of the recessed lid); it swings
+   up and out over the top of the box, its underside showing past vertical, and fades only past 100°. */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__lid { transform-origin: 50% 0 0; transform: translateZ(0px) rotateX(0deg); backface-visibility: hidden; }
+.vault-box .vo-dopen__under { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__under { display: block; position: absolute; inset: 0; transform-origin: 50% 0 0; transform: translateZ(0px) rotateX(0deg) translateZ(-5px) rotateY(180deg); backface-visibility: hidden; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px), linear-gradient(180deg, #101011 0%, #0b0b0c 100%); box-shadow: inset 0 0 0 1px #1a1a1b, inset 0 0 0 3px rgba(10, 10, 10, 0.3); }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__lid { transform: translateZ(8px) rotateX(100deg); opacity: 1; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__under { transform: translateZ(8px) rotateX(100deg) translateZ(-5px) rotateY(180deg); opacity: 1; }
+/* The halves' shadow falls into the gap onto the recessed lid. */
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--up { box-shadow: inset 0 -1px 0 rgba(246, 242, 234, 0.1), inset 0 -2px 0 rgba(10, 10, 10, 0.7), 0 9px 14px -5px rgba(10, 10, 10, 0.85); }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--down { box-shadow: inset 0 1px 0 rgba(246, 242, 234, 0.2), inset 0 2px 0 rgba(10, 10, 10, 0.6), 0 -1px 0 rgba(10, 10, 10, 0.8), 0 -9px 14px -5px rgba(10, 10, 10, 0.85); }
+/* The front's light from its angle: the sheen slides across the brushed face and the engraving (at most 6 %), and the
+   face darkens a little when turned away, as the sides do. */
+.vault-box .vlt[data-variant="door-open"] .vo-sheen { display: block; position: absolute; left: 0; right: 0; height: 246px; overflow: hidden; pointer-events: none; background: rgba(10, 10, 10, var(--shade, 0)); }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--up .vo-sheen { top: 0; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--down .vo-sheen { top: -123px; }
+.vault-box .vlt[data-variant="door-open"] .vo-sheen > span { position: absolute; display: block; top: -35%; bottom: -35%; left: 50%; width: 70%; margin-left: -35%; background: radial-gradient(ellipse 38% 42% at 50% 48%, rgba(255, 250, 240, 0.22) 0%, rgba(246, 242, 234, 0.10) 38%, rgba(246, 242, 234, 0.035) 64%, rgba(246, 242, 234, 0) 100%); filter: blur(10px); mix-blend-mode: screen; transform: translateX(calc(var(--sx, -40) * 1px)) rotate(-12deg); will-change: transform; }
+/* The reveal inside the box, on its back plane (90 px in), seen through the opening; the page's own copy gives way. */
+.vault-box .vlt[data-variant="door-open"].is-open .vo-in { display: block; position: absolute; left: 32px; right: 32px; top: 0; height: 246px; transform: translateZ(-90px); pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-in span { display: block; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__prize > span { display: inline-block; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__odds { display: block; }
+.vault-box .vlt[data-variant="door-open"] .vlt__stage > :is(.vlt__hz, .vlt__glow), .vault-box .vlt[data-variant="door-open"] .vlt__reward > :is(.vlt__above, .vlt__what) { display: none !important; }
+/* ═══ No ivory edge on the box (owner, 23 Oct): every edge reads by the box's own dark, a tone lighter or darker
+   where a face turns; no line of another colour. The engraving, the seam and its point, the sheen and the reveal's own
+   horizon stay. ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-side, .vault-box .vlt[data-variant="door-open"] .vo-dopen__front::after { box-shadow: inset 0 0 0 1px #1a1a1b, inset 0 0 0 3px rgba(10, 10, 10, 0.3) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--up { box-shadow: inset 0 -2px 0 rgba(10, 10, 10, 0.7), 0 9px 14px -5px rgba(10, 10, 10, 0.85) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--down { box-shadow: inset 0 2px 0 rgba(10, 10, 10, 0.6), 0 -1px 0 rgba(10, 10, 10, 0.8), 0 -9px 14px -5px rgba(10, 10, 10, 0.85) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half::before { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__grip { background: linear-gradient(180deg, #1c1c1d, #070708); box-shadow: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__lid { box-shadow: none !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-out__tray, .vault-box .vlt[data-variant="door-open"] .vo-dopen__box > .vo-out__tray { box-shadow: none !important; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__box { box-shadow: none !important; transform: translateZ(-8px); }
+/* The keyboard's focus ring: in the box's own tone (still visible), gone once it opens. */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__front:focus-visible { outline: 1px solid #3a3a3b !important; outline-offset: 6px; animation-name: none !important; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-dopen__front:focus-visible { outline-color: transparent !important; }
+/* ═══ The finish (owner, 23 Oct: 'a glowy finish to the surfaces'): a satin gloss on every face of the box, screened over
+   the brushed metal so its grain shows through: a soft top light fading down each face and a broad faint bloom; on the
+   sides a fresnel brightening at the edge nearest the eye, stronger as the face turns to the light (--spec). No line,
+   no hard edge, no colour. ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-sheen::before { content: ""; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; background: linear-gradient(180deg, rgba(246, 242, 234, 0.055) 0%, rgba(246, 242, 234, 0.018) 32%, rgba(246, 242, 234, 0) 62%), radial-gradient(ellipse 58% 62% at 50% 30%, rgba(255, 250, 240, 0.04) 0%, rgba(246, 242, 234, 0.012) 55%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-side::after { opacity: calc(0.45 + var(--spec, 0) * 9) !important; mix-blend-mode: screen; background: var(--vo-fres), radial-gradient(ellipse 70% 80% at 50% 45%, rgba(255, 250, 240, 0.03) 0%, rgba(246, 242, 234, 0) 70%) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-side--t { --vo-fres: linear-gradient(180deg, rgba(246, 242, 234, 0.11) 0%, rgba(246, 242, 234, 0.035) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--b { --vo-fres: linear-gradient(0deg, rgba(246, 242, 234, 0.08) 0%, rgba(246, 242, 234, 0.025) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--l { --vo-fres: linear-gradient(90deg, rgba(246, 242, 234, 0.1) 0%, rgba(246, 242, 234, 0.03) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-side--r { --vo-fres: linear-gradient(270deg, rgba(246, 242, 234, 0.1) 0%, rgba(246, 242, 234, 0.03) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__lid::after, .vault-box .vlt[data-variant="door-open"] .vo-dopen__under::after { content: ""; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; background: linear-gradient(180deg, rgba(246, 242, 234, 0.05) 0%, rgba(246, 242, 234, 0.015) 35%, rgba(246, 242, 234, 0) 62%), radial-gradient(ellipse 58% 62% at 50% 32%, rgba(255, 250, 240, 0.035) 0%, rgba(246, 242, 234, 0.01) 55%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__under::after { opacity: 0.6; }
+/* ═══ Thickness and ground (owner, 23 Oct: 'the box should have a ground', 'sides should have thickness, including the
+   lid'). The walls are 7 px thick: at the opening, the rim's top (a slightly lighter lacquer, its top edge catching more)
+   and the inner faces of the walls going down into the box, darker inside; the recessed lid and the interior sit within
+   them. The lid is a slab 5 px thick: its free edge and its underside show as it swings open. The halves show their edge
+   where they meet at the seam. The box stands on a dark glossy floor that fades into the vault, its contact shadow on
+   it, the front mirrored faintly in it. ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__box { inset: 7px !important; }
+.vault-box .vo-rim, .vault-box .vo-wall, .vault-box .vo-lid-edge, .vault-box .vo-floor { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-rim { display: block; position: absolute; inset: 0; pointer-events: none; transform: translateZ(-0.5px); box-shadow: inset 0 7px 0 0 #141416, inset 0 -7px 0 0 #0c0c0d, inset 7px 0 0 0 #111113, inset -7px 0 0 0 #0e0e0f; }
+.vault-box .vlt[data-variant="door-open"] .vo-wall { display: block; position: absolute; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-wall--t { left: 7px; right: 7px; top: 7px; height: 90px; transform-origin: 50% 0; transform: rotateX(-90deg); background: linear-gradient(180deg, #121214 0%, #08080a 45%, #040405 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-wall--b { left: 7px; right: 7px; bottom: 7px; height: 90px; transform-origin: 50% 100%; transform: rotateX(90deg); background: linear-gradient(0deg, #0f0f11 0%, #070708 45%, #040405 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-wall--l { left: 7px; top: 7px; bottom: 7px; width: 90px; transform-origin: 0 50%; transform: rotateY(90deg); background: linear-gradient(90deg, #111113 0%, #070708 45%, #040405 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-wall--r { right: 7px; top: 7px; bottom: 7px; width: 90px; transform-origin: 100% 50%; transform: rotateY(-90deg); background: linear-gradient(270deg, #111113 0%, #070708 45%, #040405 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-lid-edge { display: block; position: absolute; left: 0; right: 0; top: 0; height: 5px; pointer-events: none; transform-origin: 50% 0 0; transform: translateZ(0px) rotateX(0deg) translateY(242px) rotateX(-90deg); background: linear-gradient(180deg, rgba(25, 25, 27, 0.9) 0%, rgba(11, 11, 12, 0.9) 100%); }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-lid-edge { opacity: 1; transform: translateZ(8px) rotateX(100deg) translateY(242px) rotateX(-90deg); }
+/* The halves' edges at the seam: a lacquer band, the thickness of the door seen as they part. */
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--up::after, .vault-box .vlt[data-variant="door-open"] .vo-door__half--down::after { display: block !important; content: ""; position: absolute; left: 0; right: 0; height: 5px; top: auto; bottom: auto; background: linear-gradient(180deg, #18181a 0%, #0a0a0b 100%) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--up::after { bottom: 0; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--down::after { top: 0; background: linear-gradient(0deg, #141416 0%, #09090a 100%) !important; }
+/* The floor: under the box (from 110 px behind its front to 200 px before it), dark and slightly glossy, fading out. */
+.vault-box .vlt[data-variant="door-open"] .vo-floor { display: block; position: absolute; left: -90px; right: -90px; top: 246.5px; height: 760px; pointer-events: none; transform-origin: 50% 0; transform: rotateX(90deg) translateY(-110px); background: linear-gradient(180deg, rgba(246, 242, 234, 0) 13%, rgba(246, 242, 234, 0.03) 15%, rgba(246, 242, 234, 0.01) 20%, rgba(246, 242, 234, 0) 30%), radial-gradient(ellipse 52% 26% at 50% 18%, rgba(28, 28, 31, 1) 0%, rgba(19, 19, 21, 0.85) 40%, rgba(12, 12, 13, 0.35) 75%, rgba(10, 10, 10, 0) 100%); -webkit-mask-image: linear-gradient(180deg, #0a0a0a 0%, #0a0a0a 30%, transparent 70%); mask-image: linear-gradient(180deg, #0a0a0a 0%, #0a0a0a 30%, transparent 70%); }
+/* On a phone the box is 0.8: the floor meets its base (y 221.5) and reaches 88 px behind its front. */
+.vault-box--phone .vlt[data-variant="door-open"] .vo-floor { top: 221.8px; transform: rotateX(90deg) translateY(-88px); }
+.vault-box .vlt[data-variant="door-open"] .vo-floor__shadow { position: absolute; left: 50%; top: 4px; width: 440px; height: 150px; margin-left: -220px; border-radius: 50%; background: radial-gradient(closest-side, rgba(10, 10, 10, 0.75) 0%, rgba(10, 10, 10, 0.45) 55%, rgba(10, 10, 10, 0) 100%); filter: blur(10px); transform: translateX(calc(var(--ryn, 0) * -1.6px)); }
+.vault-box .vlt[data-variant="door-open"] .vo-ground { display: none !important; }
+/* ═══ v52 (owner, 23 Oct: 'why did you put inserts in the box', 'the box still has no ground', 'improve the prizes
+   display'): no inner walls (the inside of the open box is one clean dark space; the thickness reads from outside: the
+   sides, a thin rim at the opening, the lid's slab); a ground drawn under the box (its sheen fading to dark, a soft
+   elliptical contact shadow, the box's faint reflection); the reward presented on a readable plane near the opening,
+   centred with generous margins, a soft pool of light behind it. ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-wall { display: none !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-rim { box-shadow: inset 0 2px 0 0 #18181a, inset 0 -2px 0 0 #0c0c0d, inset 2px 0 0 0 #121214, inset -2px 0 0 0 #0f0f10 !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__box { inset: 2px !important; }
+/* The ground: a 2D floor under the box (its base at y 246; 221.5 on a phone, where the box is 0.8). */
+.vault-box .vo-ground2 { display: none !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-ground2 { display: block; position: absolute; left: 50%; top: 238px; width: 560px; height: 150px; margin-left: -280px; pointer-events: none; background: radial-gradient(ellipse 48% 58% at 50% 4%, rgba(58, 58, 63, 0.95) 0%, rgba(38, 38, 42, 0.8) 30%, rgba(22, 22, 25, 0.45) 62%, rgba(10, 10, 10, 0) 100%); clip-path: polygon(16% 0, 84% 0, 100% 100%, 0 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-ground2::before { content: ""; position: absolute; left: 50%; top: 2px; width: 420px; height: 30px; margin-left: -210px; border-radius: 50%; background: radial-gradient(closest-side, rgba(10, 10, 10, 0.92) 0%, rgba(10, 10, 10, 0.6) 50%, rgba(10, 10, 10, 0) 100%); filter: blur(4px); transform: translate(calc(var(--ryn, 0) * -1.6px), calc(var(--eye, 0) * 3px)) scale(calc(1 + var(--eye, 0) * 0.08)); }
+.vault-box .vlt[data-variant="door-open"] .vo-ground2::after { content: ""; position: absolute; left: 0; right: 0; top: 10px; height: 1px; background: linear-gradient(90deg, rgba(246, 242, 234, 0) 10%, rgba(246, 242, 234, 0.05) 50%, rgba(246, 242, 234, 0) 90%); filter: blur(1px); }
+.vault-box--phone .vlt[data-variant="door-open"] .vo-ground2 { top: 214px; scale: 0.8; transform-origin: 50% 0; }
+/* The reward, on a readable plane 30 px in, centred in the opening with generous margins; a soft pool of light behind. */
+.vault-box .vlt[data-variant="door-open"].is-open .vo-in { transform: translateZ(-30px) !important; left: 40px !important; right: 40px !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-in::before { content: ""; position: absolute; left: 50%; top: 40px; width: 300px; height: 150px; margin-left: -150px; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, rgba(246, 242, 234, 0.07) 0%, rgba(246, 242, 234, 0.025) 50%, rgba(246, 242, 234, 0) 100%); filter: blur(8px); }
+.vault-box .vlt[data-variant="door-open"].is-rare .vo-in::before { background: radial-gradient(closest-side, rgba(246, 242, 234, 0.1) 0%, rgba(246, 242, 234, 0.035) 50%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__above { height: 110px; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__from { margin: 0 0 4px; color: rgba(246, 242, 234, 0.62); }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__prize { font-size: 34px; letter-spacing: 0.18em; text-indent: 0.18em; color: #f6f2ea; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__prize[data-len="m"] { font-size: 27px; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__prize[data-len="l"] { font-size: 22px; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__prize[data-len="xl"] { font-size: 17px; letter-spacing: 0.16em; text-indent: 0.16em; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__hz { left: 18px !important; right: 18px !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__what { top: 140px; left: 10px; right: 10px; color: rgba(246, 242, 234, 0.72); }
+.vault-box .vlt[data-variant="door-open"] .vo-in .vlt__what .vlt__odds { margin-top: 8px; color: rgba(246, 242, 234, 0.5); opacity: 1; }
+/* ═══ v52 (owner: 'the ground ... inside the box', then 'I like the ground you added under the vaults so you can keep
+   them'): the ground under the box stays (its sheen, contact shadow, faint reflection); inside, the box has a bottom: a dark floor receding to the back, lit by the
+   light coming in (brighter at the front edge, falling off towards the back), its sides fading out (no corner lines). ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-wall--b { display: block !important; left: 2px; right: 2px; bottom: 2px; height: 96px; background: linear-gradient(0deg, #2b2b2f 0%, #1b1b1e 20%, #101012 50%, #070708 100%) !important; -webkit-mask-image: linear-gradient(90deg, transparent 0%, #0a0a0a 7%, #0a0a0a 93%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0%, #0a0a0a 7%, #0a0a0a 93%, transparent 100%); }
+.vault-box .vlt[data-variant="door-open"].is-rare .vo-wall--b { background: linear-gradient(0deg, #313135 0%, #1f1f22 20%, #121214 50%, #070708 100%) !important; }
+/* ═══ v53 (owner: 'the ground you added before was better', 'add a side inside the box where the text stands'): v51's
+   ground under the box again; inside, the back wall 70 px in: a dark satin panel lit by the light coming in (brighter
+   at its top near the opening, falling off downward), meeting the inside floor in a soft shading, no corner line; the
+   reward stands just in front of it, centred. No other inner panel. ═══ */
+.vault-box .vo-back { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-back { display: block; position: absolute; inset: 2px; pointer-events: none; transform: translateZ(-70px); background: linear-gradient(180deg, #1d1d20 0%, #141416 22%, #0e0e10 58%, #0b0b0c 86%, #121214 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-back::after { content: ""; position: absolute; inset: 0; mix-blend-mode: screen; background: radial-gradient(ellipse 60% 55% at 50% 42%, rgba(246, 242, 234, 0.035) 0%, rgba(246, 242, 234, 0) 70%); }
+.vault-box .vlt[data-variant="door-open"] .vo-wall--b { height: 70px !important; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-in { transform: translateZ(-64px) !important; }
+/* ═══ v55 · THE NICHE (owner, 23 Oct: the prize stands in a lit niche in the back wall). The inside is deep and quiet
+   (back wall and floor darker); a shallow recess is cut into the back wall (6 px deep, the same satin dark, its inner
+   faces shaded, no line), lit from its top edge like a museum niche: a gentle downward wash, brightest at the top, a low
+   glow, no hard edge. The reward stands in it, optically centred. The horizon draws during the opening, then goes; the
+   niche's light comes up once the lid is away, the reward resolves and settles at 4.6 s (the reveal sound); rare: the
+   light warmer and richer, slower (--k). ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-back { background: linear-gradient(180deg, #121214 0%, #0b0b0c 30%, #080809 70%, #0a0a0b 100%) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-back::after { opacity: 0.5; }
+.vault-box .vlt[data-variant="door-open"] .vo-wall--b { background: linear-gradient(0deg, #1a1a1d 0%, #111113 22%, #0a0a0b 55%, #070708 100%) !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-in :is(.vlt__above, .vlt__what) { display: none !important; }
+.vault-box .vlt[data-variant="door-open"] .vo-in::before { display: none; }
+.vault-box .vlt[data-variant="door-open"].is-open .vo-in :is(.vlt__hz, .vlt__glow) { opacity: 0 !important; }
+.vault-box .vo-rw { display: none; }
+/* The inside floor at the box's bottom: a wall-of-drawers rule (.vault-box .vo-wall { top: 46px }) had held it at eye height, where it
+   showed edge-on as a line across the middle of the opening. */
+.vault-box .vlt[data-variant="door-open"] .vo-wall--b { top: auto !important; display: block !important; }
+/* The opening in the back wall (the wall is inset 2 px in the box): v56 (owner: 'too much empty space', 'it should take all
+   the space available inside'): the niche fills the back wall, a slim 12 px of wall left round it (about 10 px on a phone). */
+.vault-box .vlt[data-variant="door-open"] .vo-back { -webkit-mask-image: linear-gradient(#0a0a0a, #0a0a0a), linear-gradient(#0a0a0a, #0a0a0a); -webkit-mask-size: 100% 100%, calc(100% - 24px) calc(100% - 24px); -webkit-mask-position: 0 0, 50% 50%; -webkit-mask-repeat: no-repeat; -webkit-mask-composite: xor; mask-composite: exclude; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw { display: block; position: absolute; inset: 14px; transform: translateZ(-70px); transform-style: preserve-3d; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw > span { display: block; position: absolute; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw > span::after { content: ""; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; }
+/* Its back, 6 px in: the same satin dark, its corners softly shaded; the wash from the top edge. */
+.vault-box .vlt[data-variant="door-open"] .vo-rw__nb { inset: -1px; transform: translateZ(-6px); background: linear-gradient(180deg, #0c0c0d 0%, #0a0a0b 55%, #080809 100%); box-shadow: inset 0 0 18px 3px rgba(10, 10, 10, 0.65); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__nb::after { background: radial-gradient(ellipse 58% 80% at 50% 0%, rgba(255, 247, 232, 0.15) 0%, rgba(255, 247, 232, 0.07) 30%, rgba(255, 247, 232, 0.022) 62%, rgba(255, 247, 232, 0) 100%), linear-gradient(180deg, rgba(255, 247, 232, 0.05) 0%, rgba(255, 247, 232, 0.012) 45%, rgba(255, 247, 232, 0) 75%); }
+.vault-box .vlt[data-variant="door-open"].is-rare .vo-rw__nb::after { background: radial-gradient(ellipse 64% 88% at 50% 0%, rgba(255, 236, 206, 0.22) 0%, rgba(255, 236, 206, 0.1) 30%, rgba(255, 236, 206, 0.032) 64%, rgba(255, 236, 206, 0) 100%), linear-gradient(180deg, rgba(255, 236, 206, 0.075) 0%, rgba(255, 236, 206, 0.018) 45%, rgba(255, 236, 206, 0) 78%); }
+/* Its inner faces: the top (where the light sits) darkest, the sides lit at the top and falling off, the sill catching the light. */
+.vault-box .vlt[data-variant="door-open"] .vo-rw__fc--t { left: -1px; right: -1px; top: 0; height: 6px; transform-origin: 50% 0; transform: rotateX(-90deg); background: #060607; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__fc--b { left: -1px; right: -1px; bottom: 0; height: 6px; transform-origin: 50% 100%; transform: rotateX(90deg); background: linear-gradient(0deg, #121214 0%, #0d0d0f 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__fc--b::after { background: radial-gradient(ellipse 50% 100% at 50% 50%, rgba(255, 247, 232, 0.05) 0%, rgba(255, 247, 232, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__fc--l { top: -1px; bottom: -1px; left: 0; width: 6px; transform-origin: 0 50%; transform: rotateY(90deg); background: linear-gradient(180deg, #0f0f11 0%, #0a0a0b 45%, #070708 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__fc--r { top: -1px; bottom: -1px; right: 0; width: 6px; transform-origin: 100% 50%; transform: rotateY(-90deg); background: linear-gradient(180deg, #0f0f11 0%, #0a0a0b 45%, #070708 100%); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-rw__fc--l, .vo-rw__fc--r)::after { background: linear-gradient(180deg, rgba(255, 247, 232, 0.08) 0%, rgba(255, 247, 232, 0.02) 40%, rgba(255, 247, 232, 0) 75%); }
+.vault-box .vlt[data-variant="door-open"].is-rare :is(.vo-rw__fc--l, .vo-rw__fc--r)::after { background: linear-gradient(180deg, rgba(255, 236, 206, 0.11) 0%, rgba(255, 236, 206, 0.03) 42%, rgba(255, 236, 206, 0) 78%); }
+.vault-box .vlt[data-variant="door-open"].is-rare .vo-rw__fc--b::after { background: radial-gradient(ellipse 50% 100% at 50% 50%, rgba(255, 236, 206, 0.07) 0%, rgba(255, 236, 206, 0) 100%); }
+/* The reward in the niche, a hair in front of its back; centred a little above the middle (optical centre). */
+.vault-box .vlt[data-variant="door-open"] .vo-rw__obj { position: absolute; inset: 0; transform: translateZ(-5px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 10px; text-align: center; color: #f6f2ea; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__obj > p { margin: 0; font-family: var(--font-display); white-space: nowrap; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__obj > .vo-rw__line { font-family: var(--font); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__from { font-size: 10.5px; letter-spacing: 0.4em; text-indent: 0.4em; color: rgba(246, 242, 234, 0.6); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__prize { margin-top: 14px !important; font-weight: 400; line-height: 1.05; font-size: 66px; letter-spacing: 0.18em; text-indent: 0.18em; color: #f6f2ea; text-shadow: 0 1px 0 rgba(10, 10, 10, 0.6); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__prize[data-len="m"] { font-size: 54px; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__prize[data-len="l"] { font-size: 46px; letter-spacing: 0.16em; text-indent: 0.16em; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__prize[data-len="xl"] { font-size: 40px; letter-spacing: 0.15em; text-indent: 0.15em; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__prize > span { display: inline-block; }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__line { margin-top: 16px !important; font-size: 15.5px; letter-spacing: 0.01em; white-space: normal !important; max-width: 300px; line-height: 1.4; color: rgba(246, 242, 234, 0.74); }
+.vault-box .vlt[data-variant="door-open"] .vo-rw__odds { margin-top: 12px !important; font-size: 10px; letter-spacing: 0.34em; text-indent: 0.34em; color: rgba(246, 242, 234, 0.5); }
+.vault-box .vlt[data-variant="door-open"]:not(.is-open) .vo-rw__obj { visibility: hidden; }
+/* v58: room above the box for the open lid (100°, rising over the box's top edge in perspective): the vault block starts
+   lower, so the lid clears the sentence above by at least 16 px in every tilt of the held pose (D69; SCOPE 23 Oct 06:1x:
+   phone +36 px, computer +78 px). The reference nests these two in its no-preference block; here they hold under reduced
+   motion too, where the box opens at once. */
+.vault-box .vlt[data-variant="door-open"] { padding-top: 78px; }
+.vault-box--phone .vlt[data-variant="door-open"] { padding-top: 36px; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-in .vlt__hz { animation: vlt-on calc(var(--k) * 0.01s) linear calc(var(--k) * 2.55s) backwards, vo-hz-out calc(var(--k) * 0.45s) ease calc(var(--k) * 3.75s) both !important; }
+  .vault-box .vlt[data-variant="door-open"] .vo-dopen__lid { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px), linear-gradient(180deg, rgba(22, 22, 23, 0.86) 0%, rgba(15, 15, 16, 0.86) 50%, rgba(11, 11, 12, 0.86) 100%) !important; -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  .vault-box .vlt[data-variant="door-open"] .vo-dopen__under { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px), linear-gradient(180deg, rgba(16, 16, 17, 0.86) 0%, rgba(11, 11, 12, 0.86) 100%) !important; -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-rw > span::after { animation: vo-nl calc(var(--k) * 1.15s) cubic-bezier(0.4, 0, 0.2, 1) calc(var(--k) * 2.25s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] :is(.vo-rw__from, .vo-rw__prize) { animation: vlt-resolve calc(var(--k) * 0.95s) cubic-bezier(0.22, 1, 0.36, 1) calc(var(--k) * 2.45s) backwards !important; }
+  .vault-box .vlt.is-playing[data-variant="door-open"] :is(.vo-rw__line, .vo-rw__odds) { animation: vlt-in calc(var(--k) * 0.6s) ease calc(var(--k) * 3.40s) backwards !important; }
+}
+/* ═══ v59 · THE CLEAR COAT (owner, 23 Oct: 'a more glowy varnish effect ... realistic and premium, not like a 3D
+   artifact'; added over the satin finish, nothing removed): on every face of the box and the lid, a fine film grain and
+   the metal's own brushed micro-grain under the coat; a soft highlight drawn out across the grain (as brushed metal
+   under lacquer reflects) that travels with the tilt, with a few hairline scratches catching the light only inside it; a
+   broad low glow sitting in the coat, shifting with the angle; the faces a touch brighter at grazing angles; soft
+   occlusion where the halves meet, at the foot of the faces and where the box meets the ground. No line, no colour,
+   nothing static white. ═══ */
+.vault-box .vo-coat, .vault-box .vo-floor__ao { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-coat { display: block; position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-coat::before, .vault-box .vlt[data-variant="door-open"] .vo-coat::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+/* Grain and brushed micro-grain, in the metal under the coat (about 3 % contrast): dark noise, screened, so only its
+   lighter fibres lift the dark a little. */
+.vault-box .vlt[data-variant="door-open"] .vo-coat::before { mix-blend-mode: screen; opacity: 0.11; background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'160'%20height%3D'160'%3E%3Cfilter%20id%3D'n'%20x%3D'0'%20y%3D'0'%20width%3D'100%25'%20height%3D'100%25'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.82'%20numOctaves%3D'3'%20seed%3D'7'%20stitchTiles%3D'stitch'%2F%3E%3CfeColorMatrix%20type%3D'saturate'%20values%3D'0'%2F%3E%3CfeComponentTransfer%3E%3CfeFuncR%20type%3D'gamma'%20exponent%3D'2.6'%2F%3E%3CfeFuncG%20type%3D'gamma'%20exponent%3D'2.6'%2F%3E%3CfeFuncB%20type%3D'gamma'%20exponent%3D'2.6'%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D'100%25'%20height%3D'100%25'%20filter%3D'url(%23n)'%2F%3E%3C%2Fsvg%3E"), url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'240'%20height%3D'240'%3E%3Cfilter%20id%3D'n'%20x%3D'0'%20y%3D'0'%20width%3D'100%25'%20height%3D'100%25'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.9%200.006'%20numOctaves%3D'2'%20seed%3D'3'%20stitchTiles%3D'stitch'%2F%3E%3CfeColorMatrix%20type%3D'saturate'%20values%3D'0'%2F%3E%3CfeComponentTransfer%3E%3CfeFuncR%20type%3D'gamma'%20exponent%3D'3.2'%2F%3E%3CfeFuncG%20type%3D'gamma'%20exponent%3D'3.2'%2F%3E%3CfeFuncB%20type%3D'gamma'%20exponent%3D'3.2'%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D'100%25'%20height%3D'100%25'%20filter%3D'url(%23n)'%2F%3E%3C%2Fsvg%3E"); background-size: 160px 160px, 240px 240px; }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-side--t, .vo-side--b) > .vo-coat::before { background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'160'%20height%3D'160'%3E%3Cfilter%20id%3D'n'%20x%3D'0'%20y%3D'0'%20width%3D'100%25'%20height%3D'100%25'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.82'%20numOctaves%3D'3'%20seed%3D'7'%20stitchTiles%3D'stitch'%2F%3E%3CfeColorMatrix%20type%3D'saturate'%20values%3D'0'%2F%3E%3CfeComponentTransfer%3E%3CfeFuncR%20type%3D'gamma'%20exponent%3D'2.6'%2F%3E%3CfeFuncG%20type%3D'gamma'%20exponent%3D'2.6'%2F%3E%3CfeFuncB%20type%3D'gamma'%20exponent%3D'2.6'%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D'100%25'%20height%3D'100%25'%20filter%3D'url(%23n)'%2F%3E%3C%2Fsvg%3E"), url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'240'%20height%3D'240'%3E%3Cfilter%20id%3D'n'%20x%3D'0'%20y%3D'0'%20width%3D'100%25'%20height%3D'100%25'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.006%200.9'%20numOctaves%3D'2'%20seed%3D'3'%20stitchTiles%3D'stitch'%2F%3E%3CfeColorMatrix%20type%3D'saturate'%20values%3D'0'%2F%3E%3CfeComponentTransfer%3E%3CfeFuncR%20type%3D'gamma'%20exponent%3D'3.2'%2F%3E%3CfeFuncG%20type%3D'gamma'%20exponent%3D'3.2'%2F%3E%3CfeFuncB%20type%3D'gamma'%20exponent%3D'3.2'%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D'100%25'%20height%3D'100%25'%20filter%3D'url(%23n)'%2F%3E%3C%2Fsvg%3E"); }
+/* The glow in the coat, and the grazing-angle brightening (stronger the more the box turns). */
+.vault-box .vlt[data-variant="door-open"] .vo-coat::after { mix-blend-mode: screen; --tilt: max(var(--rxn, 0), calc(var(--rxn, 0) * -1), var(--ryn, 0), calc(var(--ryn, 0) * -1)); background: radial-gradient(ellipse 78% 66% at calc(50% + var(--ryn, 0) * 2.4%) calc(40% - var(--rxn, 0) * 2.4%), rgba(255, 248, 236, 0.05) 0%, rgba(255, 248, 236, 0.018) 45%, rgba(255, 248, 236, 0) 82%); box-shadow: inset 0 0 30px rgba(246, 242, 234, calc(0.006 + var(--tilt) * 0.0022)); }
+/* The highlight across the grain, travelling with the tilt; the scratches stay put on the face, seen only inside it. */
+.vault-box .vlt[data-variant="door-open"] .vo-coat > span { position: absolute; left: -30%; right: -30%; top: -30%; bottom: -30%; mix-blend-mode: screen; background: radial-gradient(ellipse 30% 4.5% at 50% 50%, rgba(255, 250, 242, 0.12) 0%, rgba(255, 250, 242, 0.045) 40%, rgba(255, 250, 242, 0) 100%), radial-gradient(ellipse 40% 14% at 50% 50%, rgba(255, 250, 242, 0.03) 0%, rgba(255, 250, 242, 0) 100%); transform: translate(calc(var(--ryn, 0) * 4px), calc(-28px + var(--rxn, 0) * -7px)); will-change: transform; }
+.vault-box .vlt[data-variant="door-open"] .vo-coat > span::before { content: ""; position: absolute; inset: 0; opacity: 0.6; background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'260'%20height%3D'260'%3E%3Cline%20x1%3D'18.2'%20y1%3D'98.8'%20x2%3D'24.1'%20y2%3D'107.5'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.81'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'204.1'%20y1%3D'215.0'%20x2%3D'220.2'%20y2%3D'222.0'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.86'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'88.3'%20y1%3D'18.0'%20x2%3D'112.4'%20y2%3D'20.7'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.39'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'161.1'%20y1%3D'240.5'%20x2%3D'166.8'%20y2%3D'253.0'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.79'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'14.2'%20y1%3D'114.4'%20x2%3D'53.1'%20y2%3D'126.2'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.39'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'89.1'%20y1%3D'3.4'%20x2%3D'99.1'%20y2%3D'1.9'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.50'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'209.3'%20y1%3D'135.3'%20x2%3D'202.7'%20y2%3D'168.9'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.71'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'138.3'%20y1%3D'41.9'%20x2%3D'153.9'%20y2%3D'41.1'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.86'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'55.5'%20y1%3D'11.5'%20x2%3D'78.8'%20y2%3D'16.0'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.63'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'57.6'%20y1%3D'254.8'%20x2%3D'65.9'%20y2%3D'275.5'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.58'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3Cline%20x1%3D'44.2'%20y1%3D'33.4'%20x2%3D'77.0'%20y2%3D'22.0'%20stroke%3D'%23fff'%20stroke-opacity%3D'0.35'%20stroke-width%3D'0.4'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E"); background-size: 260px 260px; background-position: calc(var(--ryn, 0) * -4px) calc(28px + var(--rxn, 0) * 7px); -webkit-mask-image: radial-gradient(ellipse 30% 9% at 50% 50%, #0a0a0a 0%, rgba(10, 10, 10, 0.4) 50%, transparent 100%); mask-image: radial-gradient(ellipse 30% 9% at 50% 50%, #0a0a0a 0%, rgba(10, 10, 10, 0.4) 50%, transparent 100%); }
+/* The front: one coat across both halves (as the sheen); occlusion along the seam and at its foot. */
+.vault-box .vlt[data-variant="door-open"] .vo-door__half > .vo-coat { inset: auto; left: 0; right: 0; height: 246px; background: linear-gradient(180deg, rgba(10, 10, 10, 0) calc(50% - 7px), rgba(10, 10, 10, 0.2) 50%, rgba(10, 10, 10, 0) calc(50% + 7px)), linear-gradient(0deg, rgba(10, 10, 10, 0.3) 0px, rgba(10, 10, 10, 0.1) 10px, rgba(10, 10, 10, 0) 26px); }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--up > .vo-coat { top: 0; }
+.vault-box .vlt[data-variant="door-open"] .vo-door__half--down > .vo-coat { top: -123px; }
+/* The sides: the highlight with their own light (--spec); the top and bottom brushed across, so their highlight runs the other way. */
+.vault-box .vlt[data-variant="door-open"] .vo-side > .vo-coat > span { opacity: calc(0.35 + var(--spec, 0) * 10); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-side--t, .vo-side--b) > .vo-coat > span { background: radial-gradient(ellipse 4.5% 30% at 50% 50%, rgba(255, 250, 242, 0.12) 0%, rgba(255, 250, 242, 0.045) 40%, rgba(255, 250, 242, 0) 100%), radial-gradient(ellipse 14% 40% at 50% 50%, rgba(255, 250, 242, 0.03) 0%, rgba(255, 250, 242, 0) 100%); transform: translate(calc(var(--ryn, 0) * 7px), calc(var(--rxn, 0) * -2px)); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-side--t, .vo-side--b) > .vo-coat > span::before { background-position: calc(var(--ryn, 0) * -7px) calc(var(--rxn, 0) * 2px); -webkit-mask-image: radial-gradient(ellipse 9% 30% at 50% 50%, #0a0a0a 0%, rgba(10, 10, 10, 0.4) 50%, transparent 100%); mask-image: radial-gradient(ellipse 9% 30% at 50% 50%, #0a0a0a 0%, rgba(10, 10, 10, 0.4) 50%, transparent 100%); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-side--l, .vo-side--r) > .vo-coat { background: linear-gradient(0deg, rgba(10, 10, 10, 0.3) 0px, rgba(10, 10, 10, 0.1) 10px, rgba(10, 10, 10, 0) 26px); }
+/* The lid and its underside: the same coat over the smoked dark. */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__lid > .vo-coat { z-index: 1; }
+/* Where the box meets the ground: a tight soft occlusion under its footprint, lighter as it lifts. */
+.vault-box .vlt[data-variant="door-open"] .vo-floor__ao { display: block; position: absolute; left: 50%; top: 4px; width: 404px; height: 112px; margin-left: -202px; border-radius: 8px; background: rgba(10, 10, 10, 0.62); filter: blur(7px); opacity: calc(1 - var(--eye, 0) * 0.55); transform: translateX(calc(var(--ryn, 0) * -0.6px)); }
+.vault-box .vlt[data-variant="door-open"] .vo-floor__ao::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -2px; height: 8px; border-radius: 50%; background: rgba(10, 10, 10, 0.7); filter: blur(3px); }
+.vault-box--phone .vlt[data-variant="door-open"] .vo-floor__ao { top: 4px; width: 322px; height: 90px; margin-left: -161px; }
+/* v61 · FOR YOU resolves 1 s after the halves first show it (see the hooks): hidden while sealed, a 0.5 s ease-out; in
+   an opening from a tap, 1 s into it; after a hold or a draw, at the time the page sets (--fyd), or already there. */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__for { opacity: 0; transition: opacity 0.5s cubic-bezier(0, 0, 0.2, 1) !important; }
+.vault-box .vlt[data-variant="door-open"].fy-in .vo-dopen__for { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"]:not(.fy-in) .vo-dopen__for { animation: vo-fy 0.5s cubic-bezier(0, 0, 0.2, 1) var(--fyd, 1s) both !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-box .vlt[data-variant="door-open"] .vo-dopen__for { opacity: 1 !important; transition: none; }
+}
+/* OPEN ANOTHER clear of the open box's lower face. */
+.vault-box .vlt[data-variant="door-open"] .vlt__reward > .vlt__again { top: 292px; z-index: 3; }
+@media (prefers-reduced-motion: no-preference) {
+  .vault-box .vlt.is-playing[data-variant="door-open"] .vo-dopen__box { animation: none !important; }
+}
+/* v57 · the lid on its hinge (owner, 23 Oct: 'it doesn't stay stuck to the top side of the box'): its top edge is its
+   transform origin; it comes forward 8 px out of its recess along the box's top side onto the rim (the opening's top front
+   edge), then turns about that edge, which stays on the rim through the swing, to 100° and rests there open. Same
+   function lists from key to key, so the angle (not a matrix) is interpolated and the edge never leaves the rim. */
+@media (prefers-reduced-motion: reduce) {
+  .vault-box .vo-dopen { transform: none !important; }
+}
+/* On a phone the box is about 80 % of the frame's width, centred, so its tilt and its sides read: the door, its horizon,
+   its light and the reward scale together (0.8 in x, y and z) about the door's centre (stage x 50 %, y 123 px), so every
+   hand-off stays matched. The computer is unchanged. */
+.vault-box--phone .vlt[data-variant="door-open"] .vo-dopen { scale: 0.8 0.8 0.8; transform-origin: 50% 123px; }
+/* ═══ v62 · SOFTENED CORNERS (trial, owner 23 Oct: 'a lil bit radius / rounded corners on the vault'): the box's four
+   corners as seen are rounded, 6 px on the computer (4.8 px on a phone, where the box is 0.8), and the rounding runs
+   through the box's depth: the front (both halves inside one rounded opening; the seam stays sharp) and its rim take the
+   radius; the four sides stop where the curve begins, and a rounded column (two narrow facets, each lit from its own
+   angle as the sides are) carries each corner back (each facet runs 0.5 px past its joins, out of sight, so no hairline opens). The lid, 2 px inside the rim, takes the concentric radius (4 px), its
+   slab edge following round its free corners. Nothing else changes: timings, sounds, FOR YOU, finish, coat, ground, glow. ═══ */
+.vault-box .vlt[data-variant="door-open"] .vo-dopen { --vo-r: 6px; --vo-cw: calc(var(--vo-r) * 0.76537); --vo-lr: calc(var(--vo-r) - 2px); --vo-lw: calc(var(--vo-lr) * 0.76537); }
+.vault-box .vlt[data-variant="door-open"] .vo-dopen__front, .vault-box .vlt[data-variant="door-open"] .vo-dopen__front::after, .vault-box .vlt[data-variant="door-open"] .vo-rim { border-radius: var(--vo-r); }
+/* The sides end where the corner's curve begins; their bevel kept along the front and back edges. */
+.vault-box .vlt[data-variant="door-open"] :is(.vo-side--t, .vo-side--b) { left: var(--vo-r); right: var(--vo-r); box-shadow: inset 0 1px 0 0 #1a1a1b, inset 0 -1px 0 0 #1a1a1b, inset 0 3px 0 0 rgba(10, 10, 10, 0.3), inset 0 -3px 0 0 rgba(10, 10, 10, 0.3) !important; }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-side--l, .vo-side--r) { top: var(--vo-r); bottom: var(--vo-r); box-shadow: inset 1px 0 0 0 #1a1a1b, inset -1px 0 0 0 #1a1a1b, inset 3px 0 0 0 rgba(10, 10, 10, 0.3), inset -3px 0 0 0 rgba(10, 10, 10, 0.3) !important; }
+/* The corner columns: each corner a quarter round in two facets of 22.5° (one from each side it joins), the sides' own
+   metal, bevel, grain and fresnel, lit by vault-float.js from their own normals (--shade, --spec). */
+.vault-box .vo-cnr, .vault-box .vo-lcnr { display: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr { display: block; position: absolute; pointer-events: none; background-color: #151516; }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr::before, .vault-box .vlt[data-variant="door-open"] .vo-cnr::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr::before { background: #0a0a0a; opacity: var(--shade, 0.3); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr::after { mix-blend-mode: screen; opacity: calc(0.45 + var(--spec, 0) * 9); background: var(--vo-fres); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-cnr--t-l, .vo-cnr--t-r, .vo-cnr--b-l, .vo-cnr--b-r) { width: calc(var(--vo-cw) + 1px); height: 100px; background-image: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px); box-shadow: inset 0 1px 0 0 #1a1a1b, inset 0 -1px 0 0 #1a1a1b, inset 0 3px 0 0 rgba(10, 10, 10, 0.3), inset 0 -3px 0 0 rgba(10, 10, 10, 0.3); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-cnr--l-t, .vo-cnr--l-b, .vo-cnr--r-t, .vo-cnr--r-b) { width: 100px; height: calc(var(--vo-cw) + 1px); background-image: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.011) 0 1px, transparent 1px 3px); box-shadow: inset 1px 0 0 0 #1a1a1b, inset -1px 0 0 0 #1a1a1b, inset 3px 0 0 0 rgba(10, 10, 10, 0.3), inset -3px 0 0 0 rgba(10, 10, 10, 0.3); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-cnr--t-l, .vo-cnr--t-r) { top: 0; --vo-fres: linear-gradient(180deg, rgba(246, 242, 234, 0.11) 0%, rgba(246, 242, 234, 0.035) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-cnr--b-l, .vo-cnr--b-r) { bottom: 0; --vo-fres: linear-gradient(0deg, rgba(246, 242, 234, 0.08) 0%, rgba(246, 242, 234, 0.025) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-cnr--l-t, .vo-cnr--l-b) { left: 0; --vo-fres: linear-gradient(90deg, rgba(246, 242, 234, 0.1) 0%, rgba(246, 242, 234, 0.03) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-cnr--r-t, .vo-cnr--r-b) { right: 0; --vo-fres: linear-gradient(270deg, rgba(246, 242, 234, 0.1) 0%, rgba(246, 242, 234, 0.03) 40%, rgba(246, 242, 234, 0) 100%); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--t-l { left: calc(var(--vo-r) - var(--vo-cw) - 0.5px); transform-origin: calc(100% - 0.5px) 0; transform: rotateX(-90deg) rotateY(22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--t-r { left: calc(100% - var(--vo-r) - 0.5px); transform-origin: 0.5px 0; transform: rotateX(-90deg) rotateY(-22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--b-l { left: calc(var(--vo-r) - var(--vo-cw) - 0.5px); transform-origin: calc(100% - 0.5px) 100%; transform: rotateX(90deg) rotateY(22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--b-r { left: calc(100% - var(--vo-r) - 0.5px); transform-origin: 0.5px 100%; transform: rotateX(90deg) rotateY(-22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--l-t { top: calc(var(--vo-r) - var(--vo-cw) - 0.5px); transform-origin: 0 calc(100% - 0.5px); transform: rotateY(90deg) rotateX(-22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--l-b { top: calc(100% - var(--vo-r) - 0.5px); transform-origin: 0 0.5px; transform: rotateY(90deg) rotateX(22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--r-t { top: calc(var(--vo-r) - var(--vo-cw) - 0.5px); transform-origin: 100% calc(100% - 0.5px); transform: rotateY(-90deg) rotateX(-22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-cnr--r-b { top: calc(100% - var(--vo-r) - 0.5px); transform-origin: 100% 0.5px; transform: rotateY(-90deg) rotateX(22.5deg); }
+/* The lid and its underside: the concentric radius; the coat and finish inside it; the slab's edge round its free corners. */
+.vault-box .vlt[data-variant="door-open"] :is(.vo-dopen__lid, .vo-dopen__under) { border-radius: var(--vo-lr); }
+.vault-box .vlt[data-variant="door-open"] :is(.vo-dopen__lid, .vo-dopen__under) > .vo-coat, .vault-box .vlt[data-variant="door-open"] :is(.vo-dopen__lid, .vo-dopen__under)::after { border-radius: inherit; }
+.vault-box .vlt[data-variant="door-open"] .vo-lid-edge { left: var(--vo-lr); right: var(--vo-lr); transform-style: preserve-3d; }
+.vault-box .vlt[data-variant="door-open"] .vo-lcnr { display: block; position: absolute; top: 0; height: 100%; width: calc(var(--vo-lw) + 1px); background: inherit; pointer-events: none; }
+.vault-box .vlt[data-variant="door-open"] .vo-lcnr--l { right: calc(100% - 0.5px); transform-origin: calc(100% - 0.5px) 50%; transform: rotateY(-22.5deg); }
+.vault-box .vlt[data-variant="door-open"] .vo-lcnr--r { left: calc(100% - 0.5px); transform-origin: 0.5px 50%; transform: rotateY(22.5deg); }
+@keyframes vlt-out { to { opacity: 0; } }
+@keyframes vlt-in { from { opacity: 0; } }
+@keyframes vlt-on { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vlt-fin { from { filter: opacity(0); } }
+@keyframes vlt-glow { 0% { opacity: 0; } 38% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes vlt-draw-l { from { clip-path: inset(-24px -24px -24px 100%); } to { clip-path: inset(-24px); } }
+@keyframes vlt-draw-r { from { clip-path: inset(-24px 100% -24px -24px); } to { clip-path: inset(-24px); } }
+@keyframes vlt-part-l { from { right: 50%; } }
+@keyframes vlt-part-r { from { left: 50%; } }
+@keyframes vlt-pt { from { left: 50%; } }
+@keyframes vlt-gap { from { opacity: 0; transform: scale(0.6, 0.35); } }
+@keyframes vlt-resolve { from { opacity: 0; filter: blur(3px); transform: translateY(6px); } }
+@keyframes vlt-morph { from { opacity: 0; filter: blur(1.2px); transform: translateY(0.1em) scale(1.015); } }
+@keyframes vo-door-up { 0% { transform: translateY(-3px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); } 14% { transform: translateY(-7px); animation-timing-function: cubic-bezier(0.62, 0, 0.18, 1); } 82% { transform: translateY(-113px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); } 100% { transform: translateY(-108px); } }
+@keyframes vo-door-down { 0% { transform: translateY(20px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); } 14% { transform: translateY(23px); animation-timing-function: cubic-bezier(0.62, 0, 0.18, 1); } 82% { transform: translateY(113px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); } 100% { transform: translateY(108px); } }
+@keyframes vo-door-light { from { opacity: 0.6; transform: scaleY(0.13); } }
+@keyframes vo-fade { from { opacity: 1; } to { opacity: 0; } }
+@keyframes vo-dopen-out { from { transform: none; box-shadow: none; } }
+@keyframes vo-front { 0% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-40px) rotateX(58deg); } }
+@keyframes vo-light { from { opacity: 0; transform: scale(0.6, 0.35); } }
+@keyframes vo-ring-off { from { outline-color: rgba(246, 242, 234, 0.5); } }
+@keyframes vo-lift-out { from { transform: none; box-shadow: none; } to { transform: scale(1.06); box-shadow: 0 30px 60px rgba(10, 10, 10, 0.85); } }
+@keyframes vo-shadow-off { from { box-shadow: 0 30px 60px rgba(10, 10, 10, 0.85); } to { box-shadow: 0 0 0 rgba(10, 10, 10, 0); } }
+@keyframes vo-gap-up { 0% { opacity: 1; transform: translateY(-3px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); } 14% { opacity: 1; transform: translateY(-7px); animation-timing-function: cubic-bezier(0.62, 0, 0.18, 1); } 100% { opacity: 1; transform: translateY(-123px); } }
+@keyframes vo-gap-down { 0% { opacity: 1; transform: translateY(20px); animation-timing-function: cubic-bezier(0.45, 0, 0.2, 1); } 14% { opacity: 1; transform: translateY(23px); animation-timing-function: cubic-bezier(0.62, 0, 0.18, 1); } 100% { opacity: 1; transform: translateY(123px); } }
+@keyframes vo-swing { 0% { opacity: 1; transform: rotateX(0deg); animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); } 84% { opacity: 1; transform: rotateX(78deg); animation-timing-function: linear; } 100% { opacity: 0; transform: rotateX(86deg); } }
+@keyframes vo-hz-out { to { opacity: 0; } }
+@keyframes vo-nl { from { opacity: 0; } }
+@keyframes vo-fy { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vo-lid-hinge { 0% { transform: translateZ(0px) rotateX(0deg); animation-timing-function: cubic-bezier(0.3, 0, 0.3, 1); } 17.9% { transform: translateZ(8px) rotateX(0deg); animation-timing-function: cubic-bezier(0.42, 0, 0.25, 1); } 100% { transform: translateZ(8px) rotateX(100deg); } }
+@keyframes vo-edge-hinge { 0% { transform: translateZ(0px) rotateX(0deg) translateY(242px) rotateX(-90deg); animation-timing-function: cubic-bezier(0.3, 0, 0.3, 1); } 17.9% { transform: translateZ(8px) rotateX(0deg) translateY(242px) rotateX(-90deg); animation-timing-function: cubic-bezier(0.42, 0, 0.25, 1); } 100% { transform: translateZ(8px) rotateX(100deg) translateY(242px) rotateX(-90deg); } }
+@keyframes vo-under-hinge { 0% { transform: translateZ(0px) rotateX(0deg) translateZ(-5px) rotateY(180deg); animation-timing-function: cubic-bezier(0.3, 0, 0.3, 1); } 17.9% { transform: translateZ(8px) rotateX(0deg) translateZ(-5px) rotateY(180deg); animation-timing-function: cubic-bezier(0.42, 0, 0.25, 1); } 100% { transform: translateZ(8px) rotateX(100deg) translateZ(-5px) rotateY(180deg); } }
+/* A door of THE VAULT page (lot Q3 §3.5, N1, N3; MK V: `.vp-door .vlt :is(.vlt__rule, .vlt__lead, .vlt__hint, .vlt__again)
+   { display: none !important; }`, `.vp-door > .vlt[data-variant="door-open"] { padding-top: 0 !important; }`): no hairline,
+   no line, no hint, no OPEN ANOTHER; the room above its lid is the page's spacing between its doors. */
+.vault-box .vlt[data-place="page"] :is(.vlt__rule, .vlt__lead, .vlt__hint, .vlt__again) { display: none !important; }
+.vault-box .vlt[data-place="page"][data-variant="door-open"] { padding-top: 0 !important; }

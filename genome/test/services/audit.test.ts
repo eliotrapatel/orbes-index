@@ -129,6 +129,26 @@ describe('AuditService', () => {
     expect(v).toEqual({ ok: true, checked: before + n });
   });
 
+  it('appends many entries at once in their order, linked as one by one, beside concurrent single appends (recordAll)', async () => {
+    const before = (await audit.verifyChain()).checked;
+    const head = await audit.head();
+    const n = 1_203; // more than two of its insert statements
+    const many = Array.from({ length: n }, (_, i) => ({ actor: system, action: 'test.batch', targetType: 'account', targetId: `a-${i}`, details: { i } }));
+    await Promise.all([
+      t.db.transaction().execute((trx) => audit.recordAll(many, trx)),
+      ...Array.from({ length: 5 }, (_, i) => audit.record({ actor: system, action: 'test.beside', details: { i } })),
+    ]);
+    const rows = await t.db.selectFrom('audit_logs').select(['id', 'target_id', 'details']).where('action', '=', 'test.batch').orderBy('id').execute();
+    expect(rows.map((r) => r.target_id)).toEqual(many.map((m) => m.targetId));
+    expect(rows.map((r) => (r.details as { i: number }).i)).toEqual(many.map((m) => m.details.i));
+    expect(await audit.verifyChain({ batchSize: 500 })).toEqual({ ok: true, checked: before + n + 5 });
+    // An entry refused refuses the whole batch, nothing written.
+    const now = await audit.head();
+    expect(now).not.toEqual(head);
+    await expect(audit.recordAll([{ actor: system, action: 'test.ok' }, { actor: system, action: 'drop table;' }])).rejects.toBeInstanceOf(DomainError);
+    expect(await audit.head()).toEqual(now);
+  });
+
   it('commits and rolls back with the caller transaction', async () => {
     const head = await audit.head();
     await expect(

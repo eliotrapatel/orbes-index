@@ -28,7 +28,8 @@ import { isCountryCode, PHONE_RE } from '../../shared/countries.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
-import { accountDeleted } from './profiles.js';
+import { accountDeleted, profileMissing } from './profiles.js';
+import { giveProfileVault } from './vault.js';
 
 /** The bounds of a saved address (migration 0039's CHECKs) and how many an account keeps. */
 export const ADDRESS_LIMITS = Object.freeze({ saved: 5, name: 200, address: 1000 });
@@ -140,17 +141,27 @@ export async function lockAccountAddresses(tx: Db, accountId: string): Promise<v
  * Save a new address for the account, in the caller's transaction, under `lockAccountAddresses`: 409 ADDRESS_LIMIT at
  * five; the first one, or one asked as the default, is the default. Returns the row and its audit entry.
  */
-export async function insertAddress(tx: Db, accountId: string, a: DeliveryAddress, isDefault: boolean, actor: Actor, now: Date): Promise<{ row: AccountAddressRow; note: AuditRecordInput }> {
+export async function insertAddress(
+  tx: Db,
+  accountId: string,
+  a: DeliveryAddress,
+  isDefault: boolean,
+  actor: Actor,
+  now: Date,
+): Promise<{ row: AccountAddressRow; note: AuditRecordInput; vaulted: AuditRecordInput[] }> {
   const existing = await tx.selectFrom('account_addresses').select(['id', 'is_default']).where('account_id', '=', accountId).execute();
   if (existing.length >= ADDRESS_LIMITS.saved) throw addressLimit();
   const makeDefault = isDefault || existing.length === 0;
+  // THE VAULT's A COMPLETE PROFILE: the first address (the default) is the only save of the book that completion() reads.
+  const missingBefore = existing.length === 0 ? await profileMissing(tx, accountId) : [];
   if (makeDefault) await tx.updateTable('account_addresses').set({ is_default: false, updated_at: now }).where('account_id', '=', accountId).where('is_default', '=', true).execute();
   const row = await tx
     .insertInto('account_addresses')
     .values({ account_id: accountId, name: a.name, address: a.address, country: a.country, phone: a.phone, is_default: makeDefault, created_at: now, updated_at: now })
     .returningAll()
     .executeTakeFirstOrThrow();
-  return { row, note: { actor, action: 'account.address.create', targetType: 'account', targetId: accountId, details: { addressId: row.id, country: row.country, isDefault: makeDefault } } };
+  const vaulted = missingBefore.length > 0 ? await giveProfileVault(tx, accountId, missingBefore, await profileMissing(tx, accountId), now) : [];
+  return { row, note: { actor, action: 'account.address.create', targetType: 'account', targetId: accountId, details: { addressId: row.id, country: row.country, isDefault: makeDefault } }, vaulted };
 }
 
 /** The account's default address, or none (the order's creation copies it: services/orders.ts createOrder). */
@@ -201,8 +212,8 @@ export class AddressService {
     const isDefault = (input as { isDefault?: unknown })?.isDefault === true;
     await inTransaction(this.db, async (tx) => {
       await lockAccountAddresses(tx, id);
-      const { note } = await insertAddress(tx, id, a, isDefault, actor, this.clock());
-      await this.audit.record(note, tx);
+      const { note, vaulted } = await insertAddress(tx, id, a, isDefault, actor, this.clock());
+      for (const n of [note, ...vaulted]) await this.audit.record(n, tx);
     });
     return this.list(id);
   }
@@ -265,8 +276,8 @@ export class AddressService {
       await lockAddresses(tx, id);
       const row = await tx.selectFrom('account_addresses').selectAll().where('account_id', '=', id).where('is_default', '=', true).forUpdate().executeTakeFirst();
       if (!row) {
-        const { note } = await insertAddress(tx, id, a, true, actor, this.clock());
-        await this.audit.record({ ...note, details: { ...note.details, by: 'staff' } }, tx);
+        const { note, vaulted } = await insertAddress(tx, id, a, true, actor, this.clock());
+        for (const n of [{ ...note, details: { ...note.details, by: 'staff' } }, ...vaulted]) await this.audit.record(n, tx);
         return;
       }
       const fields = (['name', 'address', 'country', 'phone'] as const).filter((k) => row[k] !== a[k]);

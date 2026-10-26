@@ -364,9 +364,17 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
     );
     expect(creditAppliedLine(view({ currency: 'EUR', credit: { available: [], applied: [applied.credit.applied[1]!] } }))).toBe('\u2212 €\u00a020 (BIRTHDAY)');
     expect(creditActions(applied, 'OPERATOR')).toEqual({ apply: false, remove: true });
+    // A vault's credit (THE VAULT, lot Q3): no tier, never read as the birthday credit; after it, before the tiers'.
+    const vault = { ...birthday, grantId: 'gv', kind: 'VAULT' as const, balanceMinor: 2_500, expiresAt: '2026-11-30T22:59:59.999Z' };
+    expect(creditAvailableLine(view({ credit: { available: [grant, vault, birthday], applied: [] } }))).toBe(
+      'Birthday €\u00a020 until 12 APR 2027 · Vault €\u00a025 until 30 NOV 2026 · PALLADIUM €\u00a050 until 06 OCT 2027',
+    );
+    expect(
+      creditAppliedLine({ ...applied, credit: { available: [], applied: [...applied.credit.applied, { id: 'u5', grantId: 'gv', kind: 'VAULT', tier: null, amountMinor: 2_500, appliedAt: 'x', releasedAt: null, releasedReason: null }] } }),
+    ).toBe('\u2212 €\u00a020 (BIRTHDAY) · \u2212 €\u00a025 (VAULT) · \u2212 €\u00a030 (PLATINE)');
     // The one sentence changed in the console: the old one would be untrue.
     expect(APPLY_CREDIT_TEXT).toBe(
-      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
+      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then a vault’s, then the warranty credit, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
     );
   });
 

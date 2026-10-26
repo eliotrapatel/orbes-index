@@ -29,6 +29,8 @@
  *   YOUR ADDRESSES          2 SAVED ›     the delivery addresses saved (plan NEXT LOT §3.6.B), or NOT SET; its view
  *   YOUR WISHLIST          3 MODELS ›     the models marked with the heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), or
  *                                         NONE YET (nothing when unreadable); it opens its page, /verify/wishlist
+ *   THE VAULT                     2 ›     the vaults waiting, a quiet number (lot Q3 §3.6, D18; nothing when none); it
+ *                                         opens THE VAULT page, /verify/vault
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
  *   LIGHT MODE                    (○)     the light mode (shared/mode.ts), kept on the device; off is NOCTURNE's dark
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
@@ -73,7 +75,7 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
 import { countryName } from '../../../shared/countries.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, FROM_ORBES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, FROM_ORBES, MESSAGES, MODE, PIECES, RELEASE_NOTICES, SIGN_UP, SOUND, TASTES, TIER, VAULT, WISHLIST } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
@@ -103,6 +105,7 @@ import type { SoundSwitch } from '../sound.js';
 import type { ModeSwitch } from '../../shared/mode.js';
 import { tierModel } from '../tier-model.js';
 import { WISHLIST_PATH, wishlistCount } from '../wishlist-model.js';
+import { VAULT_PAGE_PATH, vaultQuietNumber } from '../vault-model.js';
 import { seen } from '../seen.js';
 import { accountPageOf } from '../seen-model.js';
 import type { AccountAddresses, AccountProfileView, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
@@ -144,6 +147,7 @@ export interface AccountSheetDeps {
     | 'profile'
     | 'saveProfile'
     | 'wishlist'
+    | 'vaultsWaiting'
     | 'emailPreferences'
     | 'setReleaseNotices'
   >;
@@ -157,6 +161,8 @@ export interface AccountSheetDeps {
   onTheClub(): void;
   /** YOUR WISHLIST's page, in the app (plan CUSTOMER INTELLIGENCE §3.2 W.10.2). */
   onWishlist(): void;
+  /** THE VAULT page, in the app (lot Q3 §3.6, D41). */
+  onVault(): void;
   /** The sound was switched here: the footer's SOUND says it too. */
   onSound(): void;
   /** The club's status was read here: the header's tier follows it. */
@@ -270,6 +276,8 @@ export class AccountSheet {
   protected noticesGen = 0;
   /** YOUR WISHLIST's line (3 MODELS, NONE YET), read as the sheet opens; null until read, or unreadable (no line). */
   protected wishCount: string | null = null;
+  /** THE VAULT's quiet number (lot Q3 §3.6, D18): how many vaults wait; null when none (or unread: no number). */
+  protected vaultCount: string | null = null;
 
   /**
    * `page` (desktop, BRIEF decision 5: views/desktop-account.ts): the account as pages of the app, its views
@@ -389,6 +397,7 @@ export class AccountSheet {
     this.noticesGen++;
     this.notices = null;
     this.wishCount = null;
+    this.vaultCount = null;
     // The sheet's view ends as it closes; the page under it counts again.
     seen.release(this);
     this.el.hidden = true;
@@ -431,7 +440,7 @@ export class AccountSheet {
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   protected async read(): Promise<void> {
     const gen = ++this.readGen;
-    const [club, pieces, unread, sizes, addresses, profile, wishlist] = await Promise.all([
+    const [club, pieces, unread, sizes, addresses, profile, wishlist, vaults] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
         this.deps.session.noteError(e);
         return null;
@@ -442,6 +451,7 @@ export class AccountSheet {
       this.deps.api.addresses().catch(() => null),
       this.deps.api.profile().catch(() => null),
       this.deps.api.wishlist().catch(() => null),
+      this.deps.api.vaultsWaiting().catch(() => null),
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
@@ -465,6 +475,7 @@ export class AccountSheet {
     }
     this.listed = pieces?.length ?? 0;
     this.wishCount = wishlistCount(wishlist);
+    this.vaultCount = vaultQuietNumber(vaults);
     this.deps.onClub(club);
     if (this.view === 'account') {
       const focused = this.panel.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
@@ -531,6 +542,7 @@ export class AccountSheet {
         this.sizesRow(),
         this.addressesRow(),
         this.wishlistRow(),
+        this.vaultRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
         h('label', { class: 'n-row n-account__mode' }, h('span', { class: 'n-g n-row__label', text: MODE.label }), mode.el),
         leadRow(ACCOUNT_PASSWORD.change, { onOpen: () => this.openPassword(), attrs: { 'data-key': 'password' } }),
@@ -1618,6 +1630,24 @@ export class AccountSheet {
       extraClass: 'n-account__sizes n-account__wishlist',
     });
     if (this.wishCount) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__wishlist-line' }, ...withNumerals(this.wishCount)), row.lastChild);
+    return row;
+  }
+
+  /**
+   * THE VAULT (lot Q3 §3.6; D18, D41): after YOUR WISHLIST, its quiet number of vaults waiting at its right (nothing when
+   * none), then its page (the sheet closes first).
+   */
+  protected vaultRow(): HTMLElement {
+    const row = leadRow(VAULT.row, {
+      href: VAULT_PAGE_PATH,
+      onOpen: () => {
+        this.close();
+        this.deps.onVault();
+      },
+      attrs: { 'data-key': 'vault' },
+      extraClass: 'n-account__sizes n-account__vault',
+    });
+    if (this.vaultCount) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__vault-line' }, ...withNumerals(this.vaultCount)), row.lastChild);
     return row;
   }
 

@@ -28,6 +28,13 @@ export type CameraFailure = 'NotAllowedError' | 'NotFoundError' | 'NotReadableEr
 /** 5b shown (lot Q2, step Q2.8): its rows, one of them chosen. */
 const FIVE_B_READY = '.view--live .live__addons:not([hidden]) .live__addon-item.is-on';
 
+/** THE VAULT's door shown (lot Q3, step Q3.10): the box in its slot, on SOLD OUT for your size or the end page. */
+const VAULT_DOOR = '.view--live .live__vault-slot .vault-box .vo-dopen__front';
+const VAULT_END_DOOR = '.view--live.live--end-vault .live__vault-slot .vault-box .vo-dopen__front';
+const VAULT_OPEN = '.view--live .live__vault-slot .vlt.is-open';
+/** THE VAULT page drawn with its doors (lot Q3, step Q3.11). */
+const VAULT_PAGE_READY = '.view--vault[data-state="ready"] .vp-vault .vo-dopen__front';
+
 /** The demo's service whose name is exactly 40 characters (addons-hold-stress). */
 const LONGEST_ADDON = 'A SECOND BOX OF THE HOUSE, WITH ITS CARD';
 
@@ -2258,6 +2265,44 @@ export const PHONE_STATES: readonly UiState[] = [
   { id: 'live-removed', title: 'YOUR ENTRY IS REMOVED', refs: ['live-19', 'C30'], variant: 'live', as: 'removed', path: release('live'), ready: '.view--live .n-live__end' },
   // No before-capture shows ENTER THE LINE (live-09 is the line itself): the room's own pieces.
   { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['same pieces'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
+  // ── THE VAULT (lot Q3, step Q3.10; MK #sold, #release-end; the stage `vault`): its door on SOLD OUT for your size and
+  // on the end page of a release sold out whole, closed (also in light: the room stays dark), then opened (the reveal
+  // still under reduced motion: €25 · House credit, valid 30 days. · 1 IN 10; GUARANTEED, rare), each opening its own
+  // collector's vault (they write: last of the stage). ──
+  { id: 'live-sold-out-size-vault', title: 'SOLD OUT for your size with THE VAULT (MK S): the door under the sentence, A vault is waiting for you., DRAW IT DOWN, OR PRESS AND HOLD, then LEAVE THE LINE', refs: ['MK S'], variant: 'vault', as: 'vaultS', path: release('live'), ready: VAULT_DOOR, check: vaultClosed },
+  { id: 'live-sold-out-size-vault-light', title: 'SOLD OUT for your size with THE VAULT, in light mode: the room and the door stay dark', refs: ['MK S'], variant: 'vault', as: 'vaultS', path: release('live'), light: true, ready: VAULT_DOOR, check: allOf(vaultClosed, staysDark) },
+  { id: 'live-end-vault', title: 'The end page of a release sold out whole with THE VAULT (MK 11): LIVE RELEASE and the name, SOLD OUT, its sentence, the door, THE RELEASES', refs: ['MK 11'], variant: 'vault', as: 'vaultEnd', path: release('vaultEnd'), act: (run) => sellOutWhole(run, 'vaultEnd'), ready: VAULT_END_DOOR, mutates: true, check: vaultClosed },
+  { id: 'live-end-vault-light', title: 'The end page with THE VAULT, in light mode: drawn dark, as the room', refs: ['MK 11'], variant: 'vault', as: 'vaultEndLight', path: release('vaultEndLight'), light: true, act: (run) => sellOutWhole(run, 'vaultEndLight'), ready: VAULT_END_DOOR, mutates: true, check: allOf(vaultClosed, staysDark) },
+  { id: 'vault-open', title: 'SOLD OUT for your size, THE VAULT opened (MK S, PLAY THE VAULT): FROM THE VAULT, €25, House credit, valid 30 days., 1 IN 10, OPEN ANOTHER above LEAVE THE LINE, the page dimmed', refs: ['MK S'], variant: 'vault', as: 'vaultSOpen', path: release('live'), act: (run) => openTheVault(run, { reduced: true }), ready: VAULT_OPEN, mutates: true, check: vaultOpened('.live__leave-line') },
+  { id: 'vault-open-rare', title: 'SOLD OUT for your size, THE VAULT opened on a rare reward: GUARANTEED, A piece at the next LIVE release., 1 IN 200, OPEN ANOTHER', refs: ['MK S'], variant: 'vault', as: 'vaultSRare', path: release('live'), act: (run) => openTheVault(run, { rare: true, reduced: true }), ready: VAULT_OPEN, mutates: true, check: vaultOpened('.live__leave-line') },
+  { id: 'live-end-vault-open', title: 'The end page with THE VAULT opened (MK 11): the reward, OPEN ANOTHER above THE RELEASES', refs: ['MK 11'], variant: 'vault', as: 'vaultEndOpen', path: release('vaultEndOpen'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpen'), openTheVault(run, { reduced: true })), ready: VAULT_OPEN, mutates: true, check: vaultOpened('.n-live__back') },
+  // ── THE VAULT page (lot Q3, step Q3.11; MK #vault-page V; the stage `vault`): MK's demo (two waiting, three opened, SAVE
+  // THE IMAGE and GIVE IT, PALLADIUM 3 pieces away, the profile DONE), in light (dark all the same, D41), none waiting, a
+  // first visit, ONE MOMENT…, could not be read, the stress (five waiting, twenty opened, GIVEN); YOUR ACCOUNT's row with
+  // its quiet number; NOW's line; YOUR ORDERS' piece won free (CLAIM IT) and right to buy (BUY); a credit to give's page
+  // (ACCEPT) and a friend's invitation (CREATE ACCOUNT, its line). Nothing here writes. ──
+  { id: 'vault-page', title: 'THE VAULT (MK V): YOUR VAULTS · 2 WAITING, two doors (PRESS AND HOLD, the source line, WAITS UNTIL), OPENED with SAVE THE IMAGE and GIVE IT, HOW TO OBTAIN A VAULT, WHAT A VAULT CAN HOLD', refs: ['MK V'], variant: 'vault', as: 'vaultPage', path: at('/verify/vault'), ready: VAULT_PAGE_READY, check: vaultPageCheck({ doors: 2, actions: ['SAVE THE IMAGE', 'GIVE IT'] }) },
+  { id: 'vault-page-light', title: 'THE VAULT, in light mode: the page stays dark (D41)', refs: ['MK V'], variant: 'vault', as: 'vaultPage', path: at('/verify/vault'), light: true, ready: VAULT_PAGE_READY, check: allOf(vaultPageCheck({ doors: 2, actions: ['SAVE THE IMAGE', 'GIVE IT'] }), staysDark) },
+  { id: 'vault-page-empty', title: 'THE VAULT, none waiting: YOUR VAULTS, No vault is waiting., OPENED', refs: ['MK V'], variant: 'vault', as: 'vaultPageEmpty', path: at('/verify/vault'), ready: '.view--vault[data-state="empty"] .vp-none' },
+  { id: 'vault-page-first', title: 'THE VAULT, a first visit: the title, the sentence, HOW TO OBTAIN A VAULT, WHAT A VAULT CAN HOLD', refs: ['MK V'], variant: 'vault', as: 'vaultPageFirst', path: at('/verify/vault'), ready: '.view--vault[data-state="first"] .vp-sec--hold' },
+  { id: 'vault-page-loading', title: 'THE VAULT while it is read: ONE MOMENT…', refs: ['MK V'], variant: 'vault', as: 'vaultPage', path: at('/verify/vault'), routes: async (page, hold) => hold.hold('**/api/v1/account/vaults'), ready: '.view--vault[data-state="loading"] .n-loading [role=status]' },
+  {
+    id: 'vault-page-error',
+    title: 'THE VAULT could not be read: its sentence, the reason, TRY AGAIN',
+    refs: ['MK V'],
+    variant: 'vault',
+    as: 'vaultPage',
+    path: at('/verify/vault'),
+    routes: (page) => page.route('**/api/v1/account/vaults', (route) => route.abort('failed')),
+    ready: '.view--vault[data-state="failed"] .vp-retry',
+  },
+  { id: 'vault-page-stress', title: 'THE VAULT at its most: five waiting (a long model and variant), twenty opened (GIVE IT, GIVEN, SAVE THE IMAGE, a long add-on), PALLADIUM · THE HIGHEST TIER', refs: ['MK V'], variant: 'vault', as: 'vaultPageStress', path: at('/verify/vault'), ready: VAULT_PAGE_READY, stress: true, check: vaultPageCheck({ doors: 5, actions: ['SAVE THE IMAGE', 'GIVE IT', 'GIVEN'] }) },
+  { id: 'vault-account-sheet', title: 'The account sheet with THE VAULT after YOUR WISHLIST, its quiet number 2', refs: ['MK V', 'C2'], variant: 'vault', as: 'vaultPage', path: at('/verify'), act: (run) => openAccountSheet(run), ready: `${ACCT} :is(.n-account__vault, .d-acct__cards)`, viewport: true },
+  { id: 'now-vault', title: 'NOW with THE VAULT’s line: A VAULT IS WAITING FOR YOU, OPEN', refs: ['D18'], variant: 'vault', as: 'vaultPage', path: at('/verify'), ready: '.view--now .now__vault' },
+  { id: 'orders-vault-claim', title: 'YOUR ORDERS: a piece won free, FROM THE VAULT, FREE, its sizes, CLAIM IT until its day', refs: ['D20'], variant: 'vault', as: 'vaultClaim', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'ORDERS'), ready: '.view--pieces .n-vault-claim .n-vault-claim__claim' },
+  { id: 'orders-vault-buy', title: 'YOUR ORDERS: a right to buy, FROM THE VAULT, its price, until when in Paris, BUY', refs: ['D29'], variant: 'vault', as: 'vaultBuy', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'ORDERS'), ready: '.view--pieces .n-vault-buy .n-vault-buy__buy' },
+  { id: 'vault-gift', title: 'A credit to give, as its friend opens it: A FRIEND SENT YOU A CREDIT, €30 for your first piece, ACCEPT', refs: ['N10'], variant: 'vault', as: 'vaultFriend', path: (d) => `/verify/gift/${d.links.vaultGift}`, ready: '.view--gift[data-state="ready"] .vp-gift__accept' },
+  { id: 'vault-join', title: 'A friend’s invitation, signed out: CREATE ACCOUNT with its line, A friend invited you to ORBES.', refs: ['N10'], variant: 'vault', path: (d) => `/verify/join/${d.links.vaultJoin}`, ready: ':is(.view--pieces, .view--signin) .n-own__lead, .view--signin' },
   { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'after-room-door', title: 'The after-room’s second door: the horizon open, a point at each parted end, the light through the gap (lot Q1 §3.9)', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
   {
@@ -3037,6 +3082,140 @@ async function fiveBRows(page: Page): Promise<string[]> {
 }
 
 /** Each of `checks`, in order: every problem of each. */
+/**
+ * Open THE VAULT on the page (lot Q3, step Q3.10): its door held with the space bar until the hold is full (HOLD_MS 1 500), the
+ * server's draw landing on the table's first row (€25 HOUSE CREDIT) or on GUARANTEED (`rare`: past the first row's
+ * 100 000 parts of 1 000 000), the reveal under reduced motion (the reward at once) when `reduced`.
+ */
+async function openTheVault(run: StateRun, opts: { rare?: boolean; reduced?: boolean } = {}): Promise<void> {
+  const service = run.stage.ctx.services.vault as unknown as { random: (max: number) => number };
+  service.random = () => (opts.rare ? 100_000 : 0);
+  if (opts.reduced) await run.page.emulateMedia({ reducedMotion: 'reduce' });
+  const front = run.page.locator('.view--live .live__vault-slot .vo-dopen__front');
+  await front.waitFor();
+  await front.focus();
+  await run.page.keyboard.down(' ');
+  // Held until the hold is complete on the page's own clock (a page still loading runs it slower than the test's).
+  await run.page.waitForFunction(() => (document.querySelector('.live__vault-slot .vlt') as HTMLElement | null)?.style.getPropertyValue('--p') === '1.0000', null, { timeout: 15_000 });
+  await run.page.keyboard.up(' ');
+  await run.page.locator(VAULT_OPEN).waitFor({ state: 'attached' });
+}
+
+/**
+ * A release of one piece sold out whole while its page is open (lot Q3 §3.4): the page in the line, its piece's holder
+ * pays (seedVault's `<key>Buyer`), Q3.5's hook gives the line its vaults, the release ends; the page follows the room to
+ * its end page.
+ */
+async function sellOutWhole(run: StateRun, key: string): Promise<void> {
+  const dropId = run.demo.releases[key]!;
+  const buyer = run.demo.accounts[`${key}Buyer`]!;
+  await run.page.locator('.view--live .live__queue').first().waitFor();
+  await run.stage.ctx.services.live.confirm(buyer.id, dropId, buyer.actor);
+}
+
+/** A closed door (lot Q3 §3.3): its line and its hint shown, no OPEN ANOTHER, no number on it (D10). */
+async function vaultClosed(page: Page): Promise<string[]> {
+  const at = await page.evaluate(() => {
+    const vlt = document.querySelector('.live__vault-slot .vlt');
+    const shown = (sel: string) => {
+      const e = vlt?.querySelector(sel);
+      return !!e && getComputedStyle(e).display !== 'none' && Number(getComputedStyle(e).opacity) > 0.5 && e.getBoundingClientRect().height > 0;
+    };
+    return { lead: shown('.vlt__lead'), hint: shown('.vlt__hint'), again: shown('.vlt__again'), digits: /\d/.test(vlt?.querySelector('.vo-dopen')?.textContent ?? '') };
+  });
+  return [...(at.lead ? [] : ['the door\'s line is not shown']), ...(at.hint ? [] : ['its hint is not shown']), ...(at.again ? ['OPEN ANOTHER is shown on a closed door'] : []), ...(at.digits ? ['a number on the box'] : [])];
+}
+
+/**
+ * An opened vault (lot Q3 §3.2, N3, N35): OPEN ANOTHER shown under the reward, wholly above `below` (LEAVE THE LINE on
+ * S, THE RELEASES on the end page) and clear of it; the door's line and hint gone; the page dimmed to 16 % (`below` at
+ * 0.16), OPEN ANOTHER at full strength.
+ */
+function vaultOpened(below: string) {
+  return async (page: Page): Promise<string[]> => {
+    const at = await page.evaluate((sel) => {
+      const vlt = document.querySelector('.live__vault-slot .vlt');
+      const again = vlt?.querySelector('.vlt__again');
+      const next = document.querySelector(`.view--live ${sel}`);
+      const o = (e: Element | null | undefined) => (e ? Number(getComputedStyle(e).opacity) : null);
+      const gone = (e: Element | null | undefined) => !e || getComputedStyle(e).display === 'none' || Number(getComputedStyle(e).opacity) === 0;
+      const box = (e: Element | null | undefined) => (e ? e.getBoundingClientRect() : null);
+      // The page's dim is on the lines themselves or on what holds them (the screen's children, the room's places).
+      let dim = 1;
+      for (let e: Element | null = next; e && e !== document.body; e = e.parentElement) dim *= Number(getComputedStyle(e).opacity);
+      const a = box(again);
+      const n = box(next);
+      return { again: !!again && !gone(again), againOpacity: o(again), lead: gone(vlt?.querySelector('.vlt__lead')), hint: gone(vlt?.querySelector('.vlt__hint')), dim, gap: a && n ? n.top - a.bottom : null, below: !!n };
+    }, below);
+    const out: string[] = [];
+    if (!at.again) out.push('OPEN ANOTHER is not shown');
+    if (at.againOpacity !== null && at.againOpacity < 0.99) out.push(`OPEN ANOTHER at opacity ${at.againOpacity}`);
+    if (!at.lead) out.push('the door\'s line is still shown');
+    if (!at.hint) out.push('the door\'s hint is still shown');
+    if (!at.below) out.push(`no ${below} under the vault`);
+    else if (Math.abs(at.dim - 0.16) > 0.01) out.push(`${below} at opacity ${at.dim.toFixed(2)}, not 0.16`);
+    if (at.gap !== null && at.gap < 0) out.push(`OPEN ANOTHER overlaps ${below} by ${Math.round(-at.gap)} px`);
+    return out;
+  };
+}
+
+/** Light mode kept on the device, the page drawn dark all the same (the room, and the end page with THE VAULT). */
+async function staysDark(page: Page): Promise<string[]> {
+  const at = await page.evaluate(() => {
+    const rgb = getComputedStyle(document.body).backgroundColor.match(/\d+(\.\d+)?/g)?.map(Number) ?? [255, 255, 255];
+    return { mode: document.documentElement.dataset.mode ?? null, luminance: (rgb[0]! + rgb[1]! + rgb[2]!) / 3, nocturne: document.body.classList.contains('nocturne') };
+  });
+  return [...(at.mode === 'light' ? [] : ['light mode is not kept on the device']), ...(at.luminance < 40 ? [] : [`the page's ground is light (${Math.round(at.luminance)})`])];
+}
+
+/**
+ * THE VAULT page as MK V draws it (lot Q3 §3.5, §3.12; N1, N33): `doors` doors, each with its source line, WAITS UNTIL and
+ * PRESS AND HOLD (OP-23), none with its hairline, "A vault is waiting for you.", the DRAW IT DOWN hint or OPEN ANOTHER;
+ * each of `actions` shown (SAVE THE IMAGE, GIVE IT, GIVEN); no number on a box; no rules link.
+ */
+function vaultPageCheck(want: { doors: number; actions: readonly string[] }) {
+  return async (page: Page): Promise<string[]> => {
+    const at = await page.evaluate(() => {
+      const shown = (e: Element | null) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+      const doors = [...document.querySelectorAll('.view--vault .vp-vault')].map((li) => ({
+        rule: shown(li.querySelector('.vlt__rule')),
+        lead: shown(li.querySelector('.vlt__lead')),
+        hint: shown(li.querySelector('.vlt__hint:not(.vp-press)')),
+        again: shown(li.querySelector('.vlt__again')),
+        press: shown(li.querySelector('.vp-press')) && li.querySelector('.vp-press')!.textContent === 'PRESS AND HOLD',
+        from: li.querySelector('.vp-from')?.textContent ?? '',
+        until: li.querySelector('.vp-until')?.textContent ?? '',
+        pressAbove: (() => {
+          const p = li.querySelector('.vp-press')?.getBoundingClientRect();
+          const f = li.querySelector('.vp-from')?.getBoundingClientRect();
+          const box = li.querySelector('.vo-dopen__front')?.getBoundingClientRect();
+          return !!p && !!f && !!box && p.top >= box.bottom - 1 && p.bottom <= f.top + 1;
+        })(),
+        digits: /\d/.test(li.querySelector('.vo-dopen')?.textContent ?? ''),
+      }));
+      const actions = [...document.querySelectorAll('.view--vault .vp-opened .vp-occ__state')].map((e) => e.textContent ?? '');
+      const rules = /RULES/i.test(document.querySelector('.view--vault')?.textContent ?? '');
+      return { doors, actions, rules };
+    });
+    const out: string[] = [];
+    if (at.doors.length !== want.doors) out.push(`${at.doors.length} doors, not ${want.doors}`);
+    at.doors.forEach((d, i) => {
+      if (d.rule) out.push(`door ${i + 1}: its hairline is shown`);
+      if (d.lead) out.push(`door ${i + 1}: "A vault is waiting for you." is shown`);
+      if (d.hint) out.push(`door ${i + 1}: the DRAW IT DOWN hint is shown`);
+      if (d.again) out.push(`door ${i + 1}: OPEN ANOTHER is shown`);
+      if (!d.press) out.push(`door ${i + 1}: no PRESS AND HOLD`);
+      if (!d.pressAbove) out.push(`door ${i + 1}: PRESS AND HOLD is not under the box and above the source line`);
+      if (!d.from) out.push(`door ${i + 1}: no source line`);
+      if (!/^WAITS UNTIL \d{1,2} [A-Z]+$/.test(d.until)) out.push(`door ${i + 1}: WAITS UNTIL reads "${d.until}"`);
+      if (d.digits) out.push(`door ${i + 1}: a number on the box`);
+    });
+    for (const a of want.actions) if (!at.actions.includes(a)) out.push(`no ${a} in OPENED`);
+    if (at.rules) out.push('a rules link on the page');
+    return out;
+  };
+}
+
 function allOf(...checks: ((page: Page) => Promise<string[]>)[]) {
   return async (page: Page): Promise<string[]> => {
     const out: string[] = [];
@@ -3594,6 +3773,36 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('addons-hold-light'), 1440, { light: true, name: 'addons-hold', extra: { check: allOf(fiveBColumn(false), fiveBRows) } }),
     onDesk(phoneState('addons-hold-stress'), 1440, { extra: { check: fiveBColumn() } }),
     onDesk(phoneState('addons-hold-stress'), 1024, { extra: { check: fiveBColumn() } }),
+  ],
+  // ── THE VAULT (lot Q3, step Q3.10; MK #sold, #release-end, desk) on its stage (vault): the door in the centre column of
+  // SOLD OUT for your size (also at 1024 × 768, and in light: the room dark), on the end page of a release sold out whole
+  // (also in light); then opened, each its own collector's vault (they write, last): S with its reward and OPEN ANOTHER
+  // above LEAVE THE LINE, a rare one, the end page's OPEN ANOTHER clear of THE RELEASES ──
+  'desk-16': [
+    ...desk(1440, 'live-sold-out-size-vault'),
+    ...desk(1024, 'live-sold-out-size-vault'),
+    onDesk(phoneState('live-sold-out-size-vault-light'), 1440, { light: true, name: 'live-sold-out-size-vault' }),
+    onDesk(phoneState('live-end-vault'), 1440, { extra: { as: 'vaultEndDesk', path: release('vaultEndDesk'), act: (run) => sellOutWhole(run, 'vaultEndDesk') } }),
+    onDesk(phoneState('live-end-vault-light'), 1440, { light: true, name: 'live-end-vault', extra: { as: 'vaultEndDeskLight', path: release('vaultEndDeskLight'), act: (run) => sellOutWhole(run, 'vaultEndDeskLight') } }),
+    onDesk(phoneState('vault-open'), 1440, { extra: { as: 'vaultSOpenDesk' } }),
+    onDesk(phoneState('vault-open-rare'), 1440, { extra: { as: 'vaultSRareDesk' } }),
+    onDesk(phoneState('live-end-vault-open'), 1440, { extra: { as: 'vaultEndOpenDesk', path: release('vaultEndOpenDesk'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpenDesk'), openTheVault(run, { reduced: true })) } }),
+  ],
+  // ── THE VAULT page and its surroundings on a computer (lot Q3, step Q3.11; MK V desk): its own page, /verify/account/
+  // vault (also at 1024 × 768, and in light: dark all the same), none waiting, a first visit, ONE MOMENT…, could not be
+  // read, the stress; YOUR ACCOUNT's seventh card THE VAULT with its quiet number; NOW's line; the piece won free on its
+  // order's page (CLAIM IT), the right to buy at the head of ORDERS; a credit to give's page; the invitation's sign-in. ──
+  'desk-17': [
+    ...desk(1440, 'vault-page', 'vault-page-empty', 'vault-page-first', 'vault-page-loading', 'vault-page-error', 'vault-page-stress', 'now-vault', 'orders-vault-buy', 'vault-gift'),
+    ...desk(1024, 'vault-page'),
+    onDesk(phoneState('vault-page-light'), 1440, { light: true, name: 'vault-page' }),
+    // YOUR ACCOUNT's page, its seventh card THE VAULT (2) after YOUR WISHLIST (N32): its own state (the phone's is the
+    // sheet over NOW, no twin of it).
+    ...([1440, 1024] as const).map((w) =>
+      deskOwn('account-vault', { title: 'YOUR ACCOUNT with its seventh card THE VAULT after YOUR WISHLIST, its quiet number 2', variant: 'vault', as: 'vaultPage', path: at('/verify/account'), ready: '.view--account .d-acct__cards [data-key="vault"]' }, w),
+    ),
+    onDesk(phoneState('orders-vault-claim'), 1440, { extra: { act: (run) => openOrderPage(run, /MONOLITHE/), ready: '.view--order .n-vault-claim .n-vault-claim__claim' } }),
+    onDesk(phoneState('vault-join'), 1440, { extra: { ready: '.view--signin' } }),
   ],
 });
 

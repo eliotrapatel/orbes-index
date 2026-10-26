@@ -222,7 +222,7 @@ describe('the tiers\' grants (BP-19 T5)', () => {
     const today = parisDay(clock.now());
     const given = await birthday(none.id, today);
     expect(await creditBalances(t.db, none.id)).toEqual([
-      { grantId: given.id, kind: 'BIRTHDAY', tier: null, birthdayOn: today, amountMinor: 2_000, balanceMinor: 2_000, currency: 'EUR', expiresAt: birthdayExpiry(today, 30) },
+      { grantId: given.id, kind: 'BIRTHDAY', tier: null, birthdayOn: today, usableWhileNoPiece: false, amountMinor: 2_000, balanceMinor: 2_000, currency: 'EUR', expiresAt: birthdayExpiry(today, 30) },
     ]);
     const bare = await ctx.services.club.inUse(none.id, 0);
     expect(bare).toMatchObject({ credit: null, birthdayCredit: { balanceMinor: 2_000, currency: 'EUR', expiresAt: birthdayExpiry(today, 30) } });
@@ -266,7 +266,7 @@ describe('the tiers\' grants (BP-19 T5)', () => {
     const none = await createAccount(t.db);
     const given = await warranty(none.id, 45_000);
     expect(await creditBalances(t.db, none.id)).toEqual([
-      { grantId: given.id, kind: 'WARRANTY', tier: null, birthdayOn: null, amountMinor: 45_000, balanceMinor: 45_000, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 12) },
+      { grantId: given.id, kind: 'WARRANTY', tier: null, birthdayOn: null, usableWhileNoPiece: false, amountMinor: 45_000, balanceMinor: 45_000, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 12) },
     ]);
     expect(await ctx.services.club.inUse(none.id, 0)).toMatchObject({ credit: null, birthdayCredit: null, warrantyCredit: { balanceMinor: 45_000, currency: 'EUR', expiresAt: addUtcMonths(clock.now(), 12) } });
     // ensureGrants (a status read) adds nothing to it.

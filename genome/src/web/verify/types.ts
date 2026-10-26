@@ -507,6 +507,8 @@ export interface AddonOfferItem {
   textMax?: number;
   /** Lot Q2, step Q2.8 (5b, N2): at a LIVE hold, an add-on with stock (added at PAY while available). */
   whileAvailable?: boolean;
+  /** Lot Q3 (THE VAULT, §2.4): in YOUR ORDERS, an add-on a vault's right to buy offers until then (ISO time). */
+  vaultUntil?: string;
 }
 
 /** A choice carried onto an order that could not be added: none left (NONE_LEFT), or no longer offered (NOT_OFFERED). */
@@ -855,7 +857,7 @@ export interface ClubEntry {
  */
 export interface ClubGuarantee {
   id: string;
-  scope: 'RELEASE' | 'MODEL' | 'COLLECTION';
+  scope: 'RELEASE' | 'MODEL' | 'COLLECTION' | 'LIVE';
   target: string | null;
   pieces: number;
   validUntil: string;
@@ -889,6 +891,11 @@ export interface ClubInUse {
    * until when, apart from the others; for an account without a tier too. Absent from a server before it; null when none.
    */
   warrantyCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
+  /**
+   * The vaults' credits (THE VAULT, lot Q3: a house credit won, a friend's credit for a first piece): what is left and
+   * until when, apart from the others; for an account without a tier too. Absent from a server before it; null when none.
+   */
+  vaultCredit?: { balanceMinor: number; currency: string; expiresAt: string } | null;
   care: { year: number; used: number; allowance: number | 'ALL' } | null;
   gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
   /** THE PROGRAM's "Credit usable on": the orders the credit is taken off (the note under CREDIT names them). */
@@ -1324,11 +1331,12 @@ export interface LiveAccountEntry {
 
 /**
  * The channel an order was sold through (plan LIVE RELEASE+, choice 6): a LIVE RELEASE, a draw, the private salon; a
- * welcome gift; a size exchange (plan NEXT LOT §3.6.D: the other size, an order of its own, SIZE EXCHANGE).
+ * welcome gift; a size exchange (plan NEXT LOT §3.6.D: the other size, an order of its own, SIZE EXCHANGE); a vault's
+ * product (THE VAULT: won free or bought under its right to buy).
  */
-export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON' | 'GIFT' | 'EXCHANGE';
+export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON' | 'GIFT' | 'EXCHANGE' | 'VAULT';
 /** The server's order (ORDER_CHANNELS in db/schema.ts). */
-export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'];
+export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE', 'VAULT'];
 
 /** An order's step: RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
 export type OrderStatus = 'RESERVED' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
@@ -1378,6 +1386,11 @@ export interface AccountOrder {
   set?: AccountOrderSet | null;
   /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
   giftTier?: 'PLATINE' | 'PALLADIUM' | null;
+  /**
+   * THE VAULT (lot Q3 §3.8): a VAULT order's, won free (`free`: at 0, CLAIM IT until `claimBy`) or bought under a right to
+   * buy; null (or absent) for any other order.
+   */
+  vault?: { free: boolean; claimBy: string | null } | null;
   /** BP-19 T5: the credit taken off it, in its currency; 0 for none. */
   creditMinor?: number;
   status: OrderStatus;
@@ -1555,11 +1568,12 @@ export interface AccountThread {
 /**
  * A house message (macro scope D24, M3 and M4; lot M2 plan §1.5; GET /api/v1/account/house-messages): written by ORBES,
  * read-only. A moment's words were rendered at its delivery; its links are fixed by its kind (src/shared/house-words.ts
- * HOUSE_MOMENT_LINKS); a custom message has none.
+ * HOUSE_MOMENT_LINKS); a custom message has none. Since migration 0061 a vault's arrival (VAULT, THE VAULT D18): its
+ * words rendered at its delivery, no moment.
  */
 export interface AccountHouseMessage {
   id: string;
-  source: 'MOMENT' | 'CUSTOM';
+  source: 'MOMENT' | 'CUSTOM' | 'VAULT';
   /** A moment's kind (FIRST_REGISTRATION…); null for a custom message. */
   moment: string | null;
   title: string;
@@ -1791,4 +1805,123 @@ export interface SheetWorn {
 export interface SheetWornPage extends SheetWorn {
   page: number;
   pageSize: number;
+}
+
+// ── THE VAULT (lot Q3) ─────────────────────────────────────────────────────
+
+/** Where a vault comes from (vaults.source; vault/SCOPE.md E2): the seven occasions. */
+export type VaultSource = 'LIVE' | 'PIECE' | 'TIER' | 'WORN' | 'FRIEND' | 'PROFILE' | 'HOUSE';
+
+/** What a vault can hold (vault_rewards.kind; E7): I_WAS_THERE is the floor. */
+export type VaultRewardKind = 'CREDIT' | 'ADDON' | 'GUARANTEED' | 'PRODUCT' | 'VAULT_EDITION' | 'THE_PIECE' | 'CREDIT_TO_GIVE' | 'I_WAS_THERE';
+
+/**
+ * A vault that waits (GET /api/v1/account/vaults/live/:dropId, §3.3, §3.4; THE VAULT page's doors, §3.5): its source's
+ * label and detail (`YOUR SIZE SOLD OUT · MONOLITHE IN BLUE`), WAITS UNTIL as a Paris day. No number (D10).
+ */
+export interface VaultDoorView {
+  id: string;
+  source: VaultSource;
+  label: string;
+  detail: string | null;
+  line: string;
+  givenAt: string;
+  waitsUntil: string;
+  /** WAITS UNTIL, a Paris day `YYYY-MM-DD`. */
+  waitsUntilDay: string;
+}
+
+/**
+ * What an opening drew (POST /api/v1/account/vaults/:id/open, §2.2): the reveal's large words and line, its published
+ * odds (`1 IN 200`), whether it is rare (the slower opening and the second note, D15), where it went.
+ */
+export interface VaultRevealView {
+  vaultId: string;
+  kind: VaultRewardKind;
+  prize: string;
+  line: string | null;
+  odds: string;
+  rare: boolean;
+  where: 'ACCOUNT' | 'ORDERS' | 'NONE';
+  openedAt: string;
+  giftCode: string | null;
+}
+
+/** An opened vault, a row of OPENED (GET /api/v1/account/vaults, §3.5): its day, its source's bare label, what it held. */
+export interface VaultOpenedRowView {
+  id: string;
+  source: VaultSource;
+  /** `A NEW PIECE`. */
+  label: string;
+  /** Its occasion's detail (`MONOLITHE IN BLUE`; null without one) and its Paris day `YYYY-MM-DD` (the I WAS THERE image). */
+  detail: string | null;
+  givenDay: string;
+  openedAt: string;
+  /** The Paris day it was opened, `YYYY-MM-DD`. */
+  openedDay: string;
+  kind: VaultRewardKind;
+  prize: string;
+  prizeLine: string | null;
+  /** `€25 · HOUSE CREDIT`, `I WAS THERE`, `€30 TO GIVE` (OP-32). */
+  held: string;
+  /** A credit to give: its link's code while it can be given (GIVE IT), and whether a friend accepted it (GIVEN). */
+  gift: { code: string | null; given: boolean } | null;
+}
+
+/** HOW TO OBTAIN A VAULT: each source switched on, with this collector's state (N21). */
+export type VaultLedgerRowView =
+  | { source: 'LIVE'; next: string | null }
+  | { source: 'PIECE' }
+  | { source: 'TIER'; tier: string | null; pieces: number; next: { tier: string; pieces: number; away: number } | null }
+  | { source: 'WORN' }
+  | { source: 'FRIEND' }
+  | { source: 'PROFILE'; done: boolean; percent: number }
+  | { source: 'HOUSE' };
+
+/** THE VAULT page's data (GET /api/v1/account/vaults). */
+export interface AccountVaultsView {
+  waiting: VaultDoorView[];
+  opened: VaultOpenedRowView[];
+  ledger: VaultLedgerRowView[];
+  waitingCount: number;
+  /** WHAT A VAULT CAN HOLD: the eight kinds in the grid's order, the rare ones marked. */
+  grid: { kind: VaultRewardKind; rare: boolean }[];
+}
+
+/** A credit to give as its link reads it (GET /api/v1/account/vaults/gifts/:code): never anything of the giver. */
+export interface VaultGiftView {
+  amount: string;
+  amountMinor: number;
+  currency: string;
+  expiresAt: string;
+  /** Its Paris day `YYYY-MM-DD`. */
+  expiresDay: string;
+  state: 'OPEN' | 'ACCEPTED' | 'ENDED';
+  canAccept: boolean | null;
+  refusal: string | null;
+}
+
+/** A right to buy a model, open (YOUR ORDERS: BUY within its 24 hours). */
+export interface VaultRightToBuyView {
+  vaultId: string;
+  modelId: string;
+  /** `MONOLITHE IN BLUE`. */
+  name: string;
+  priceMinor: number;
+  currency: string;
+  offerUntil: string;
+  sizes: (string | null)[];
+  /** The size YOUR SIZES preselects (its label); null without one. */
+  savedSize?: string | null;
+}
+
+/** What a piece won free can be claimed in (GET /api/v1/account/orders/:id/claim). */
+export interface VaultClaimSizesView {
+  orderId: string;
+  claimBy: string;
+  claimDay: string;
+  claimed: boolean;
+  sizeFixed: boolean;
+  size: string | null;
+  sizes: { label: string | null; current: boolean; available: boolean }[];
 }

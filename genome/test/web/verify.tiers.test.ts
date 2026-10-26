@@ -209,6 +209,27 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
     expect(m.inUse).toEqual({ label: 'IN USE', rows: [['WARRANTY CREDIT', '€\u00a0135 · UNTIL 15 OCT 2027']], note });
   });
 
+  it('shows a vault’s HOUSE CREDIT right after the birthday credit, as credits are taken, with the note, for an account without a tier too (THE VAULT, lot Q3)', () => {
+    const birthdayCredit = { balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' };
+    const vaultCredit = { balanceMinor: 2500, currency: 'EUR', expiresAt: '2026-12-01T22:59:59.999Z' };
+    const warrantyCredit = { balanceMinor: 13_500, currency: 'EUR', expiresAt: '2027-10-15T21:59:59.999Z' };
+    const note = 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.';
+    expect(TIER.vaultCredit).toBe('HOUSE CREDIT');
+    expect(inUseModel({ credit: null, birthdayCredit, vaultCredit, warrantyCredit, care: null, gifts: [], creditChannels: ALL_CHANNELS })).toEqual({
+      label: 'IN USE',
+      rows: [
+        ['BIRTHDAY CREDIT', '€\u00a020 · UNTIL 12 APR 2027'],
+        ['HOUSE CREDIT', '€\u00a025 · UNTIL 1 DEC 2026'],
+        ['WARRANTY CREDIT', '€\u00a0135 · UNTIL 15 OCT 2027'],
+      ],
+      note,
+    });
+    expect(inUseModel({ credit: null, vaultCredit, care: null, gifts: [], creditChannels: ALL_CHANNELS })).toEqual({ label: 'IN USE', rows: [['HOUSE CREDIT', '€\u00a025 · UNTIL 1 DEC 2026']], note });
+    for (const none of [null, undefined, { ...vaultCredit, balanceMinor: 0 }, 'yes']) {
+      expect(inUseModel({ credit: null, vaultCredit: none as never, care: null, gifts: [], creditChannels: ALL_CHANNELS }), JSON.stringify(none)).toBeNull();
+    }
+  });
+
   it('says PALLADIUM is the highest, with every benefit and no next tier', () => {
     const m = tierModel(status(3, 12), 12);
     expect(m.badge).toEqual({ name: 'PALLADIUM', pieces: '12 pieces held' });

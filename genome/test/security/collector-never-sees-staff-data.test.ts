@@ -36,6 +36,11 @@
  * (`held`), the admission (`admitted…`) nor the hold after the opening (`hold…`, the entry's own `hold`, its pay window,
  * aside) on the room, the board, an entry, its queue (exactly its five figures) or a size; nor the queue's length.
  *
+ * THE VAULT (lot Q3, step Q3.9; plan §2.9, §2.10): the collector's vaults are given by the house with the private
+ * note's words as GIVE A VAULT's note for Client Services and the first console login as the giver, and one is opened
+ * (a credit to give): THE VAULT page, its summary, the LIVE door, the gift's link, the rights to buy, a claim's sizes and
+ * the opening's reply carry neither the note, the giver, nor THE VAULT's table.
+ *
  * ADD-ONS ONE SYSTEM (lot Q2, step Q2.2; plan §2.8): what a collector reads of an add-on is its name, line, price,
  * `maxUnits` (and, for the engraving, `engraving` and `textMax`); never its kind, a stock figure, a supplier, its SKU or
  * its code, its switches, nor a release's pick: on a LIVE hold with a product and a service chosen (GET /state), then
@@ -233,6 +238,20 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
     const post = await db.selectFrom('circle_posts').select('id').orderBy('created_at', 'desc').executeTakeFirstOrThrow();
     const link = await h.ctx.services.links.create({ name: 'Sentinel link', channelId: (await h.ctx.services.links.channels())[0]!.id, destination: 'NOW' }, { type: 'admin', id: (await db.selectFrom('admin_users').select('id').executeTakeFirstOrThrow()).id });
 
+    // THE VAULT (lot Q3, step Q3.9): two vaults from the house, the private note's words as its note, the first console
+    // login as the giver; one opened (a credit to give), its reply read too.
+    const giver = (await db.selectFrom('admin_users').select('id').orderBy('created_at').executeTakeFirstOrThrow()).id;
+    const vaults = h.ctx.services.vault;
+    for (const r of (await vaults.settings()).rewards) if (r.kind !== 'I_WAS_THERE' && r.active) await vaults.deactivateReward(r.id, { type: 'admin', id: giver });
+    await vaults.createReward({ kind: 'CREDIT_TO_GIVE', oddsIn: 1, quantity: 10, amountMinor: 3_000, currency: 'EUR' }, { type: 'admin', id: giver });
+    const fromHouse = await vaults.giveFromHouse({ accountId: youId, note: NOTE }, { type: 'admin', id: giver });
+    await vaults.giveFromHouse({ accountId: youId, note: NOTE }, { type: 'admin', id: giver });
+    const toOpen = (await db.selectFrom('vaults').select('id').where('occasion_key', '=', `HOUSE:${fromHouse.giftId}`).executeTakeFirstOrThrow()).id;
+    const opened = await you.post(`/api/v1/account/vaults/${toOpen}/open`);
+    expect(opened.statusCode, opened.body.slice(0, 200)).toBe(200);
+    replies.set('POST /api/v1/account/vaults/:id/open', opened);
+    const giftCode = (safeJson(opened) as { reveal: { giftCode: string } }).reveal.giftCode;
+
     /** Each GET of the collector's route files, as read here. */
     const URLS: Record<string, string> = {
       '/api/v1/account/sign-up': '/api/v1/account/sign-up',
@@ -294,6 +313,13 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       '/api/v1/account/house-messages': '/api/v1/account/house-messages',
       '/api/v1/ownership/certificates': '/api/v1/ownership/certificates',
       '/go/:code': `/go/${link.code}`,
+      // Lot Q3 step Q3.9: THE VAULT (the page, its quiet number, the LIVE door, a gift's link, YOUR ORDERS' lines).
+      '/api/v1/account/vaults': '/api/v1/account/vaults',
+      '/api/v1/account/vaults/summary': '/api/v1/account/vaults/summary',
+      '/api/v1/account/vaults/live/:dropId': `/api/v1/account/vaults/live/${live.id}`,
+      '/api/v1/account/vaults/gifts/:code': `/api/v1/account/vaults/gifts/${giftCode}`,
+      '/api/v1/account/vaults/rights-to-buy': '/api/v1/account/vaults/rights-to-buy',
+      '/api/v1/account/orders/:id/claim': `/api/v1/account/orders/${order.id}/claim`,
     };
 
     // A house message of the collector's own (plan MACRO M2 §1.2: the first registration's moment, its piece named).
@@ -341,7 +367,7 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       expect(res.statusCode, `GET ${url} → ${res.body.slice(0, 200)}`).toBeLessThan(500);
     }
     // The collector's own screens answer: the sentinel reads real replies, not refusals.
-    for (const path of ['/api/v1/account/me', '/api/v1/account/products', '/api/v1/account/profile', '/api/v1/account/wishlist', '/api/v1/account/orders', '/api/v1/account/participation', '/api/v1/club/status', '/api/v1/club/circle', '/api/v1/account/messages', '/api/v1/account/messages/unread-count', '/api/v1/account/house-messages', '/api/v1/ownership/certificates', '/api/v1/live/mine', '/api/v1/account/sign-up', '/api/v1/lookbook/:slug', '/api/v1/club/drops/:id/entry']) {
+    for (const path of ['/api/v1/account/me', '/api/v1/account/products', '/api/v1/account/profile', '/api/v1/account/wishlist', '/api/v1/account/orders', '/api/v1/account/participation', '/api/v1/club/status', '/api/v1/club/circle', '/api/v1/account/messages', '/api/v1/account/messages/unread-count', '/api/v1/account/house-messages', '/api/v1/ownership/certificates', '/api/v1/live/mine', '/api/v1/account/sign-up', '/api/v1/lookbook/:slug', '/api/v1/club/drops/:id/entry', '/api/v1/account/vaults', '/api/v1/account/vaults/summary', '/api/v1/account/vaults/gifts/:code', '/api/v1/account/vaults/rights-to-buy']) {
       expect(replies.get(`GET ${path}`)!.statusCode, path).toBe(200);
     }
     expect(replies.get('GET /go/:code')!.statusCode).toBe(302);
@@ -364,6 +390,8 @@ describe('the collector never sees staff data (§3.6 C.9, §3.0 (k); step 9.13)'
       if (kind === 'ORDER') expect((await db.selectFrom('orders').select('account_id').where('id', '=', ref).executeTakeFirstOrThrow()).account_id).toBe(youId);
     }
     expect(safeJson(replies.get('GET /api/v1/account/messages/unread-count')!)).toEqual({ count: expect.any(Number) });
+    // THE VAULT's page is a real one: one waiting, one opened.
+    expect(safeJson(replies.get('GET /api/v1/account/vaults')!)).toMatchObject({ waitingCount: 1, opened: [{ id: toOpen, kind: 'CREDIT_TO_GIVE' }] });
 
     // The lot's replies to the collector's own writes: YOUR PROFILE saved as read, a heart on a model, a batch of views.
     const read = safeJson(replies.get('GET /api/v1/account/profile')!) as {

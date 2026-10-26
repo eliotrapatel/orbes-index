@@ -6,8 +6,9 @@
  *   SIGNED IN AS you@example.com                                      ● ● ○ ○ ○ ○ ○ ○ ○ ○
  *   ┌ YOUR PROFILE          › ┐ ┌ YOUR SIZES            › ┐ ┌ YOUR ADDRESSES        › ┐   six hairline cards, three
  *   │ 0% COMPLETE             │ │ NOT SET                 │ │ 2 SAVED                 │   to a row (two below 1200
- *   ┌ YOUR WISHLIST         › ┐ ┌ MESSAGES              › ┐ ┌ CHANGE PASSWORD       › ┐   px), each one link, its
- *   │ NONE YET                │ │ 1 UNREAD                │ │                         │   line from the account's data
+ *   ┌ YOUR WISHLIST         › ┐ ┌ THE VAULT             › ┐ ┌ MESSAGES              › ┐   px), each one link, its
+ *   │ NONE YET                │ │ 2                       │ │ 1 UNREAD                │   line from the account's data
+ *   ┌ CHANGE PASSWORD       › ┐                                                         (THE VAULT, lot Q3: seven cards)
  *   SOUND               (●)     LIGHT MODE           (○)                    [ SIGN OUT ]   the settings, then SIGN OUT
  *   YOUR TIER                              NEXT: PLATINE                                   what the tier gives (IN USE,
  *   – The owners' circle …                 3 more pieces … It adds: …                      its benefits), beside NEXT
@@ -31,7 +32,7 @@ import { h } from '../../shared/dom.js';
 import { LEGAL_PATH } from '../../shared/legal.js';
 import type { ApiClient } from '../api.js';
 import { addressesSummary } from '../addresses-model.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, DESKTOP, MESSAGES, MODE, PIECES, SOUND, TIER, WISHLIST } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, DESKTOP, MESSAGES, MODE, PIECES, SOUND, TIER, VAULT, WISHLIST } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { completionRow } from '../profile-model.js';
 import { seen } from '../seen.js';
@@ -48,6 +49,8 @@ export const ACCOUNT_PATH = '/verify/account';
 export const MESSAGES_PAGE_PATH = '/verify/messages';
 /** YOUR WISHLIST, its card's address (the same page as /verify/wishlist). */
 export const ACCOUNT_WISHLIST_PATH = '/verify/account/wishlist';
+/** THE VAULT, its card's address (lot Q3 §3.5, D41: its own page; the same page as /verify/vault). */
+export const ACCOUNT_VAULT_PATH = '/verify/account/vault';
 
 const PATHS: Readonly<Record<AccountView, string>> = Object.freeze({
   account: ACCOUNT_PATH,
@@ -73,9 +76,10 @@ export function accountPath(view: AccountView): string {
 }
 
 /** The account's page an address names; an address under /verify/account that is none: YOUR ACCOUNT. */
-export function accountRouteOf(pathname: string): AccountView | 'wishlist' | null {
+export function accountRouteOf(pathname: string): AccountView | 'wishlist' | 'vault' | null {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === ACCOUNT_WISHLIST_PATH) return 'wishlist';
+  if (path === ACCOUNT_VAULT_PATH) return 'vault';
   for (const [view, p] of Object.entries(PATHS) as [AccountView, string][]) if (path === p) return view;
   return path.startsWith(`${ACCOUNT_PATH}/`) ? 'account' : null;
 }
@@ -85,6 +89,8 @@ export interface AccountPageHost {
   navigate(view: AccountView): void;
   /** YOUR WISHLIST's card: its page, over the account's. */
   openWishlist(): void;
+  /** THE VAULT's card (lot Q3 §3.6): its page, over the account's. */
+  openVault(): void;
   /** SIGN OUT pressed: NOW. */
   signedOut(): void;
   /** Reached (or left) signed out, not by SIGN OUT here: the sign-in page in its place, this page once signed in. */
@@ -364,7 +370,7 @@ export class AccountPage extends AccountSheet {
     );
   }
 
-  /** The six cards: each one link to its page, its line from the account's data (none while unread, as the rows). */
+  /** The seven cards (THE VAULT the seventh, lot Q3): each one link to its page, its line from the account's data (none while unread, as the rows). */
   private cards(): HTMLElement {
     const card = (key: string, label: string, line: string | null, href: string, onOpen: () => void) => {
       const a = appAnchor(
@@ -386,6 +392,8 @@ export class AccountPage extends AccountSheet {
       card('sizes', ACCOUNT_SIZES.row, this.sizes ? sizesSummary(this.sizes) : null, PATHS.sizes, () => this.openSizes()),
       card('addresses', ACCOUNT_ADDRESSES.row, this.addresses ? addressesSummary(this.addresses.addresses) : null, PATHS.addresses, () => this.openAddresses()),
       card('wishlist', WISHLIST.row, this.wishCount, ACCOUNT_WISHLIST_PATH, () => this.host.openWishlist()),
+      // THE VAULT (lot Q3 §3.6, N32): a seventh card right after YOUR WISHLIST, its line the quiet number (none when nothing waits).
+      card('vault', VAULT.row, this.vaultCount, ACCOUNT_VAULT_PATH, () => this.host.openVault()),
       card('messages', MESSAGES.title, unread, MESSAGES_PAGE_PATH, () => this.host.openMessages()),
       card('password', ACCOUNT_PASSWORD.change, null, PATHS.password, () => this.openPassword()),
     );

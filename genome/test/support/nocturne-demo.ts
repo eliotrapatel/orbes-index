@@ -131,6 +131,7 @@ import { computeGenome } from '../../src/core/genome/genome.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { encodePayload, frameCodeData, signingMessage, unframeCodeData } from '../../src/core/payload.js';
 import type { AppContext } from '../../src/server/context.js';
+import { beforeTheVault } from '../../src/server/db/seed/before-the-vault.js';
 import { deriveDropSeedKey } from '../../src/server/services/drops.js';
 import { isDomainError } from '../../src/server/errors.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
@@ -176,7 +177,8 @@ export type DemoVariant =
   | 'worn'
   | 'addons'
   | 'set'
-  | 'set-live';
+  | 'set-live'
+  | 'vault';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -212,6 +214,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'addons',
   'set',
   'set-live',
+  'vault',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -319,39 +322,48 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
   const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'draw-selected', 'email', 'orders-delivery', 'orders-case', 'account-addresses', 'account-profile', 'wishes', 'birthday-credit', 'care-used', 'orbes-care', 'gallery', 'worn', 'set', 'set-live'] as const;
   // The house messages' stage (lot M2, FROM ORBES) tells the draw-leads story, MESSAGES' own.
-  // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons).
-  const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
+  // The add-ons' stage (lot M3, D2) tells the live story (a hold secured), then its own (seedAddons); THE VAULT's (lot
+  // Q3, step Q3.10) the live story too, then its own after the deployment (seedVault).
+  const story = (variant === 'house' ? 'draw-leads' : variant === 'addons' || variant === 'vault' ? 'live' : (OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<
     DemoVariant,
-    (typeof OWN_STAGES)[number] | 'house' | 'addons'
+    (typeof OWN_STAGES)[number] | 'house' | 'addons' | 'vault'
   >;
-  if (story === 'empty') await seedEmpty(w);
-  else if (story === 'stress') await seedStress(w);
-  else {
-    await seedCatalogue(w);
-    // The queue's stage tells the live story, its own releases in place of the live one.
-    await seedStory(w, story === 'queue' ? 'live' : story);
-    if (story === 'full' || story === 'rules') await seedScanCases(w);
-    if (story === 'full') await seedYearlyCare(w);
-    if (story === 'room') await seedRoom(w);
-    if (story === 'live') await seedLive(w);
-    if (story === 'queue') await seedQueue(w);
-    if (story === 'afterroom') await seedAfterRoom(w);
-    if (story === 'afterroom-ends') await seedAfterRoomEnds(w);
-    if (story === 'draws') await seedDraws(w);
-    if (story === 'full' || story === 'room' || story === 'draws') await seedGuarantees(w, story);
-    if (story === 'full' || story === 'room') await seedSizes(w, story);
-    if (variant === 'pairs') await seedPairs(w);
-    if (variant === 'draw-sizes') await seedDrawSizes(w);
-    if (variant === 'draw-selected') await seedDrawSelected(w);
-    if (variant === 'email') await seedEmail(w);
-    if (variant === 'care-used') await seedCareUsed(w);
-    if (variant === 'orbes-care') await seedOrbesCare(w);
-    if (variant === 'gallery') await seedGallery(w);
-    if (variant === 'house') await seedHouse(w);
-    if (variant === 'worn') await seedWorn(w);
-    if (variant === 'addons') await seedAddons(w);
-    if (variant === 'set') await seedSet(w);
-    if (variant === 'set-live') await seedSetLive(w);
+  // The story is told before THE VAULT's deployment (lot Q3): no vault for it, its tiers held as migration 0061 wrote them.
+  await beforeTheVault(ctx.db, async () => {
+    if (story === 'empty') await seedEmpty(w);
+    else if (story === 'stress') await seedStress(w);
+    else {
+      await seedCatalogue(w);
+      // The queue's stage tells the live story, its own releases in place of the live one.
+      await seedStory(w, story === 'queue' ? 'live' : story);
+      if (story === 'full' || story === 'rules') await seedScanCases(w);
+      if (story === 'full') await seedYearlyCare(w);
+      if (story === 'room') await seedRoom(w);
+      if (story === 'live') await seedLive(w);
+      if (story === 'queue') await seedQueue(w);
+      if (story === 'afterroom') await seedAfterRoom(w);
+      if (story === 'afterroom-ends') await seedAfterRoomEnds(w);
+      if (story === 'draws') await seedDraws(w);
+      if (story === 'full' || story === 'room' || story === 'draws') await seedGuarantees(w, story);
+      if (story === 'full' || story === 'room') await seedSizes(w, story);
+      if (variant === 'pairs') await seedPairs(w);
+      if (variant === 'draw-sizes') await seedDrawSizes(w);
+      if (variant === 'draw-selected') await seedDrawSelected(w);
+      if (variant === 'email') await seedEmail(w);
+      if (variant === 'care-used') await seedCareUsed(w);
+      if (variant === 'orbes-care') await seedOrbesCare(w);
+      if (variant === 'gallery') await seedGallery(w);
+      if (variant === 'house') await seedHouse(w);
+      if (variant === 'worn') await seedWorn(w);
+      if (variant === 'addons') await seedAddons(w);
+      if (variant === 'set') await seedSet(w);
+      if (variant === 'set-live') await seedSetLive(w);
+    }
+  });
+  // THE VAULT's stage (lot Q3, step Q3.10): its vaults given after the deployment, as in production.
+  if (variant === 'vault') {
+    await seedVault(w);
+    await seedVaultPage(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -955,6 +967,240 @@ async function seedLive(w: World): Promise<void> {
   await step(1_000);
   await live.message(r.id, 'The door is open. Take your time at the seal.', w.admin);
 }
+
+/**
+ * THE VAULT (lot Q3, step Q3.10; plan §3.3, §3.4, §3.12; MK #sold, #release-end), after the deployment: the table of
+ * the mockup's demo (€25 HOUSE CREDIT at 1 IN 10, GUARANTEED at 1 IN 200: example values, OP-27); the live story's
+ * MONOLITHE IN BLUE with THE VAULT switched on, collectors still in the line of size 17 when it sold out, each with its
+ * vault waiting there (`vaultS` its door; `vaultSOpen…` and `vaultSRare…` to open it, a phone's and a computer's each);
+ * and a second MONOLITHE IN BLUE of one piece, its vault on, sold out whole ten minutes ago at its one PAY (Q3.5's hook
+ * gave the line its vaults before the end ENDED it): its end page with the door (`vaultEnd`), and to open it
+ * (`vaultEndOpen…`). The draw is the server's: a state sets the service's source of randomness to land on a row.
+ */
+async function seedVault(w: World): Promise<void> {
+  const { ctx, clock, demo, admin } = w;
+  const live = ctx.services.live;
+  const vault = ctx.services.vault;
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 60 * MINUTE));
+  await vault.createReward({ kind: 'CREDIT', oddsIn: 10, quantity: 1000, amountMinor: 2500, currency: 'EUR' }, admin);
+  await vault.createReward({ kind: 'GUARANTEED', oddsIn: 200, quantity: 20 }, admin);
+  // SOLD OUT for your size: the live story's release, size 17 sold out two minutes ago (its one piece paid).
+  const dropId = demo.releases.live!;
+  await ctx.services.liveConsole.setVault(dropId, true, admin);
+  const s17 = await ctx.db.selectFrom('drop_sizes').select('id').where('drop_id', '=', dropId).where('label', '=', '17').executeTakeFirstOrThrow();
+  const soldAt = new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE);
+  clock.set(soldAt);
+  for (const key of ['vaultS', 'vaultSOpen', 'vaultSOpenDesk', 'vaultSRare', 'vaultSRareDesk', 'vaultSE2e']) {
+    const a = await account(w, key, `${key.toLowerCase()}@example.com`, 1, w.models.blue);
+    // Still in the line of size 17 when it sold out (written as the line's late comers: the size can no longer be entered).
+    const last = await ctx.db.selectFrom('live_entries').select((eb) => eb.fn.max('position').as('p')).where('drop_id', '=', dropId).executeTakeFirst();
+    const entry = await ctx.db
+      .insertInto('live_entries')
+      .values({ drop_id: dropId, account_id: a.id, size_id: s17.id, quantity: 1, tier: 1, status: 'QUEUED', position: Number(last?.p ?? 0) + 1, joined_at: soldAt, queued_at: soldAt })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await vault.give({ source: 'LIVE', accountId: a.id, dropId, entryId: entry.id }, soldAt);
+  }
+  // The end page of a release sold out whole is shown to a collector whose page follows the room as it ends (a page
+  // opened later shows the release's final page): one release of one piece per state, its vault on, its one piece held by
+  // `<key>Buyer` (secured a minute ago), `<key>` behind it in the line; the state pays it (sellOutWhole), Q3.5's hook
+  // gives the line its vaults, the end ENDS it.
+  for (const key of VAULT_END_KEYS) {
+    clock.set(at('2026-10-04T12:00:00Z'));
+    const t0 = new Date(NOCTURNE_NOW.getTime() - 30 * MINUTE);
+    const r = await createLiveRelease(w.f, { modelId: w.models.blue!, opensAt: t0, closesAt: new Date(t0.getTime() + 2 * HOUR), minTier: 1, turnSeconds: 300, payMinutes: 10, sizes: [{ label: '17', stock: 1 }], quantityLine: '1 PIECE', priceMinor: 505_000 });
+    await titled(w, r.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: one piece.');
+    demo.releases[key] = r.id;
+    await ctx.services.liveConsole.setVault(r.id, true, admin);
+    clock.set(t0);
+    await live.advance(r.id);
+    clock.set(new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE));
+    const join = async (k: string) => {
+      const a = await account(w, k, `${k.toLowerCase()}@example.com`, 1, w.models.blue);
+      await live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+      clock.advance(1_000);
+      await live.advance(r.id);
+      await turnsNow(w, r.id);
+      return a;
+    };
+    const buyer = await join(`${key}Buyer`);
+    await join(key);
+    const token = (await live.entry(buyer.id, r.id))?.turn?.token;
+    if (!token) throw new Error(`no turn for ${key}'s buyer`);
+    await live.press(buyer.id, r.id, token);
+    clock.advance(1_500);
+    await live.secure(buyer.id, r.id, token, buyer.actor);
+  }
+}
+
+/**
+ * THE VAULT page (lot Q3, step Q3.11; plan §3.5–§3.10, §3.12; MK #vault-page), after seedVault: the table gains a credit to
+ * give (€30, 1 IN 100), a piece won free and one to buy (MONOLITHE IN BLUE, 1 IN 200 each) and an add-on (1 IN 200) after
+ * the mockup's two (their parts unmoved: the earlier states land as before). Its collectors, each its own vaults:
+ *   vaultPage        MK's demo: 7 pieces (PALLADIUM 3 away), a complete profile (DONE); waiting YOUR SIZE SOLD OUT ·
+ *                    MONOLITHE IN BLUE (the live story's line of size 17) and A NEW TIER · PLATINE; opened €25 · HOUSE CREDIT
+ *                    (A NEW PIECE), I WAS THERE (YOUR SIZE SOLD OUT, the LIVE of 28 September), €30 TO GIVE (A COMPLETE
+ *                    PROFILE: its link `links.vaultGift`); its invitation `links.vaultJoin`
+ *   vaultPageEmpty   none waiting, two opened; vaultPageFirst none at all (one piece)
+ *   vaultPageStress  10 pieces (PALLADIUM, the highest), five waiting (a long model and variant among them), twenty opened
+ *                    (credits, cards, a credit to give still to give and one GIVEN, a long add-on's name)
+ *   vaultPageOpen…   two waiting each, opened in place by the e2e (phone, computer)
+ *   vaultClaim       a piece won free (MONOLITHE IN BLUE, at 0, CLAIM IT); vaultBuy a right to buy it (24 hours)
+ *   vaultFriend      no piece: the credit to give's page offers ACCEPT
+ */
+async function seedVaultPage(w: World): Promise<void> {
+  const { ctx, clock, demo, admin } = w;
+  const vault = ctx.services.vault;
+  const service = vault as unknown as { random: (max: number) => number };
+  const own = service.random;
+  const location = await defaultLocationId(ctx.db);
+  const blue = w.models.blue!;
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 50 * MINUTE));
+  await ctx.services.catalog.updateModel(blue, { basePriceMinor: 505_000, baseCurrency: 'EUR' }, admin);
+  const blue17 = (await ctx.db.selectFrom('skus').select('id').where('model_id', '=', blue).where('size_label', '=', '17').executeTakeFirstOrThrow()).id;
+  await ctx.services.stock.adjust({ skuId: blue17, locationId: location, delta: 4, note: 'Counted in.' }, admin);
+  const caseAddon = await ctx.services.addons.create({ name: 'TRAVEL CASE IN BRUSHED MIDNIGHT LEATHER', line: 'For the piece on its travels.', skuCode: 'ADD-VAULT-CASE', weightG: 120, prices: { EUR: 9_000 } }, admin);
+  await ctx.services.stock.adjust({ skuId: caseAddon.sku.id, locationId: location, delta: 10, note: 'Counted in.' }, admin);
+  // After the mockup's two (CREDIT 0–99 999, GUARANTEED 100 000–104 999): each row its parts, in this order.
+  await vault.createReward({ kind: 'CREDIT_TO_GIVE', oddsIn: 100, quantity: 100, amountMinor: 3_000, currency: 'EUR' }, admin);
+  await vault.createReward({ kind: 'PRODUCT', oddsIn: 200, quantity: 10, modelId: blue, mode: 'FREE' }, admin);
+  await vault.createReward({ kind: 'PRODUCT', oddsIn: 200, quantity: 10, modelId: blue, mode: 'RIGHT_TO_BUY' }, admin);
+  await vault.createReward({ kind: 'ADDON', oddsIn: 200, quantity: 10, addonId: caseAddon.id }, admin);
+  const DRAW = { credit: 0, guaranteed: 100_000, toGive: 105_000, free: 115_000, buy: 120_000, addon: 125_000, card: 999_999 } as const;
+  const open = async (accountId: string, vaultId: string, when: Date, draw: number) => {
+    clock.set(when);
+    service.random = () => draw;
+    try {
+      return await vault.open(accountId, vaultId, when);
+    } finally {
+      service.random = own;
+    }
+  };
+  const give = async (occasion: Parameters<typeof vault.give>[0], when: Date) => {
+    clock.set(when);
+    const g = await vault.give(occasion, when);
+    if (!g.vaults[0]) throw new Error(`no vault given (${g.skipped}) for ${occasion.source}`);
+    return g.vaults[0];
+  };
+  const house = (accountId: string, when: Date) => give({ source: 'HOUSE', accountId, giftId: crypto.randomUUID(), givenBy: admin.id }, when);
+  // The page's own MONOLITHE IN BLUE of one piece, its vault on, its size 17 sold out two minutes ago: its line's vaults
+  // (the live story's room keeps its own figures).
+  clock.set(at('2026-10-04T12:00:00Z'));
+  const t0 = new Date(NOCTURNE_NOW.getTime() - 30 * MINUTE);
+  const pageRelease = await createLiveRelease(w.f, { modelId: blue, opensAt: t0, closesAt: new Date(t0.getTime() + 2 * HOUR), minTier: 1, turnSeconds: 300, payMinutes: 10, sizes: [{ label: '17', stock: 1 }], quantityLine: '1 PIECE', priceMinor: 505_000 });
+  await titled(w, pageRelease.id, 'MONOLITHE IN BLUE', 'The blue of MONOLITHE, released live: one piece.');
+  await ctx.services.liveConsole.setVault(pageRelease.id, true, admin);
+  demo.releases.vaultPage = pageRelease.id;
+  const dropId = pageRelease.id;
+  const s17 = { id: pageRelease.sizes[0]!.id };
+  const soldAt = new Date(NOCTURNE_NOW.getTime() - 2 * MINUTE);
+  /** An entry still in the live story's line of size 17 when it sold out, and its vault. */
+  const liveVault = async (accountId: string, drop: string, size: string, when: Date) => {
+    const last = await ctx.db.selectFrom('live_entries').select((eb) => eb.fn.max('position').as('p')).where('drop_id', '=', drop).executeTakeFirst();
+    const entry = await ctx.db
+      .insertInto('live_entries')
+      .values({ drop_id: drop, account_id: accountId, size_id: size, quantity: 1, tier: 1, status: 'QUEUED', position: Number(last?.p ?? 0) + 1, joined_at: when, queued_at: when })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return give({ source: 'LIVE', accountId, dropId: drop, entryId: entry.id }, when);
+  };
+  const heard = (await ctx.services.profiles.offeredHeard())[0]!.id;
+  /** A complete profile, saved (its save gives A COMPLETE PROFILE's vault, as in production). */
+  const complete = async (accountId: string, when: Date) => {
+    clock.set(when);
+    await ctx.services.addresses.create(accountId, { name: 'Camille Durand', address: '1 rue de Test\n69001 Lyon', country: 'FR', phone: '+33612345678' }, { type: 'account', id: accountId });
+    const p = await ctx.services.profiles.forCollector(accountId);
+    await ctx.services.profiles.save(
+      accountId,
+      {
+        version: p.profile.version,
+        firstName: 'Camille',
+        lastName: 'Durand',
+        country: 'FR',
+        city: 'Lyon',
+        phone: { country: 'FR', number: '+33612345678' },
+        birthDate: '1994-03-14',
+        instagram: '@camille.dl',
+        heard: { optionId: heard },
+        tastes: { pieces: p.options.pieces.slice(0, 1).map((o) => o.key), finishes: p.options.finishes.slice(0, 1).map((o) => o.key) },
+      },
+      { type: 'account', id: accountId },
+    );
+    const v = await ctx.db.selectFrom('vaults').select('id').where('account_id', '=', accountId).where('source', '=', 'PROFILE').executeTakeFirst();
+    if (!v) throw new Error('no PROFILE vault: the profile is not complete');
+    return v.id;
+  };
+  const pieceOf = async (accountId: string) => (await ctx.db.selectFrom('ownership').select('product_id').where('account_id', '=', accountId).where('ended_at', 'is', null).orderBy('started_at').executeTakeFirstOrThrow()).product_id;
+
+  // MK's demo.
+  const page = await account(w, 'vaultPage', 'vaultpage@example.com', 7, blue);
+  const giftVault = await complete(page.id, at('2026-09-12T09:00:00Z'));
+  const toGive = await open(page.id, giftVault, at('2026-09-12T09:30:00Z'), DRAW.toGive);
+  demo.links.vaultGift = toGive.giftCode!;
+  // The LIVE of 28 September in gold, its vault switched on then (written as it stood: the release has ended since).
+  await ctx.db.updateTable('drops').set({ vault_on: true }).where('id', '=', demo.releases.live28!).execute();
+  const gold28 = await ctx.db.selectFrom('drop_sizes').select('id').where('drop_id', '=', demo.releases.live28!).where('label', '=', '17').executeTakeFirstOrThrow();
+  const card = await liveVault(page.id, demo.releases.live28!, gold28.id, at('2026-09-28T17:40:00Z'));
+  await open(page.id, card.id, at('2026-10-03T08:00:00Z'), DRAW.card);
+  const piece = await give({ source: 'PIECE', accountId: page.id, productId: await pieceOf(page.id) }, at('2026-10-03T09:00:00Z'));
+  await open(page.id, piece.id, at('2026-10-04T10:00:00Z'), DRAW.credit);
+  await liveVault(page.id, dropId, s17.id, soldAt);
+  await give({ source: 'TIER', accountId: page.id, tier: 2 }, new Date(soldAt.getTime() + MINUTE));
+  demo.links.vaultJoin = (await vault.invitation(page.id)).code;
+
+  // None waiting, two opened.
+  const empty = await account(w, 'vaultPageEmpty', 'vaultpage.empty@example.com', 1, blue);
+  const e1 = await give({ source: 'PIECE', accountId: empty.id, productId: await pieceOf(empty.id) }, at('2026-09-20T09:00:00Z'));
+  await open(empty.id, e1.id, at('2026-09-21T09:00:00Z'), DRAW.credit);
+  const e2 = await house(empty.id, at('2026-09-30T09:00:00Z'));
+  await open(empty.id, e2.id, at('2026-10-01T09:00:00Z'), DRAW.card);
+  await account(w, 'vaultPageFirst', 'vaultpage.first@example.com', 1, blue);
+
+  // Opened in place by the e2e: two waiting each.
+  for (const key of ['vaultPageOpen', 'vaultPageOpenDesk']) {
+    const a = await account(w, key, `${key.toLowerCase()}@example.com`, 1, blue);
+    await give({ source: 'PIECE', accountId: a.id, productId: await pieceOf(a.id) }, at('2026-10-02T09:00:00Z'));
+    await house(a.id, at('2026-10-04T09:00:00Z'));
+  }
+
+  // The stress: PALLADIUM, five waiting, twenty opened.
+  const stress = await account(w, 'vaultPageStress', 'vaultpage.stress@example.com', 10, blue);
+  clock.set(new Date(NOCTURNE_NOW.getTime() - 45 * MINUTE));
+  const long = await ctx.services.catalog.createModel(
+    { categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER', careInstructions: 'Wipe it with a soft, dry cloth.' },
+    admin,
+  );
+  const longVariant = await ctx.services.catalog.createVariant(long.id, { label: 'Brushed Midnight Cobalt', swatch: '#1F2A44', skuPrefix: 'MNL-BC', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, admin);
+  const [longPiece] = await holdPieces(ctx.db, stress.id, 1, longVariant.id, { variant: '17', startedAt: at('2026-09-01T09:00:00Z') });
+  const friendGiven = await account(w, 'vaultFriendGiven', 'vaultfriend.given@example.com');
+  for (let i = 0; i < 20; i++) {
+    const v = await house(stress.id, new Date(at('2026-09-07T09:00:00Z').getTime() + i * DAY));
+    const draw = [DRAW.credit, DRAW.card, DRAW.addon, DRAW.toGive, DRAW.credit][i % 5]!;
+    const r = await open(stress.id, v.id, new Date(at('2026-09-07T10:00:00Z').getTime() + i * DAY), draw);
+    if (i === 3) await vault.acceptGift(friendGiven.id, r.giftCode!, new Date(at('2026-09-11T09:00:00Z').getTime()));
+  }
+  await liveVault(stress.id, dropId, s17.id, soldAt);
+  await give({ source: 'PIECE', accountId: stress.id, productId: longPiece! }, at('2026-09-29T09:00:00Z'));
+  await give({ source: 'TIER', accountId: stress.id, tier: 3 }, at('2026-10-01T09:00:00Z'));
+  await house(stress.id, at('2026-10-02T09:00:00Z'));
+  await house(stress.id, at('2026-10-04T09:00:00Z'));
+
+  // YOUR ORDERS: a piece won free, a right to buy.
+  const claimer = await account(w, 'vaultClaim', 'vaultclaim@example.com', 1, blue);
+  const won = await house(claimer.id, at('2026-10-04T09:00:00Z'));
+  const free = await open(claimer.id, won.id, at('2026-10-04T09:30:00Z'), DRAW.free);
+  if (free.kind !== 'PRODUCT') throw new Error(`the piece won free gave ${free.kind}`);
+  const buyer = await account(w, 'vaultBuy', 'vaultbuy@example.com', 1, blue);
+  const right = await house(buyer.id, new Date(NOCTURNE_NOW.getTime() - 3 * HOUR));
+  const offer = await open(buyer.id, right.id, new Date(NOCTURNE_NOW.getTime() - 2 * HOUR), DRAW.buy);
+  if (offer.kind !== 'PRODUCT') throw new Error(`the right to buy gave ${offer.kind}`);
+
+  // The credit to give's friend: no piece.
+  await account(w, 'vaultFriend', 'vaultfriend@example.com');
+}
+
+/** The collectors of THE VAULT's end page states (seedVault): each its own release of one piece, sold out by its state. */
+export const VAULT_END_KEYS = ['vaultEnd', 'vaultEndLight', 'vaultEndOpen', 'vaultEndDesk', 'vaultEndDeskLight', 'vaultEndOpenDesk', 'vaultEndE2e'] as const;
 
 /** `n` accounts of a crowd, written in bulk (no password to sign in with: they are never signed in). */
 async function crowdOf(w: World, n: number, tag: string): Promise<string[]> {
