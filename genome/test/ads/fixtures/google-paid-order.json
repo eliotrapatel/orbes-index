@@ -1,0 +1,22 @@
+{
+  "conversions": [
+    {
+      "conversionAction": "customers/1234567890/conversionActions/987654321",
+      "conversionDateTime": "2026-10-26 08:30:00+00:00",
+      "gclid": "Cj0KfakeGclid",
+      "orderId": "orbes-4217",
+      "conversionValue": 1250.5,
+      "currencyCode": "EUR",
+      "userIdentifiers": [
+        {
+          "hashedEmail": "5c05cc2a15fabd0ba6b85714fa29e94e4fe68de62bcb02c501ebd99b089f2418"
+        }
+      ],
+      "consent": {
+        "adUserData": "GRANTED"
+      }
+    }
+  ],
+  "partialFailure": true,
+  "validateOnly": false
+}

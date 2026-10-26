@@ -88,6 +88,15 @@ export interface AppConfig {
    * server's .env only; the log says which are set, never their values (redactConfig).
    */
   email: EmailConfig;
+  /**
+   * The ad platforms' keys (lot M4, K27 A2 and A5): Meta (ADS_META_DATASET_ID, ADS_META_ACCESS_TOKEN), TikTok
+   * (ADS_TIKTOK_PIXEL_CODE, ADS_TIKTOK_ACCESS_TOKEN) and Google Ads (ADS_GOOGLE_CUSTOMER_ID, ADS_GOOGLE_LOGIN_CUSTOMER_ID
+   * optional, ADS_GOOGLE_DEVELOPER_TOKEN, ADS_GOOGLE_CLIENT_ID, ADS_GOOGLE_CLIENT_SECRET, ADS_GOOGLE_REFRESH_TOKEN). A
+   * platform is ready when all of its keys are set and not ready when none is (null); some but not all is refused at
+   * start, the missing variable named. The keys live in the server's .env only; the log says which platforms have them,
+   * never their values (redactConfig). Nothing is sent while the console's switch is off.
+   */
+  ads: AdsConfig;
 }
 
 /** Who the emails come from (EMAIL_FROM): an address, with the name the inbox shows when one is given. */
@@ -112,6 +121,38 @@ export type SmtpSecurity = (typeof SMTP_SECURITIES)[number];
 export type EmailConfig =
   | { transport: 'off' }
   | { transport: 'smtp'; from: EmailSender; replyTo: string | null; smtp: SmtpSettings };
+
+/** Meta's Conversions API: the dataset (pixel) and its access token. */
+export interface MetaAdsKeys {
+  datasetId: string;
+  accessToken: string;
+}
+
+/** TikTok's Events API: the pixel and its access token. */
+export interface TikTokAdsKeys {
+  pixelCode: string;
+  accessToken: string;
+}
+
+/**
+ * Google Ads' API: the customer the conversions are uploaded to (10 digits, hyphens dropped), the manager account it is
+ * reached through when there is one, the developer token and the OAuth client with its refresh token.
+ */
+export interface GoogleAdsKeys {
+  customerId: string;
+  loginCustomerId: string | null;
+  developerToken: string;
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+/** Each ad platform's keys, null while it has none (not ready). */
+export interface AdsConfig {
+  meta: MetaAdsKeys | null;
+  tiktok: TikTokAdsKeys | null;
+  google: GoogleAdsKeys | null;
+}
 
 /** The default port of each SMTP security (SMTP_PORT unset). */
 export const SMTP_DEFAULT_PORT: Readonly<Record<SmtpSecurity, number>> = Object.freeze({ tls: 465, starttls: 587 });
@@ -488,6 +529,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // The emails' channel (E0): off unless EMAIL_TRANSPORT=smtp; every SMTP_* / EMAIL_* set is checked either way.
   const email = parseEmailConfig(e, field, issues);
 
+  // The ad platforms' keys (K27 A5): a platform's keys go together; none leaves it not ready.
+  const ads = parseAdsConfig(e, field, issues);
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -513,6 +557,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     careSubscribeUrl,
     transferAcceptRequireProduct,
     email: email!,
+    ads: ads!,
   };
 
   if (prod) {
@@ -662,6 +707,12 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
             user: '[set]',
             password: '[set]',
           },
+    // Which ad platforms have their keys, never a key nor an id.
+    ads: {
+      meta: c.ads.meta ? '[set]' : undefined,
+      tiktok: c.ads.tiktok ? '[set]' : undefined,
+      google: c.ads.google ? '[set]' : undefined,
+    },
   };
 }
 
@@ -700,6 +751,87 @@ function parseEmailConfig(e: Record<string, string | undefined>, field: FieldPar
   // Unset, the security follows the port (587 and 25 speak STARTTLS), and the port the security.
   const sec: SmtpSecurity = security ?? (port === 587 || port === 25 ? 'starttls' : 'tls');
   return { transport: 'smtp', from, replyTo: replyTo ?? null, smtp: { host, port: port ?? SMTP_DEFAULT_PORT[sec], security: sec, user, password } };
+}
+
+/** An ad platform's token or secret: one line of printable ASCII, no space. */
+const zAdsKey = (max: number) => z.string().max(max, `must be at most ${max} characters`).regex(/^[!-~]+$/, 'must be one line of printable characters without spaces');
+/** A Google Ads customer number: 10 digits, written 123-456-7890 or 1234567890; kept as its digits. */
+const zGoogleCustomerId = z
+  .string()
+  .regex(/^[0-9]{3}-?[0-9]{3}-?[0-9]{4}$/, 'must be a Google Ads customer number such as 123-456-7890')
+  .transform((s) => s.replace(/-/g, ''));
+
+/** The variables of each ad platform, the optional ones marked. */
+export const ADS_ENV = Object.freeze({
+  meta: ['ADS_META_DATASET_ID', 'ADS_META_ACCESS_TOKEN'],
+  tiktok: ['ADS_TIKTOK_PIXEL_CODE', 'ADS_TIKTOK_ACCESS_TOKEN'],
+  google: [
+    'ADS_GOOGLE_CUSTOMER_ID',
+    'ADS_GOOGLE_LOGIN_CUSTOMER_ID',
+    'ADS_GOOGLE_DEVELOPER_TOKEN',
+    'ADS_GOOGLE_CLIENT_ID',
+    'ADS_GOOGLE_CLIENT_SECRET',
+    'ADS_GOOGLE_REFRESH_TOKEN',
+  ],
+} as const);
+const ADS_OPTIONAL_ENV: ReadonlySet<string> = new Set(['ADS_GOOGLE_LOGIN_CUSTOMER_ID']);
+
+/**
+ * The ad platforms' keys (K27 A5). Each variable that is set is validated; a platform with some of its variables set
+ * must have every required one, each missing one named (as EMAIL_TRANSPORT=smtp's); with none, it is not ready.
+ */
+function parseAdsConfig(e: Record<string, string | undefined>, field: FieldParser, issues: string[]): AdsConfig | undefined {
+  const metaDataset = field('ADS_META_DATASET_ID', z.string().regex(/^[0-9]{1,20}$/, "must be the dataset's number (digits)"), e.ADS_META_DATASET_ID);
+  const metaToken = field('ADS_META_ACCESS_TOKEN', zAdsKey(1_024), e.ADS_META_ACCESS_TOKEN);
+  const tiktokPixel = field('ADS_TIKTOK_PIXEL_CODE', z.string().regex(/^[A-Za-z0-9]{1,64}$/, "must be the pixel's code (letters and digits)"), e.ADS_TIKTOK_PIXEL_CODE);
+  const tiktokToken = field('ADS_TIKTOK_ACCESS_TOKEN', zAdsKey(1_024), e.ADS_TIKTOK_ACCESS_TOKEN);
+  const googleCustomer = field('ADS_GOOGLE_CUSTOMER_ID', zGoogleCustomerId, e.ADS_GOOGLE_CUSTOMER_ID);
+  const googleLogin = field('ADS_GOOGLE_LOGIN_CUSTOMER_ID', zGoogleCustomerId, e.ADS_GOOGLE_LOGIN_CUSTOMER_ID);
+  const googleDeveloper = field('ADS_GOOGLE_DEVELOPER_TOKEN', zAdsKey(256), e.ADS_GOOGLE_DEVELOPER_TOKEN);
+  const googleClientId = field('ADS_GOOGLE_CLIENT_ID', zAdsKey(256), e.ADS_GOOGLE_CLIENT_ID);
+  const googleClientSecret = field('ADS_GOOGLE_CLIENT_SECRET', zAdsKey(256), e.ADS_GOOGLE_CLIENT_SECRET);
+  const googleRefresh = field('ADS_GOOGLE_REFRESH_TOKEN', zAdsKey(1_024), e.ADS_GOOGLE_REFRESH_TOKEN);
+
+  let complete = true;
+  const setOf = (platform: keyof typeof ADS_ENV): boolean => {
+    const names = ADS_ENV[platform];
+    if (!names.some((n) => e[n] !== undefined)) return false;
+    for (const n of names) {
+      if (e[n] === undefined && !ADS_OPTIONAL_ENV.has(n)) {
+        issues.push(`${n}: required when another ADS_${platform.toUpperCase()}_* key is set (a platform's keys go together)`);
+        complete = false;
+      }
+    }
+    return true;
+  };
+  const metaSet = setOf('meta');
+  const tiktokSet = setOf('tiktok');
+  const googleSet = setOf('google');
+  if (!complete) return undefined;
+
+  const meta = metaSet ? (metaDataset !== undefined && metaToken !== undefined ? { datasetId: metaDataset, accessToken: metaToken } : undefined) : null;
+  const tiktok = tiktokSet ? (tiktokPixel !== undefined && tiktokToken !== undefined ? { pixelCode: tiktokPixel, accessToken: tiktokToken } : undefined) : null;
+  const googleOk =
+    googleCustomer !== undefined &&
+    googleDeveloper !== undefined &&
+    googleClientId !== undefined &&
+    googleClientSecret !== undefined &&
+    googleRefresh !== undefined &&
+    (e.ADS_GOOGLE_LOGIN_CUSTOMER_ID === undefined || googleLogin !== undefined);
+  const google = googleSet
+    ? googleOk
+      ? {
+          customerId: googleCustomer!,
+          loginCustomerId: googleLogin ?? null,
+          developerToken: googleDeveloper!,
+          clientId: googleClientId!,
+          clientSecret: googleClientSecret!,
+          refreshToken: googleRefresh!,
+        }
+      : undefined
+    : null;
+  if (meta === undefined || tiktok === undefined || google === undefined) return undefined;
+  return { meta, tiktok, google };
 }
 
 /** Trim values and drop empty ones, so `FOO=` behaves like an unset variable. */

@@ -21,9 +21,9 @@
  *    with a recovery code, no undoing an accepted transfer, no account
  *    deletion, no age check, no vote of the circle and no note of the private
  *    salon in the audit log, no payment taken, no public view of a LIVE
- *    RELEASE's room, no call to an online store, SMTP the one connection
- *    out, no house message by email or notification nor answered) holding in
- *    the code;
+ *    RELEASE's room, no call to an online store, SMTP and the ad platforms'
+ *    client the two connections out, no house message by email or
+ *    notification nor answered) holding in the code;
  *  - the two production settings that would change a rule
  *    (SESSION_TTL_ACCOUNT_HOURS, TRANSFER_ACCEPT_REQUIRE_PRODUCT) left
  *    commented out in deploy/vps/.env.example and empty in compose.yaml;
@@ -48,6 +48,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { ADS_HOSTS } from '../../src/server/ads/http.js';
 import { DEFAULT_SESSION_TTL_HOURS, loadConfig } from '../../src/server/config.js';
 import { ADDON_UNITS_MAX, EMAIL_KINDS, SET_PIECES_MAX, SET_PIECES_MIN, VAULT_WAIT_DAYS, WARRANTY_CLAIM_OUTCOMES_BY_BASIS, WARRANTY_CLAIM_REFUSALS_BY_BASIS } from '../../src/server/db/schema.js';
 import { registerAccountBody } from '../../src/server/http/schemas.js';
@@ -873,13 +874,27 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   },
   N10: () => {
     // No call to an online store (plan LIVE RELEASE+, choice 9: Shopify not decided, exports only): no dependency for
-    // one, and no request the server sends out at all.
+    // one, and no request the server sends out but the ad platforms'.
     const pkg = JSON.parse(readDoc('genome/package.json')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
     expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((d) => /shopify/i.test(d))).toEqual([]);
     const server = SOURCES.filter(({ file }) => file.startsWith(join('src', 'server')));
     expect(server.length).toBeGreaterThan(50);
-    expect(server.filter(({ text }) => /\bfetch\(|\bhttps?\.request\(|\bhttps?\.get\(/.test(text)).map(({ file }) => file)).toEqual([]);
-    // Its one connection out is the emails' SMTP client (lot M1 §5): no other file opens a socket.
+    // Two connections out, named (lot M4 §3.2). The advertising client (K27, used only while its switch is on) is the
+    // one file that calls `fetch(`, once, to the four fixed ADS_HOSTS only; no file sends an http(s).request.
+    const ads = join('src', 'server', 'ads', 'http.ts');
+    expect(server.filter(({ text }) => /\bfetch\(/.test(text)).map(({ file }) => file)).toEqual([ads]);
+    expect(server.filter(({ text }) => /\bhttps?\.request\(|\bhttps?\.get\(/.test(text)).map(({ file }) => file)).toEqual([]);
+    const client = readDoc('genome/src/server/ads/http.ts');
+    expect(client.match(/\bfetch\(/g)).toHaveLength(1);
+    const hosts = /^export const ADS_HOSTS = Object\.freeze\(\[([^\]]*)\] as const\);$/m.exec(client);
+    expect(hosts?.[1].split(',').map((h) => h.trim())).toEqual(["'graph.facebook.com'", "'business-api.tiktok.com'", "'googleads.googleapis.com'", "'oauth2.googleapis.com'"]);
+    expect(ADS_HOSTS).toEqual(['graph.facebook.com', 'business-api.tiktok.com', 'googleads.googleapis.com', 'oauth2.googleapis.com']);
+    expect(ADS_HOSTS.filter((h) => /shopify/i.test(h))).toEqual([]);
+    // The host is checked before the request: the refusal comes first in the one method that calls fetch.
+    expect(client.indexOf('if (!this.allows(url)) throw')).toBeGreaterThan(0);
+    expect(client.indexOf('if (!this.allows(url)) throw')).toBeLessThan(client.indexOf('fetch('));
+    expect(client).toContain("redirect: 'error'");
+    // The other is the emails' SMTP client (lot M1 §5): no other file opens a socket.
     const opens = /import \{[^}]*\b(?:connect|createConnection)\b[^}]*\} from 'node:(?:net|tls)'|\b(?:net|tls)\.(?:connect|createConnection)\(/;
     expect(server.filter(({ text }) => opens.test(text)).map(({ file }) => file)).toEqual([join('src', 'server', 'email', 'smtp.ts')]);
     // The exports exist, as files of the console.
