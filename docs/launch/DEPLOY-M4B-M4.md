@@ -592,13 +592,13 @@ Dans `Growth` → `Margin settings`, avec les chiffres préparés (§1.1, point 
 2. `By channel` : la commande dans la ligne de son canal.
 3. La ligne THE VAULT : « Products won, claimed (VAULT orders at 0) », « Vault credits used », « Credits to give used », « Free add-ons given », « THE VAULT CARDs packed », « Guaranteed pieces: each is bought at its price, so it costs nothing here. », puis « The report’s cost of the rewards won » ; `THE VAULT’s report` ouvre `Club`, onglet `THE VAULT`.
 
-#### 3. Les partenaires, au premier vrai accord
+#### 3. Les partenaires : un partenaire, une expérience et son invitation en brouillon
 
-Un partenaire ne s'efface jamais (on le met de côté), une expérience non plus : fais ce point avec ton premier vrai partenaire. Sans accord le jour même, garde ce point pour le premier.
+Le jour même, avec la marque avec laquelle tu travailles, ou celle avec laquelle tu comptes travailler en premier. C'est une vraie donnée, que tu gardes : un partenaire ne s'efface jamais, une expérience non plus. Si l'accord ne vient jamais, `Cancel the experience` annule l'expérience encore en brouillon, et `Set aside` met le partenaire de côté. Rien n'est publié ni facturé.
 
 1. `Club`, onglet `Circle`, `Partners` → `New partner` : `Brand`, `Contact`, `Email`, `Phone`, `Billing name`, `Billing address`, `Billing country`, `Company number`, `Note`, puis `Create partner` : « Partner created. » Sa page s'ouvre.
 2. `New experience` : `Title`, `Event (Paris)`, `Amount`, `Currency`, `Note`, puis `Create experience` : « Experience created. » Son état : `Draft`. Rien n'est facturé.
-3. `Club`, onglet `Circle`, `New invitation` : `Experience` `Partner experience`, puis le champ `Partner experience` : l'expérience, « <BRAND> · <TITRE> · <JOUR> », puis `Create invitation`. L'invitation reste un **brouillon** : ne la publie pas maintenant. Sa page lit la ligne `Partner experience`.
+3. `Club`, onglet `Circle`, `New invitation` : `Experience` `Partner experience`, puis le champ `Partner experience` : l'expérience, « <BRAND> · <TITRE> · <JOUR> », puis `Create invitation`. L'invitation reste un **brouillon** : ce contrôle ne la publie jamais ; elle attend l'accord (§1.8). Sa page lit la ligne `Partner experience`.
 4. La page de l'expérience : sous `Invitations`, l'invitation ; sous `Guests for the partner`, « 0 guests · 0 names shared ».
 5. **Aucune facture émise pour un essai** : `Issue the invoice` attend le vrai jour, puisqu'un numéro P- ne se réutilise jamais. Le PDF d'une facture de partenaire est prouvé par la CI.
 
@@ -618,7 +618,7 @@ Sur ton téléphone, TERMS et PRIVACY au pied de page : « Version of 27 October
 Dans cet ordre, quand tu veux :
 
 1. **Tous les réglages de la marge**, `Growth` → `Margin settings` : un taux pour chaque devise où tu vends, les tranches d'expédition de chaque pays où tu envoies (et ALL OTHER COUNTRIES), POUCH, CARD et THE VAULT CARD, la provision de chaque catégorie, `PRIVATE CARE and warranty` (le service et chaque issue d'une garantie), jusqu'à ce que `What is missing` lise « Nothing is missing for this window. » Le coût de chaque boîte reste dans `Orders` → `Settings` → `Boxes`.
-2. **Les partenaires**, quand un accord existe : le partenaire, son expérience, son invitation publiée quand elle est prête ; `Issue the invoice` quand l'accord est ferme (la boîte « ISSUE THE INVOICE » nomme le numéro P- suivant, jamais réutilisé, le partenaire et le montant), puis `Record payment` le jour où le virement arrive ; avant l'événement, `Guests for the partner` → `Download the list`, que tu envoies au partenaire.
+2. **Les partenaires**, quand un accord existe : le partenaire et son expérience (ceux du §1.7, point 3, ou d'autres), son invitation publiée quand elle est prête ; `Issue the invoice` quand l'accord est ferme (la boîte « ISSUE THE INVOICE » nomme le numéro P- suivant, jamais réutilisé, le partenaire et le montant), puis `Record payment` le jour où le virement arrive ; avant l'événement, `Guests for the partner` → `Download the list`, que tu envoies au partenaire.
 3. **Préviens ORBES Client Services** que c'est en place, si ce n'est pas déjà fait (§1.1).
 4. **Les anciennes images (facultatif).** Une fois M4 stable, `<TAG_Q3>` et les images d'avant ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_M4>`), la liste d'abord :
 

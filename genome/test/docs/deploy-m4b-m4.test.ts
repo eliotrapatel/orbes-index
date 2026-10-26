@@ -477,8 +477,14 @@ describe('the runbook of lot M4 (docs/launch/DEPLOY-M4B-M4.md)', () => {
     expect(order).toContain(said(MARGIN_VAULT_WORDS.guaranteed));
     expect(MARGIN_VAULT_WORDS.guaranteed).not.toMatch(/\bplace\b/i);
     expect(order).toContain(`\`${MARGIN_TEXT.vaultLink}\` ouvre \`Club\`, onglet \`${VAULT_COPY.tab}\``);
-    // 3. Partners at the first real deal: a partner, a DRAFT experience, a DRAFT invitation linked, its guests (0), no invoice.
+    // 3. Partners on deployment day (plan §9 §1.7): a partner, a DRAFT experience, a DRAFT invitation linked and never
+    // published, its guests (0), no invoice. Unconditional: never put off to a first deal.
     const partners = section(runbook, '#### 3.');
+    expect(runbook).toContain('#### 3. Les partenaires : un partenaire, une expérience et son invitation en brouillon\n');
+    expect(partners).toContain(
+      `Le jour même, avec la marque avec laquelle tu travailles, ou celle avec laquelle tu comptes travailler en premier. C'est une vraie donnée, que tu gardes : un partenaire ne s'efface jamais, une expérience non plus. Si l'accord ne vient jamais, \`${PARTNERS_TEXT.cancel}\` annule l'expérience encore en brouillon, et \`${PARTNERS_TEXT.setAside}\` met le partenaire de côté. Rien n'est publié ni facturé.`,
+    );
+    expect(runbook).not.toMatch(/premier vrai accord|Sans accord le jour même|garde ce point pour le premier/);
     const partnersView = source('web/admin/views/partners.ts');
     const partnerFields = ['Brand', 'Contact', 'Email', 'Phone', 'Billing name', 'Billing address', 'Billing country', 'Company number', 'Note'];
     for (const f of partnerFields) expect(partnersView, f).toContain(`label: '${f}'`);
@@ -494,7 +500,7 @@ describe('the runbook of lot M4 (docs/launch/DEPLOY-M4B-M4.md)', () => {
     expect(partners).toContain(
       `\`New invitation\` : \`Experience\` \`${CIRCLE_EXPERIENCE_LABELS.PARTNER_EXPERIENCE}\`, puis le champ \`Partner experience\` : l'expérience, ${said(experienceOptionLabel('<BRAND>', { title: '<TITRE>', eventOn: '<JOUR>' }))}, puis \`Create ${CIRCLE_KIND_LABELS.INVITATION.toLowerCase()}\``,
     );
-    expect(partners).toContain("L'invitation reste un **brouillon** : ne la publie pas maintenant.");
+    expect(partners).toContain("L'invitation reste un **brouillon** : ce contrôle ne la publie jamais ; elle attend l'accord (§1.8).");
     expect(partners).toContain(`sous \`${PARTNERS_TEXT.guests}\`, ${said(guestsLine({ headcount: 0, sharedCount: 0 }))}`);
     expect(partners).toContain(`**Aucune facture émise pour un essai** : \`${PARTNERS_TEXT.issue}\` attend le vrai jour, puisqu'un numéro P- ne se réutilise jamais. Le PDF d'une facture de partenaire est prouvé par la CI.`);
     // 4. The conversions off: KEYS MISSING with the pinned versions, SWITCH ON refused in the server's words, no event,
