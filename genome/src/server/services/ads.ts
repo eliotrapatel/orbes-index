@@ -10,9 +10,12 @@
  *              and, with GRANTED only, the browser's user agent and the platforms' click ids the address carried
  *              (`ad_clicks`); a DECLINED erases the device's and the account's click ids and cancels the account's
  *              events still QUEUED (withdrawal stops every later event). Not audited: the row is the record, as a vote.
- *   carry      at a sign-up and a sign-in, inside TrackingService.link's transaction (context.ts): a choice the device
- *              made signed out becomes the account's (a new row, at the time it was made) when the account holds none
- *              newer; the device's click ids then take the account (or, when the account's choice is DECLINED, go).
+ *   carry      at a sign-up and a sign-in, inside TrackingService.link's transaction (context.ts), only while on: a
+ *              choice the device made signed out becomes the account's (a new row, at the time it was made) when the
+ *              account holds none newer and no one chose on that device signed in since; the device's click ids then
+ *              take the account (or, when the account's choice is DECLINED, go). Kept at the time it was made, a
+ *              carried GRANTED also covers the account's acts after that time which a pass inside the overlap had not
+ *              yet queued (the consent was given before them).
  *   switch     `setSwitch(on, phrase, actor)` (ADMIN, the typed phrase SWITCH ON / SWITCH OFF): on with no platform's
  *              keys in the server's .env is refused (409 ADS_NO_PLATFORM); the first on sets `events_from` (no act
  *              before it is ever sent: no backfill); each on sets the watermark to now (nothing done while off is ever
@@ -37,7 +40,9 @@
  *   sendDue    every ADS_SENDER.intervalMs (context.ts starts it when a platform has its keys; it does nothing while
  *              off): per platform, the QUEUED events due, ADS_SENDER.batch at most, claimed (attempt counted, a lease
  *              ahead), the account's consent read again (withdrawn, or the account no longer counted: CANCELLED), the
- *              age (TOO_OLD) and the platform's readiness read again, then sent; refused or unanswered, tried again after
+ *              switch read again (off: CANCELLED, nothing more sent) and the row (cancelled since its claim: not sent),
+ *              the age (TOO_OLD) and the platform's readiness read again, then sent; once the platform took it, SENT,
+ *              even when a cancel landed while its request was on its way; refused or unanswered, tried again after
  *              1 min, 5 min, 30 min, 2 h, then FAILED. Logs `ad event sent` / `ad event failed` with the platform, kind
  *              and id; never the email nor a key.
  *   purge      the housekeeping's: events AD_EVENT_RETENTION_DAYS after they settled, click ids AD_CLICK_RETENTION_DAYS
@@ -495,10 +500,13 @@ export class AdsService {
 
   /**
    * At a sign-up or a sign-in (TrackingService.link's attach, in its transaction): the device's choice made signed out
-   * becomes the account's when the account holds none newer (a new row, at the time it was made); the device's click
-   * ids take the account, or go when the account's choice is DECLINED. Nothing when the device made no choice.
+   * becomes the account's when the account holds none newer (a new row, at the time it was made) and no one chose since
+   * on that device signed in (a shared device: a later choice made signed in is not handed to the next account); the
+   * device's click ids take the account, or go when the account's choice is DECLINED. Nothing when the device made no
+   * choice, and nothing while off (no row moves while conversions are switched off; a later sign-in while on carries).
    */
   async carry(tx: Db, deviceId: number, accountId: string): Promise<void> {
+    if (!(await this.isOn(tx))) return;
     const device = await tx
       .selectFrom('ad_consents')
       .select(['choice', 'source', 'text_version', 'user_agent', 'chosen_at'])
@@ -514,8 +522,13 @@ export class AdsService {
       const newer = await tx
         .selectFrom('ad_consents')
         .select('id')
-        .where('account_id', '=', accountId)
-        .where('chosen_at', '>=', device.chosen_at)
+        .where((eb) =>
+          eb.or([
+            eb.and([eb('account_id', '=', accountId), eb('chosen_at', '>=', device.chosen_at)]),
+            // Chosen signed in on this device after it (a carried copy keeps the device's time, so it is not later).
+            eb.and([eb('device_id', '=', deviceId), eb('account_id', 'is not', null), eb('chosen_at', '>', device.chosen_at)]),
+          ]),
+        )
         .limit(1)
         .executeTakeFirst();
       if (!newer) {
@@ -878,14 +891,13 @@ export class AdsService {
     return null;
   }
 
-  /** One pass of the sender (see the header). Nothing while off. */
+  /** One pass of the sender (see the header). Nothing while off; the switch read again before each event is sent. */
   async sendDue(now: Date = this.clock()): Promise<AdsSendReport> {
     const report: AdsSendReport = { sent: 0, retried: 0, failed: 0, skipped: 0, cancelled: 0 };
-    const s = await this.db.selectFrom('ads_settings').selectAll().where('id', '=', 1).executeTakeFirst();
-    if (!s?.enabled) return report;
+    if (!(await this.isOn())) return report;
     for (const platform of ADS_PLATFORMS) {
       const rows = await this.claim(platform, now);
-      for (const row of rows) report[await this.sendOne(row, s, now)] += 1;
+      for (const row of rows) report[await this.sendOne(row, now)] += 1;
     }
     return report;
   }
@@ -921,23 +933,37 @@ export class AdsService {
     });
   }
 
-  /** An event's end: SENT, SKIPPED or CANCELLED, settled now (only while it is still QUEUED). */
+  /**
+   * An event's end: SKIPPED, CANCELLED or FAILED, settled now only while it is still QUEUED; SENT once the platform took
+   * it, even when a cancel (a switch off, a withdrawal, a lock) landed while its request was on its way: the record says
+   * what the platform received.
+   */
   private async settle(row: Claimed, set: { status: 'SENT' | 'SKIPPED' | 'CANCELLED' | 'FAILED'; skip_reason?: AdSkipReason; last_error?: string | null }, now: Date): Promise<void> {
     await this.db
       .updateTable('ad_events')
       .set({ status: set.status, skip_reason: set.skip_reason ?? null, last_error: set.last_error ?? null, settled_at: now, ...(set.status === 'SENT' ? { sent_at: now } : {}) })
       .where('id', '=', row.id as number)
-      .where('status', '=', 'QUEUED')
+      .where('status', 'in', set.status === 'SENT' ? ['QUEUED', 'CANCELLED'] : ['QUEUED'])
       .execute();
   }
 
-  private async sendOne(row: Claimed, s: { google_action_signup: string | null; google_action_draw_entry: string | null; google_action_live_entry: string | null; google_action_paid_order: string | null }, now: Date): Promise<keyof AdsSendReport> {
+  private async sendOne(row: Claimed, now: Date): Promise<keyof AdsSendReport> {
     const built = await this.eventOf(row);
     if ('cancel' in built) {
       await this.settle(row, { status: 'CANCELLED', last_error: built.cancel }, now);
       this.log.info({ platform: row.platform, kind: row.kind, id: Number(row.id) }, 'ad event cancelled');
       return 'cancelled';
     }
+    // Read again right before the send (A1): switched off since the pass began, nothing more goes; the row cancelled
+    // since its claim (a switch off, even one switched on again, a withdrawal, a lock), it does not go either.
+    const s = await this.db.selectFrom('ads_settings').selectAll().where('id', '=', 1).executeTakeFirst();
+    if (!s?.enabled) {
+      await this.settle(row, { status: 'CANCELLED', last_error: AD_CANCELLED_WORDS.switchedOff }, now);
+      this.log.info({ platform: row.platform, kind: row.kind, id: Number(row.id) }, 'ad event cancelled');
+      return 'cancelled';
+    }
+    const current = await this.db.selectFrom('ad_events').select('status').where('id', '=', row.id as number).executeTakeFirst();
+    if (current?.status !== 'QUEUED') return 'cancelled';
     const reason = this.skipReason(
       row.platform,
       row.kind,

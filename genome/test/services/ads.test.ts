@@ -19,19 +19,22 @@
  *  - TOO_OLD, NO_CLICK_ID, NOT_READY (keys missing, or Google's action not named);
  *  - retries (1 min, 5 min, 30 min, 2 h) then FAILED, its error scrubbed of the token;
  *  - SWITCH OFF cancels what is queued; the console's read (readiness true or false, never a key) and events;
+ *  - a switch off (even switched on again) or a DECLINED landing during a pass: nothing more sent after it, the event a
+ *    platform took reads SENT; no carry while off; a shared device's later choice made signed in not handed on;
  *  - the purge; the right of access's three parts; the audit (never a key, never an account); SEND A TEST EVENT;
  *  - ADS_TEXT_VERSION equal to the web's (web/legal/content/privacy-ads.ts).
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hashEmail } from '../../src/server/ads/event.js';
+import { hashEmail, type AdEvent } from '../../src/server/ads/event.js';
 import type { AdsConfig } from '../../src/server/config.js';
 import type { Db } from '../../src/server/db/connection.js';
 import type { AdClickKind, AdConsentChoice, ConversionKind } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
 import { AcquisitionService } from '../../src/server/services/acquisition.js';
 import {
+  AD_CANCELLED_WORDS,
   accountAdsData,
   ADS_SENDER,
   ADS_TEXT_VERSION,
@@ -332,6 +335,22 @@ describe('AdsService (K27, plan §3.2)', () => {
     expect(await db.selectFrom('ad_clicks').select('id').where('device_id', '=', dev2).execute()).toEqual([]);
     await db.transaction().execute((tx) => ads.carry(tx, dev2, b));
     expect(await ads.state(null, b)).toMatchObject({ choice: 'DECLINED' });
+    // A shared device: a choice made signed out, carried to one account, is carried to the next one too (its copy keeps
+    // the device's time); but once someone chose on it signed in, later, the next account is asked again.
+    const dev4 = await device();
+    await ads.choose({ deviceId: dev4, accountId: null, choice: 'GRANTED', source: 'BANNER', userAgent: UA });
+    clock.advance(MIN);
+    const [first, next] = [await account(), await account()];
+    await db.transaction().execute((tx) => ads.carry(tx, dev4, first));
+    await db.transaction().execute((tx) => ads.carry(tx, dev4, next));
+    expect([await ads.state(null, first), await ads.state(null, next)].map((x) => x.choice)).toEqual(['GRANTED', 'GRANTED']);
+    const dev3 = await device();
+    await ads.choose({ deviceId: dev3, accountId: null, choice: 'GRANTED', source: 'BANNER', userAgent: UA });
+    clock.advance(MIN);
+    const [declining, after] = [await account(), await account()];
+    await ads.choose({ deviceId: dev3, accountId: declining, choice: 'DECLINED', source: 'ACCOUNT', userAgent: UA });
+    await db.transaction().execute((tx) => ads.carry(tx, dev3, after));
+    expect(await ads.state(null, after)).toMatchObject({ choice: null });
   });
 
   it('sends a paid order as PAID_ORDER with its main invoice’s total; one recorded unpaid and PAID on a later pass, once', async () => {
@@ -510,6 +529,75 @@ describe('AdsService (K27, plan §3.2)', () => {
     expect(list.events.length).toBeGreaterThan(0);
     expect(list.events.every((e) => e.status === 'CANCELLED' && e.platform === 'META')).toBe(true);
     expect(Object.keys(list.events[0]!).sort()).toEqual(['attempts', 'createdAt', 'id', 'kind', 'lastError', 'notBefore', 'platform', 'sentAt', 'settledAt', 'skipReason', 'status']);
+  });
+
+  it('sends nothing more once switched off or declined during a pass; an event the platform took reads SENT', async () => {
+    await ads.sendDue(now());
+    // META's sender stands in for the platform: it takes the event, then what `during` does lands while its answer is on its way.
+    const took: string[] = [];
+    let during: (() => Promise<unknown>) | null = null;
+    const meta = {
+      send: async (event: AdEvent) => {
+        took.push(event.id);
+        const f = during;
+        during = null;
+        if (f) await f();
+        return { status: 200, answer: 'HTTP 200: {}' };
+      },
+    };
+    const sender = new AdsService({ db, audit: new AuditService({ db, clock: clock.now }), keys: KEYS, cookieSecret: SECRET, publicOrigin: ORIGIN, clock: clock.now, testOrigin: fake.origin, senders: { META: meta } });
+    const row = async (c: number) => db.selectFrom('ad_events').select(['status', 'sent_at', 'last_error']).where('conversion_id', '=', c).executeTakeFirstOrThrow();
+    /** Two acts of one collector through Instagram (META), queued; the first goes first. */
+    const two = async () => {
+      clock.advance(3 * MIN);
+      const a = await account();
+      await choice(a, ago(DAY));
+      const first = await conversion('SIGNUP', a, src.instagram, ago(2 * MIN));
+      const second = await conversion('DRAW_ENTRY', a, src.instagram, ago(MIN));
+      await pass();
+      took.length = 0;
+      return { a, first, second };
+    };
+    const sentAt = () => now();
+    // Switched off while the first event's request is on its way: it reads SENT; the second is never sent.
+    const off = await two();
+    during = () => ads.setSwitch(false, 'SWITCH OFF', actor);
+    expect(await sender.sendDue(now())).toMatchObject({ sent: 1, cancelled: 1 });
+    expect(took).toEqual([`orbes-${off.first}`]);
+    expect(await row(off.first)).toEqual({ status: 'SENT', sent_at: sentAt(), last_error: null });
+    expect(await row(off.second)).toEqual({ status: 'CANCELLED', sent_at: null, last_error: AD_CANCELLED_WORDS.switchedOff });
+    expect(await sender.sendDue(now())).toEqual({ sent: 0, retried: 0, failed: 0, skipped: 0, cancelled: 0 });
+    // While off, no carry: a device's choice and click id made signed out stay on the device.
+    const dev = await device();
+    await db.insertInto('ad_consents').values({ device_id: dev, choice: 'GRANTED', source: 'BANNER', text_version: ADS_TEXT_VERSION, user_agent: UA, chosen_at: ago(MIN) }).execute();
+    await db.insertInto('ad_clicks').values({ device_id: dev, kind: 'FBCLID', click_id: 'IwAR0whileoff', clicked_at: ago(MIN) }).execute();
+    const carriedOff = await account();
+    await db.transaction().execute((tx) => ads.carry(tx, dev, carriedOff));
+    expect(await db.selectFrom('ad_consents').select('id').where('account_id', '=', carriedOff).execute()).toEqual([]);
+    expect(await db.selectFrom('ad_clicks').select('account_id').where('device_id', '=', dev).execute()).toEqual([{ account_id: null }]);
+    // Switched off and on again while the first is on its way: the second, cancelled by the off, is not sent.
+    await ads.setSwitch(true, 'SWITCH ON', actor);
+    const offOn = await two();
+    during = async () => {
+      await ads.setSwitch(false, 'SWITCH OFF', actor);
+      await ads.setSwitch(true, 'SWITCH ON', actor);
+    };
+    expect(await sender.sendDue(now())).toMatchObject({ sent: 1, cancelled: 1 });
+    expect(took).toEqual([`orbes-${offOn.first}`]);
+    expect((await row(offOn.first)).status).toBe('SENT');
+    expect(await row(offOn.second)).toEqual({ status: 'CANCELLED', sent_at: null, last_error: AD_CANCELLED_WORDS.switchedOff });
+    // The collector declines while the first is on its way: the second is not sent; the right of access says so.
+    const declined = await two();
+    during = () => ads.choose({ deviceId: null, accountId: declined.a, choice: 'DECLINED', source: 'ACCOUNT', userAgent: UA });
+    expect(await sender.sendDue(now())).toMatchObject({ sent: 1, cancelled: 1 });
+    expect(took).toEqual([`orbes-${declined.first}`]);
+    expect(await row(declined.first)).toEqual({ status: 'SENT', sent_at: sentAt(), last_error: null });
+    expect(await row(declined.second)).toEqual({ status: 'CANCELLED', sent_at: null, last_error: AD_CANCELLED_WORDS.withdrawn });
+    expect((await accountAdsData(db, declined.a)).events.map((e) => [e.kind, e.status])).toEqual([
+      ['SIGNUP', 'SENT'],
+      ['DRAW_ENTRY', 'CANCELLED'],
+    ]);
+    clock.advance(2 * MIN);
   });
 
   it('SEND A TEST EVENT: in the platform’s test mode, for the house’s test address, its answer shown', async () => {
