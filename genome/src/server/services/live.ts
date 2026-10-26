@@ -1011,7 +1011,8 @@ export interface WithdrawnLiveInterest {
 /**
  * Remove the open entries of an account (WAITING, QUEUED, TURN, SECURED: REMOVED by the lock's ADMIN, add-ons
  * dropped) and withdraw its interest in the releases not opened yet, in the transaction of its lock, whose row lock
- * on the account is already held; the releases of those entries are locked first (FOR UPDATE, by id), as every action
+ * on the account is already held (FOR NO KEY UPDATE: a sell-out PAY holding one of those releases gives its line's
+ * vaults under FOR KEY SHARE on their accounts, never waiting for it); the releases of those entries are locked first (FOR UPDATE, by id), as every action
  * takes them. A piece so given back goes to the next in line at the engine's next pass. Returns them for their audit
  * entries, written after the lock's row locks (auditRemovedLiveEntries).
  */
@@ -1907,8 +1908,9 @@ export class LiveService {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     let leftOut: LeftOutAddon[] = [];
-    // Run again on a deadlock (lot Q3): a sell-out's vaults lock the line's accounts, which an account's lock elsewhere
-    // may hold (OwnerService.lock); each try takes its frame marks afresh and reads its add-ons left out anew.
+    // Run again on a deadlock or a serialization failure (40P01, 40001); each try takes its frame marks afresh and reads
+    // its add-ons left out anew. A sell-out's vaults take the line's accounts FOR KEY SHARE, which an account's lock
+    // (OwnerService.lock, FOR NO KEY UPDATE, then the releases) never blocks: the two never wait for each other (lot Q3).
     await this.changing(id, (mark, changes) => inRetriedTransaction(this.db, async (tx) => {
       changes.anew();
       leftOut = [];

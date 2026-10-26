@@ -932,7 +932,12 @@ export class OwnerService {
     assertAccountId(accountId);
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const account = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', accountId).forUpdate().executeTakeFirst();
+      // FOR NO KEY UPDATE (as a sign-in takes it): the account's own actions (their row FOR SHARE, then a release's) and
+      // a lock or a sign-in in progress are waited for, but not a FOR KEY SHARE: a sell-out PAY holds its release's row
+      // and then takes its line's accounts FOR KEY SHARE for their vaults (services/vault.ts giveLiveVaults), while this
+      // lock holds the account and then locks the releases of its entries (removeAccountLiveEntries); with FOR UPDATE
+      // here each waited for the other (a deadlock, lot Q3). The status changed below is not a key column.
+      const account = await tx.selectFrom('accounts').select(['id', 'status']).where('id', '=', accountId).forNoKeyUpdate().executeTakeFirst();
       if (!account) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
       if (account.status === 'LOCKED') throw conflict('ACCOUNT_ALREADY_LOCKED', 'This account is already locked.');
       if (account.status !== 'ACTIVE') throw conflict('ACCOUNT_NOT_ACTIVE', 'Only an active account can be locked.');

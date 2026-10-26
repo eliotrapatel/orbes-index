@@ -337,7 +337,8 @@ export async function giveVault(tx: Db, occasion: VaultOccasion, now: Date): Pro
   // at once are ordered by the unique key (`vaults_occasion_key`: the second insert of an index waits for the first and
   // gives nothing), the cap counts one key's vaults only, so no stronger lock is needed; and none may be taken: the
   // callers already hold the account's row FOR SHARE (a LIVE action, a first registration, an address saved) and two of
-  // them raising it to an update lock at once would deadlock (step Q3.6).
+  // them raising it to an update lock at once would deadlock (step Q3.6). An account's lock (OwnerService.lock, FOR NO
+  // KEY UPDATE) does not wait for it, nor it for the lock: given while a lock is under way, as if just before it.
   const account = await tx.selectFrom('accounts').select('status').where('id', '=', accountId).forKeyShare().executeTakeFirst();
   if (account?.status !== 'ACTIVE') return none('NOT_ACTIVE');
   if (await isTestEntrant(tx, accountId)) return none('TEST_ENTRANT');
@@ -429,7 +430,8 @@ export async function giveLiveVaults(tx: Db, d: LiveVaultRelease, sizeIds: reado
   const dropId = d.id.toLowerCase();
   const key = occasionKey({ source: 'LIVE', accountId: dropId, dropId, entryId: dropId });
   // The entries given to, in one read: still in the line, ACTIVE (the account's row FOR KEY SHARE, as `giveVault` takes
-  // it for LIVE), never a test entrant, none already holding this release's vault (one entry per account per release).
+  // it for LIVE; an account's lock under way holds its row FOR NO KEY UPDATE, which this never waits for: the lock then
+// waits for this release's row, held here), never a test entrant, none already holding this release's vault.
   const entries = await tx
     .selectFrom('live_entries as e')
     .innerJoin('accounts as a', 'a.id', 'e.account_id')

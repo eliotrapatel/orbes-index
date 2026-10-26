@@ -20,6 +20,7 @@ import { DomainError } from '../../src/server/errors.js';
 import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LiveEngine } from '../../src/server/services/live-engine.js';
 import { LiveService } from '../../src/server/services/live.js';
+import { giveLiveVaults } from '../../src/server/services/vault.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService } from '../../src/server/services/owners.js';
@@ -201,6 +202,43 @@ for (const backend of BACKENDS) {
         expect(await auditCount(r, 'drop.live.confirm')).toBe(1);
       }
     });
+
+    if (backend.name === 'PostgreSQL') {
+      it('the lock of an account waiting for the release a sell-out PAY holds never blocks the vaults that PAY gives its line (lot Q3: the deadlock of the pre-check, made to happen)', async () => {
+        const sessions = new SessionService({ db: handle.db, clock: f.clock.now, ttlHours: { account: 24, admin: 8 } });
+        const lifecycle = new LifecycleService({ db: handle.db, audit: f.audit, clock: f.clock.now });
+        const ownership = new OwnershipService({ db: handle.db, audit: f.audit, lifecycle, clock: f.clock.now, transferKey: new Uint8Array(32).fill(9), requireScannedPiece: false });
+        const owners = new OwnerService({ db: handle.db, audit: f.audit, sessions, ownership, clock: f.clock.now });
+        const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+        await f.liveConsole.setVault(r.id, true, f.admin);
+        const [, waiting, other] = await lineOf(r, [3, 1, 0]);
+        const lockWaitsForTheRelease = async () =>
+          Number(
+            (
+              await sql<{ n: number }>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%from "drops"%for update%'`.execute(
+                handle.db,
+              )
+            ).rows[0]!.n,
+          ) === 1;
+        const { notes, locking } = await handle.db.transaction().execute(async (trx) => {
+          // PAY's place: the release's row held FOR NO KEY UPDATE (lockLive), the size about to be sold out.
+          const d = await trx.selectFrom('drops').select(['id', 'set_id', 'parent_drop_id', 'vault_on']).where('id', '=', r.id).forNoKeyUpdate().executeTakeFirstOrThrow();
+          // The lock of an account still waiting in the line: its account row taken, it waits for the release's row.
+          const locking = owners.lock(waiting!.id, f.admin).then(
+            () => 'ok',
+            (e: unknown) => e,
+          );
+          await until(lockWaitsForTheRelease);
+          // The sell-out's vaults take the line's accounts FOR KEY SHARE, the one being locked included: never waiting for the lock.
+          return { notes: await giveLiveVaults(trx, d, [r.sizes[0]!.id], f.clock.now()), locking };
+        });
+        expect(await locking).toBe('ok');
+        expect(notes.map((n) => n.targetId).sort()).toEqual([waiting!.id, other!.id].sort());
+        // Given while it waited, then removed by its lock, which ran after the PAY's transaction.
+        expect(await statusOf(r, waiting!.id)).toBe('REMOVED');
+        expect((await handle.db.selectFrom('accounts').select('status').where('id', '=', waiting!.id).executeTakeFirstOrThrow()).status).toBe('LOCKED');
+      });
+    }
 
     it('the engine racing a SECURE at a deadline: before it, secured and never missed; at it, refused and MISSED, never both', async () => {
       for (const offset of [-1, 0]) {
