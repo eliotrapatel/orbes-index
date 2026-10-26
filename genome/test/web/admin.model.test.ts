@@ -522,6 +522,11 @@ describe('admin enums mirror the server', () => {
     ] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect([...web.PARTNER_EXPERIENCE_STATUSES]).toEqual([...serverSchema.PARTNER_EXPERIENCE_STATUSES]);
     expect([...web.PARTNER_INVOICE_KINDS]).toEqual([...serverSchema.PARTNER_INVOICE_KINDS]);
+    // The server-side conversions (macro scope K27, migration 0065): the platforms, the choices, the acts, the states, the
+    // reasons skipped, a test event code's bound and a Google Ads conversion action, as the server holds them.
+    for (const name of ['ADS_PLATFORMS', 'AD_CONSENT_CHOICES', 'AD_EVENT_KINDS', 'AD_EVENT_STATUSES', 'AD_SKIP_REASONS'] as const) expect([...web[name]], name).toEqual([...serverSchema[name]]);
+    expect(web.ADS_TEST_EVENT_CODE_MAX).toBe(serverSchema.ADS_TEST_EVENT_CODE_MAX);
+    expect(web.ADS_GOOGLE_ACTION_PATTERN.source).toBe(serverSchema.ADS_GOOGLE_ACTION_PATTERN.source);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);

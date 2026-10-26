@@ -167,6 +167,14 @@ describe('schema', () => {
       ['partner_experiences', 'currency', S.HOUSE_CURRENCIES],
       ['partner_invoices', 'kind', S.PARTNER_INVOICE_KINDS],
       ['partner_invoices', 'currency', S.HOUSE_CURRENCIES],
+      ['ads_channel_platforms', 'platform', S.ADS_PLATFORMS],
+      ['ad_consents', 'choice', S.AD_CONSENT_CHOICES],
+      ['ad_consents', 'source', S.AD_CONSENT_SOURCES],
+      ['ad_clicks', 'kind', S.AD_CLICK_KINDS],
+      ['ad_events', 'platform', S.ADS_PLATFORMS],
+      ['ad_events', 'kind', S.AD_EVENT_KINDS],
+      ['ad_events', 'status', S.AD_EVENT_STATUSES],
+      ['ad_events', 'skip_reason', S.AD_SKIP_REASONS],
       ['account_profiles', 'birth_date_by', S.PROFILE_SOURCES],
       ['account_profiles', 'updated_by', S.PROFILE_SOURCES],
       ['account_tastes', 'kind', S.TASTE_KINDS],
@@ -1918,6 +1926,87 @@ describe('schema', () => {
     await sql`ALTER TABLE partners DISABLE TRIGGER partners_no_delete`.execute(t.db);
     await t.db.deleteFrom('partners').execute();
     await sql`ALTER TABLE partners ENABLE TRIGGER partners_no_delete`.execute(t.db);
+    await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
+  });
+
+  it('ad conversions (0065): every bound is schema.ts\'s, the acts are the conversions\' with the order paid, the Google pattern the database\'s; the mirror at work: the switch row, a channel mapped, a choice on a device then on its account, a click id taking the account, an event queued then sent (bigint ids read as numbers)', async () => {
+    const def = async (table: string, constraint: string) =>
+      (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = ${table}::regclass AND conname = ${constraint}`.execute(t.db)).rows[0].def;
+    for (const [table, constraint, max] of [
+      ['ads_settings', 'ads_settings_meta_test_event_code_check', S.ADS_TEST_EVENT_CODE_MAX],
+      ['ads_settings', 'ads_settings_tiktok_test_event_code_check', S.ADS_TEST_EVENT_CODE_MAX],
+      ['ad_consents', 'ad_consents_user_agent_check', S.AD_USER_AGENT_MAX],
+      ['ad_clicks', 'ad_clicks_click_id_check', S.AD_CLICK_ID_MAX],
+      ['ad_events', 'ad_events_last_error_check', S.AD_EVENT_ERROR_MAX],
+    ] as const) {
+      expect(await def(table, constraint), constraint).toContain(`<= ${max}`);
+    }
+    // The acts sent are the conversions recorded, an ORDER sent once paid.
+    expect(S.AD_EVENT_KINDS).toEqual(S.CONVERSION_KINDS.map((k) => (k === 'ORDER' ? 'PAID_ORDER' : k)));
+    for (const act of ['signup', 'draw_entry', 'live_entry', 'paid_order']) {
+      expect(await def('ads_settings', `ads_settings_google_action_${act}_check`), act).toContain(`'${S.ADS_GOOGLE_ACTION_PATTERN.source.replace(/\\\//g, '/')}'`);
+    }
+    expect(S.ADS_GOOGLE_ACTION_PATTERN.test('customers/1234567890/conversionActions/987654321')).toBe(true);
+    expect(S.ADS_GOOGLE_ACTION_PATTERN.test('customers/1234567890/conversionActions/')).toBe(false);
+
+    const admin = await t.db.insertInto('admin_users').values({ email: 'ads-s0065@orbes.test', email_normalized: 'ads-s0065@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const from = new Date('2026-11-02T09:00:00.000Z');
+    const settings = await t.db
+      .insertInto('ads_settings')
+      .values({ enabled: true, events_from: from, switched_at: from, switched_by: admin.id, meta_test_event_code: 'TEST12345', google_action_paid_order: 'customers/1234567890/conversionActions/42', updated_by: admin.id })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(settings).toMatchObject({ id: 1, enabled: true, events_from: from, tiktok_test_event_code: null, google_action_signup: null, google_action_paid_order: 'customers/1234567890/conversionActions/42' });
+    await t.db.updateTable('ads_settings').set({ enabled: false, switched_at: new Date('2026-11-03T09:00:00.000Z') }).execute();
+    await expect(t.db.updateTable('ads_settings').set({ events_from: new Date('2026-11-03T09:00:00.000Z') }).execute()).rejects.toSatisfy(isGuardViolation);
+
+    const channel = await t.db.insertInto('link_channels').values({ name: 'Ads s0065' }).returning('id').executeTakeFirstOrThrow();
+    expect(await t.db.insertInto('ads_channel_platforms').values({ channel_id: channel.id, platform: 'META' }).returningAll().executeTakeFirstOrThrow()).toEqual({ channel_id: channel.id, platform: 'META' });
+    const account = await t.db.insertInto('accounts').values({ email: 'ads-s0065@example.com', email_normalized: 'ads-s0065@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const device = await t.db.insertInto('tracking_devices').values({ device_hash: 'S'.repeat(43) }).returning('id').executeTakeFirstOrThrow();
+    const signedOut = await t.db
+      .insertInto('ad_consents')
+      .values({ device_id: device.id, choice: 'GRANTED', source: 'BANNER', text_version: '2026-11-02', user_agent: 'Mozilla/5.0 (iPhone)' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(signedOut).toMatchObject({ id: expect.any(Number), device_id: device.id, account_id: null, choice: 'GRANTED', chosen_at: expect.any(Date) });
+    await expect(sql`UPDATE ad_consents SET choice = 'DECLINED' WHERE id = ${signedOut.id}`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    const withdrawn = await t.db.insertInto('ad_consents').values({ account_id: account.id, choice: 'DECLINED', source: 'ACCOUNT', text_version: '2026-11-02' }).returning(['id', 'user_agent']).executeTakeFirstOrThrow();
+    expect(withdrawn.id).toBeGreaterThan(signedOut.id);
+    expect(withdrawn.user_agent).toBeNull();
+    const click = await t.db
+      .insertInto('ad_clicks')
+      .values({ device_id: device.id, kind: 'FBCLID', click_id: 'IwAR0abc-_.~', clicked_at: from })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(click).toMatchObject({ id: expect.any(Number), account_id: null, kind: 'FBCLID', clicked_at: from });
+    await t.db.updateTable('ad_clicks').set({ account_id: account.id }).where('id', '=', click.id).execute();
+    await expect(t.db.updateTable('ad_clicks').set({ click_id: 'other' }).where('id', '=', click.id).execute()).rejects.toSatisfy(isGuardViolation);
+
+    const source = await t.db.insertInto('acquisition_sources').values({ kind: 'DIRECT', key: 'ads-s0065' }).returning('id').executeTakeFirstOrThrow();
+    const conversion = await t.db
+      .insertInto('acquisition_conversions')
+      .values({ kind: 'SIGNUP', ref_id: account.id, account_id: account.id, at: from, last_source_id: source.id })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const event = await t.db.insertInto('ad_events').values({ platform: 'META', conversion_id: conversion.id, kind: 'SIGNUP' }).returningAll().executeTakeFirstOrThrow();
+    expect(event).toMatchObject({ id: expect.any(Number), conversion_id: conversion.id, status: 'QUEUED', skip_reason: null, attempts: 0, sent_at: null, settled_at: null });
+    const sentAt = new Date('2026-11-02T09:00:30.000Z');
+    await t.db.updateTable('ad_events').set({ status: 'SENT', attempts: 1, sent_at: sentAt, settled_at: sentAt }).where('id', '=', event.id).execute();
+    await expect(t.db.updateTable('ad_events').set({ kind: 'PAID_ORDER' }).where('id', '=', event.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.insertInto('ad_events').values({ platform: 'META', conversion_id: conversion.id, kind: 'SIGNUP' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'ad_events_key'));
+
+    // Taken away (the cases after this one start without them).
+    await t.db.deleteFrom('ad_events').execute();
+    await t.db.deleteFrom('acquisition_conversions').where('id', '=', conversion.id).execute();
+    await t.db.deleteFrom('acquisition_sources').where('id', '=', source.id).execute();
+    await t.db.deleteFrom('ad_clicks').execute();
+    await t.db.deleteFrom('ad_consents').execute();
+    await t.db.deleteFrom('tracking_devices').where('id', '=', device.id).execute();
+    await t.db.deleteFrom('accounts').where('id', '=', account.id).execute();
+    await t.db.deleteFrom('ads_channel_platforms').execute();
+    await t.db.deleteFrom('link_channels').where('id', '=', channel.id).execute();
+    await t.db.deleteFrom('ads_settings').execute();
     await t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute();
   });
 

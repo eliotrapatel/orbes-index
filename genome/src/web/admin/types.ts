@@ -455,6 +455,25 @@ export type PartnerExperienceStatus = (typeof PARTNER_EXPERIENCE_STATUSES)[numbe
 export const PARTNER_INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
 export type PartnerInvoiceKind = (typeof PARTNER_INVOICE_KINDS)[number];
 
+/**
+ * The server-side conversions, built and switched off (ads_settings, ads_channel_platforms, ad_consents, ad_events,
+ * migration 0065, macro scope K27 A1 to A5), as Links → Ad platforms reads and writes them: the platforms, a collector's
+ * choice, an event's act, its states and the reason one is skipped; a test event code's length, at most; a Google Ads
+ * conversion action's resource name.
+ */
+export const ADS_PLATFORMS = ['META', 'TIKTOK', 'GOOGLE'] as const;
+export type AdsPlatform = (typeof ADS_PLATFORMS)[number];
+export const AD_CONSENT_CHOICES = ['GRANTED', 'DECLINED'] as const;
+export type AdConsentChoice = (typeof AD_CONSENT_CHOICES)[number];
+export const AD_EVENT_KINDS = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'PAID_ORDER'] as const;
+export type AdEventKind = (typeof AD_EVENT_KINDS)[number];
+export const AD_EVENT_STATUSES = ['QUEUED', 'SENT', 'FAILED', 'SKIPPED', 'CANCELLED'] as const;
+export type AdEventStatus = (typeof AD_EVENT_STATUSES)[number];
+export const AD_SKIP_REASONS = ['TOO_OLD', 'NO_CLICK_ID', 'NOT_READY'] as const;
+export type AdSkipReason = (typeof AD_SKIP_REASONS)[number];
+export const ADS_TEST_EVENT_CODE_MAX = 40;
+export const ADS_GOOGLE_ACTION_PATTERN = /^customers\/[0-9]{1,12}\/conversionActions\/[0-9]{1,20}$/;
+
 /** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];

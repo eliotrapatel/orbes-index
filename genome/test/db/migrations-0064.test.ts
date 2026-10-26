@@ -24,6 +24,8 @@ import { createTestDb, type TestDb } from '../support/db.js';
 
 const BEFORE = '0063_margin';
 const NAME = '0064_partners';
+/** The migration after it (lot M4, step M4.9: the ad conversions), taken down first and applied again with it. */
+const LATER = '0065_ad_conversions';
 const TABLES = ['partners', 'partner_experiences', 'partner_invoices'] as const;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -41,7 +43,7 @@ async function snapshotOf(db: Kysely<any>): Promise<string[]> {
   ).rows.map((r) => r.object);
 }
 
-/** Down to 0063 (0064 reverted). */
+/** Down to 0063 (0065, then 0064, reverted). */
 async function downTo0063(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -66,11 +68,14 @@ function cases(state: { db: () => Db; schemaAt0063: () => Promise<string[] | nul
 
   it('rolls back to the schema of 0063 exactly without rows: what 0064 added (three tables, an invitation\'s experience, an answer\'s shared name), nothing else; and applies again to the latest', async () => {
     const latest = await snapshotOf(db());
+    // 0065 down first: the schema 0064 left, which this case reads.
+    const rs = await createMigrator(db()).migrateTo(NAME);
+    if (rs.error) throw rs.error;
+    const withIt = await snapshotOf(db());
     expect(await downTo0063(db())).toEqual([NAME]);
     const before = await snapshotOf(db());
     const at0063 = await state.schemaAt0063();
     if (at0063) expect(before).toEqual(at0063);
-    const withIt = latest;
     const added = withIt.filter((o) => !before.includes(o) && !notNull(o));
     expect(before.filter((o) => !withIt.includes(o) && !notNull(o))).toEqual([]);
     expect(added.filter((o) => !of0064(o))).toEqual([]);
@@ -221,7 +226,7 @@ function cases(state: { db: () => Db; schemaAt0063: () => Promise<string[] | nul
       'trigger partners partners_touch_updated_at',
     ]);
     // Up again: no row written, no invitation linked, no answer shares a name; each guard holds its columns.
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
     expect(await snapshotOf(db())).toEqual(latest);
     for (const table of TABLES) expect(await count(table), table).toBe(0);
     expect(await count('circle_posts WHERE partner_experience_id IS NOT NULL')).toBe(0);
@@ -410,7 +415,7 @@ function cases(state: { db: () => Db; schemaAt0063: () => Promise<string[] | nul
     const refused = (n: readonly number[]) =>
       `migration 0064_partners cannot be rolled back: ${n[0]} partners, ${n[1]} partner experiences, ${n[2]} partner invoices, ${n[3]} invitations linked to an experience and ${n[4]} names shared exist`;
     await expect(downTo0063(db())).rejects.toThrow(refused(counts));
-    expect(await lastApplied()).toBe(NAME);
+    expect(await lastApplied()).toBe(LATER);
     // Each counts on its own: the names unshared and the invitations unlinked, the partners, experiences and invoices still refuse.
     await run(`UPDATE circle_rsvps SET share_name = false, share_name_at = NULL WHERE share_name`);
     await run(`UPDATE circle_posts SET partner_experience_id = NULL WHERE partner_experience_id IS NOT NULL`);
@@ -424,7 +429,7 @@ function cases(state: { db: () => Db; schemaAt0063: () => Promise<string[] | nul
     await run(`DELETE FROM partner_experiences`);
     await run(`ALTER TABLE partner_experiences ENABLE TRIGGER partner_experiences_no_delete`);
     await expect(downTo0063(db())).rejects.toThrow(refused([2, 0, 0, 0, 0]));
-    expect(await lastApplied()).toBe(NAME);
+    expect(await lastApplied()).toBe(LATER);
     await run(`ALTER TABLE partners DISABLE TRIGGER partners_no_delete`);
     await run(`DELETE FROM partners`);
     await run(`ALTER TABLE partners ENABLE TRIGGER partners_no_delete`);
@@ -432,9 +437,9 @@ function cases(state: { db: () => Db; schemaAt0063: () => Promise<string[] | nul
     const posts = await count('circle_posts');
     const answers = await count('circle_rsvps');
     expect(answers).toBeGreaterThanOrEqual(3);
-    expect(await downTo0063(db())).toEqual([NAME]);
+    expect(await downTo0063(db())).toEqual([LATER, NAME]);
     expect([await count('circle_posts'), await count('circle_rsvps')]).toEqual([posts, answers]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
   });
 }
 

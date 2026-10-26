@@ -635,6 +635,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ pace_hold_minutes: 30 });
     // Down refused while a hold exists (0061, 0060 and 0059, which hold nothing of this suite yet, go down first); without
     // one it restores 0057.
+    expect((await migrateDown(db)).reverted).toEqual(['0065_ad_conversions']);
     expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
@@ -653,7 +654,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await set({ cancelled_at: new Date() }, open.id);
     await sql`UPDATE drops SET cancelled_at = now() WHERE mode = 'LIVE' AND parent_drop_id IS NULL AND pace_batch IS NULL AND ended_at IS NULL AND cancelled_at IS NULL`.execute(db);
     expect((await unpaced.execute(db)).rows[0].n).toBe(0);
-    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0058_one_queue', '0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners', '0065_ad_conversions']);
     expect(await db.selectFrom('drops').select('pace_hold_minutes').where('id', '=', release.id).executeTakeFirstOrThrow()).toEqual({ pace_hold_minutes: 0 });
     // 0060, applied again, gave this suite's open releases its catalogue add-ons as their pick: the next case starts with none.
     await db.deleteFrom('drop_addons').execute();
@@ -712,6 +713,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect((await db.selectFrom('stock_holds').select('id').where('id', 'in', [product.id, service.id]).execute()).map((h) => h.id)).toEqual([product.id]);
     // Down refused while any of them exists, naming the counts (0061, which gave no vault here, and 0060, which converted
     // nothing here, go down first); without them it restores 0058, the product's unit kept.
+    expect((await migrateDown(db)).reverted).toEqual(['0065_ad_conversions']);
     expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
@@ -726,10 +728,11 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await db.deleteFrom('addon_items').where('id', 'in', [wrapping.id, engraving.id]).execute();
     expect((await migrateDown(db)).reverted).toEqual(['0059_addons_one_system']);
     expect((await db.selectFrom('stock_holds').select('id').where('id', '=', product.id).execute()).map((h) => h.id)).toEqual([product.id]);
-    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0059_addons_one_system', '0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners', '0065_ad_conversions']);
   });
 
   it('converts the release add-ons and the settings\' engraving into catalogue add-ons (0060: addon_conversions_source_check, addon_conversions_source_fields, addon_conversions_price, addon_conversions_source_key, addon_conversions_immutable): refused while a release add-on is chosen on a piece held, naming the count; each label once, the add-on of that name whatever its case kept, a new SERVICE the engraving, the settings\' price winning; the open release\'s pick; the three tables dropped; the same JS types as PGlite; down refused while a conversion is recorded, naming the count', async () => {
+    expect((await migrateDown(db)).reverted).toEqual(['0065_ad_conversions']);
     expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
@@ -775,7 +778,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(migrateToLatest(db)).rejects.toThrow(/0060_release_addons_converted cannot be applied: 1 release add-ons are chosen on entries in TURN or SECURED/);
     // The hold lapses (its choices deleted), then it applies.
     await sql`DELETE FROM live_entry_addons WHERE entry_id = ${entry}`.execute(db);
-    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0060_release_addons_converted', '0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners', '0065_ad_conversions']);
     const engraving = await db
       .selectFrom('addon_items as a')
       .innerJoin('skus as k', 'k.addon_id', 'a.id')
@@ -807,6 +810,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE addon_conversions SET price_minor = 1 WHERE source_id = ${boxSource}`.execute(db)).rejects.toSatisfy(isGuardViolation);
     await expect(db.deleteFrom('drops').where('id', '=', release.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
     // Down refused while a conversion is recorded, naming the count (0061, which gave no vault here, goes down first).
+    expect((await migrateDown(db)).reverted).toEqual(['0065_ad_conversions']);
     expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     expect((await migrateDown(db)).reverted).toEqual(['0063_margin']);
     expect((await migrateDown(db)).reverted).toEqual(['0062_vault_rewards']);
@@ -816,7 +820,7 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
 
   it('holds currency rates, shipping cost bands, unit costs and category allowances by their CHECKs (0063)', async () => {
     // The case above leaves this database at 0060 (its conversions refuse the down): 0061 to 0064 apply again.
-    expect((await migrateToLatest(db)).applied).toEqual(['0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners']);
+    expect((await migrateToLatest(db)).applied).toEqual(['0061_the_vault', '0062_vault_rewards', '0063_margin', '0064_partners', '0065_ad_conversions']);
     // Its own letter: this database's categories already hold A to F, S, W, P, H, G, K, N, Q, O, Y and V (the tests above);
     // the demo seed's are J, L, W, F and A.
     await db.insertInto('categories').values({ id: 31, code: 'M', name: 'Margin parity' }).execute();
@@ -848,13 +852,14 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     await expect(sql`UPDATE category_allowances SET allowance_bp = 10001 WHERE category_id = 31`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'category_allowances_allowance_bp_check'));
     await expect(db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
     // Down refused while any of them exists, naming the counts (0064, which holds nothing here, goes down first).
+    expect((await migrateDown(db)).reverted).toEqual(['0065_ad_conversions']);
     expect((await migrateDown(db)).reverted).toEqual(['0064_partners']);
     await expect(migrateDown(db)).rejects.toThrow(/0063_margin cannot be rolled back: 2 currency rates, 2 shipping cost bands, 2 unit costs and 1 category allowances exist/);
   });
 
   it('holds partners, experiences, partner invoices, linked posts and shared names by their CHECKs (0064)', async () => {
-    // The case above leaves this database at 0063 (its settings refuse the down): 0064 applies again.
-    expect((await migrateToLatest(db)).applied).toEqual(['0064_partners']);
+    // The case above leaves this database at 0063 (its settings refuse the down): 0064 and 0065 apply again.
+    expect((await migrateToLatest(db)).applied).toEqual(['0064_partners', '0065_ad_conversions']);
     const admin = await db.insertInto('admin_users').values({ email: 'partners-pg0064@orbes.test', email_normalized: 'partners-pg0064@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
     // A brand once whatever the case, one line; billing_country char(2) unpadded; never deleted.
     const partner = await db.insertInto('partners').values({ brand: 'MAISON PG', billing_country: 'FR', created_by: admin.id }).returning(['id', 'billing_country', 'active']).executeTakeFirstOrThrow();
@@ -908,7 +913,71 @@ describe.skipIf(!adminUrl)('PostgreSQL parity', () => {
     expect(
       await db.insertInto('circle_rsvps').values({ post_id: post.id, account_id: account.id, answer: 'YES', share_name: true, share_name_at: new Date() }).returning('share_name').executeTakeFirstOrThrow(),
     ).toEqual({ share_name: true });
-    // Down refused while any of them exists, naming the counts.
+    // Down refused while any of them exists, naming the counts (0065, which holds nothing here, goes down first).
+    expect((await migrateDown(db)).reverted).toEqual(['0065_ad_conversions']);
     await expect(migrateDown(db)).rejects.toThrow(/0064_partners cannot be rolled back: 1 partners, 1 partner experiences, 2 partner invoices, 1 invitations linked to an experience and 1 names shared exist/);
+  });
+
+  it('holds the ads settings, channel platforms, consents, click ids and ad events by their CHECKs (0065)', async () => {
+    // The case above leaves this database at 0064 (its partners refuse the down): 0065 applies again.
+    expect((await migrateToLatest(db)).applied).toEqual(['0065_ad_conversions']);
+    const admin = await db.insertInto('admin_users').values({ email: 'ads-pg0065@orbes.test', email_normalized: 'ads-pg0065@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    // The switch row once, on only from a first switch on that never moves; the Google action by its resource name.
+    await expect(db.insertInto('ads_settings').values({ enabled: true }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'ads_settings_on'));
+    await expect(db.insertInto('ads_settings').values({ google_action_signup: 'customers/1/conversionActions/' }).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'ads_settings_google_action_signup_check'),
+    );
+    const from = new Date('2026-11-02T09:00:00.000Z');
+    const settings = await db
+      .insertInto('ads_settings')
+      .values({ enabled: true, events_from: from, switched_at: from, switched_by: admin.id, google_action_paid_order: 'customers/1234567890/conversionActions/42' })
+      .returning(['id', 'enabled', 'events_from'])
+      .executeTakeFirstOrThrow();
+    expect(settings).toEqual({ id: 1, enabled: true, events_from: from });
+    await expect(db.insertInto('ads_settings').values({ id: 2 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'ads_settings_id_check'));
+    await expect(sql`UPDATE ads_settings SET events_from = now()`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // A channel mapped once per platform, never Snapchat; a mapped channel is not deleted under it.
+    const channel = await db.insertInto('link_channels').values({ name: 'Ads PG' }).returning('id').executeTakeFirstOrThrow();
+    await db.insertInto('ads_channel_platforms').values([{ channel_id: channel.id, platform: 'META' }, { channel_id: channel.id, platform: 'GOOGLE' }]).execute();
+    await expect(db.insertInto('ads_channel_platforms').values({ channel_id: channel.id, platform: 'META' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'ads_channel_platforms_pkey'));
+    await expect(sql`INSERT INTO ads_channel_platforms (channel_id, platform) VALUES (${channel.id}, 'SNAPCHAT')`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'ads_channel_platforms_platform_check'));
+    await expect(db.deleteFrom('link_channels').where('id', '=', channel.id).execute()).rejects.toSatisfy(isForeignKeyViolation);
+    // A choice on a device, its user agent with a GRANTED one only, never changed; bigint ids read as numbers.
+    const account = await db.insertInto('accounts').values({ email: 'ads-pg0065@example.com', email_normalized: 'ads-pg0065@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const device = await db.insertInto('tracking_devices').values({ device_hash: 'Q'.repeat(43) }).returning('id').executeTakeFirstOrThrow();
+    await expect(db.insertInto('ad_consents').values({ choice: 'GRANTED', source: 'BANNER', text_version: '2026-11-02' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'ad_consents_subject'));
+    await expect(db.insertInto('ad_consents').values({ device_id: device.id, choice: 'DECLINED', source: 'BANNER', text_version: '2026-11-02', user_agent: 'Mozilla/5.0' }).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'ad_consents_user_agent'),
+    );
+    const consent = await db
+      .insertInto('ad_consents')
+      .values({ device_id: device.id, account_id: account.id, choice: 'GRANTED', source: 'BANNER', text_version: '2026-11-02', user_agent: 'Mozilla/5.0' })
+      .returning(['id', 'chosen_at'])
+      .executeTakeFirstOrThrow();
+    expect(consent).toEqual({ id: expect.any(Number), chosen_at: expect.any(Date) });
+    await expect(sql`UPDATE ad_consents SET choice = 'DECLINED', user_agent = NULL WHERE id = ${consent.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // A click id once per device, kind and id, printable, taking the account.
+    const click = await db.insertInto('ad_clicks').values({ device_id: device.id, kind: 'TTCLID', click_id: 'E.C.P.abc-123_x', clicked_at: from }).returning('id').executeTakeFirstOrThrow();
+    expect(click.id).toEqual(expect.any(Number));
+    await expect(db.insertInto('ad_clicks').values({ device_id: device.id, kind: 'TTCLID', click_id: 'E.C.P.abc-123_x', clicked_at: from }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'ad_clicks_click_key'));
+    await expect(db.insertInto('ad_clicks').values({ device_id: device.id, kind: 'TTCLID', click_id: 'with space', clicked_at: from }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'ad_clicks_click_id_check'));
+    await db.updateTable('ad_clicks').set({ account_id: account.id }).where('id', '=', click.id).execute();
+    await expect(db.updateTable('ad_clicks').set({ kind: 'GCLID' }).where('id', '=', click.id).execute()).rejects.toSatisfy(isGuardViolation);
+    // An event once per platform, conversion and act; its reason exactly when SKIPPED, its times with its state.
+    const source = await db.insertInto('acquisition_sources').values({ kind: 'DIRECT', key: 'ads-pg0065' }).returning('id').executeTakeFirstOrThrow();
+    const conversion = await db.insertInto('acquisition_conversions').values({ kind: 'ORDER', ref_id: account.id, account_id: account.id, at: from, last_source_id: source.id }).returning('id').executeTakeFirstOrThrow();
+    const event = await db.insertInto('ad_events').values({ platform: 'META', conversion_id: conversion.id, kind: 'PAID_ORDER' }).returning(['id', 'status', 'attempts']).executeTakeFirstOrThrow();
+    expect(event).toEqual({ id: expect.any(Number), status: 'QUEUED', attempts: 0 });
+    await expect(db.insertInto('ad_events').values({ platform: 'META', conversion_id: conversion.id, kind: 'PAID_ORDER' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'ad_events_key'));
+    await expect(db.insertInto('ad_events').values({ platform: 'GOOGLE', conversion_id: conversion.id, kind: 'PAID_ORDER', status: 'SKIPPED', settled_at: from }).execute()).rejects.toSatisfy((e) =>
+      isCheckViolation(e, 'ad_events_skipped'),
+    );
+    await db.insertInto('ad_events').values({ platform: 'GOOGLE', conversion_id: conversion.id, kind: 'PAID_ORDER', status: 'SKIPPED', skip_reason: 'NO_CLICK_ID', settled_at: from }).execute();
+    await expect(sql`UPDATE ad_events SET status = 'SENT', settled_at = now() WHERE id = ${event.id}`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'ad_events_sent'));
+    await expect(sql`UPDATE ad_events SET status = 'FAILED', settled_at = now() WHERE id = ${event.id}`.execute(db)).rejects.toSatisfy((e) => isCheckViolation(e, 'ad_events_failed'));
+    await sql`UPDATE ad_events SET status = 'SENT', attempts = 1, sent_at = now(), settled_at = now() WHERE id = ${event.id}`.execute(db);
+    await expect(sql`UPDATE ad_events SET kind = 'SIGNUP' WHERE id = ${event.id}`.execute(db)).rejects.toSatisfy(isGuardViolation);
+    // Down refused while the switch is on or any of them exists, naming the counts.
+    await expect(migrateDown(db)).rejects.toThrow(/0065_ad_conversions cannot be rolled back: 1 switches on, 1 advertising choices, 1 click ids and 2 ad events exist/);
   });
 });

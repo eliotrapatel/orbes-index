@@ -921,6 +921,35 @@ export type PartnerExperienceStatus = (typeof PARTNER_EXPERIENCE_STATUSES)[numbe
 export const PARTNER_INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
 export type PartnerInvoiceKind = (typeof PARTNER_INVOICE_KINDS)[number];
 
+/**
+ * The server-side conversions, built and switched off (migration 0065, macro scope K27 A1 to A5; lot M4 plan §3.2): the
+ * platforms an act may go to (A2: Meta, TikTok and Google; no Snapchat), a collector's choice and where it was made (A4),
+ * a click id's kind, an event's act (A3: an ORDER conversion is sent once its order is paid), its states and the reason
+ * one is skipped.
+ */
+export const ADS_PLATFORMS = ['META', 'TIKTOK', 'GOOGLE'] as const;
+export type AdsPlatform = (typeof ADS_PLATFORMS)[number];
+export const AD_CONSENT_CHOICES = ['GRANTED', 'DECLINED'] as const;
+export type AdConsentChoice = (typeof AD_CONSENT_CHOICES)[number];
+export const AD_CONSENT_SOURCES = ['BANNER', 'ACCOUNT'] as const;
+export type AdConsentSource = (typeof AD_CONSENT_SOURCES)[number];
+export const AD_CLICK_KINDS = ['FBCLID', 'TTCLID', 'GCLID', 'GBRAID', 'WBRAID'] as const;
+export type AdClickKind = (typeof AD_CLICK_KINDS)[number];
+export const AD_EVENT_KINDS = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'PAID_ORDER'] as const;
+export type AdEventKind = (typeof AD_EVENT_KINDS)[number];
+export const AD_EVENT_STATUSES = ['QUEUED', 'SENT', 'FAILED', 'SKIPPED', 'CANCELLED'] as const;
+export type AdEventStatus = (typeof AD_EVENT_STATUSES)[number];
+/** Why an event is SKIPPED: older than its platform takes (7 days, Google 90), a Google act without a Google click id, a platform without its keys. */
+export const AD_SKIP_REASONS = ['TOO_OLD', 'NO_CLICK_ID', 'NOT_READY'] as const;
+export type AdSkipReason = (typeof AD_SKIP_REASONS)[number];
+/** A Meta or TikTok test event code, a user agent recorded with a GRANTED choice, a click id and an event's last error, at most. */
+export const ADS_TEST_EVENT_CODE_MAX = 40;
+export const AD_USER_AGENT_MAX = 400;
+export const AD_CLICK_ID_MAX = 500;
+export const AD_EVENT_ERROR_MAX = 300;
+/** A Google Ads conversion action, by its resource name (ads_settings.google_action_*). */
+export const ADS_GOOGLE_ACTION_PATTERN = /^customers\/[0-9]{1,12}\/conversionActions\/[0-9]{1,20}$/;
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -2868,6 +2897,84 @@ export interface PartnerInvoicesTable {
 }
 
 /**
+ * The conversions' switch and settings (migration 0065, K27 A1; one row, id 1, written at the console's first save; no
+ * row reads as off). `events_from`: set at the first switch on, never moved after (no act before it is sent); on needs
+ * it. `switched_at` / `switched_by`: the last switch, on or off. Each platform's test event code; the Google Ads
+ * conversion action of each act (ADS_GOOGLE_ACTION_PATTERN). updated_at is stamped on every update.
+ */
+export interface AdsSettingsTable {
+  id: WithDefault<number>;             // smallint, always 1
+  enabled: WithDefault<boolean>;       // false: off
+  events_from: TimestampNullable;
+  switched_at: TimestampNullable;
+  switched_by: NullableAdmin;
+  meta_test_event_code: NullableText;  // ≤ ADS_TEST_EVENT_CODE_MAX, one line
+  tiktok_test_event_code: NullableText; // ≤ ADS_TEST_EVENT_CODE_MAX, one line
+  google_action_signup: NullableText;
+  google_action_draw_entry: NullableText;
+  google_action_live_entry: NullableText;
+  google_action_paid_order: NullableText;
+  updated_by: NullableAdmin;
+  updated_at: TimestampDefault;
+}
+
+/** A link channel mapped to a platform (migration 0065, K27 A3): an act goes only to the platform the collector came from. */
+export interface AdsChannelPlatformsTable {
+  channel_id: string;
+  platform: AdsPlatform;
+}
+
+/**
+ * A collector's advertising choice (migration 0065, K27 A4), the proof of consent: on a device while signed out, on an
+ * account once known, or both (one at least). Never changed: a new choice is a new row, the latest counts. `user_agent`
+ * with a GRANTED choice only; `text_version` the advertising text's version shown ('YYYY-MM-DD').
+ */
+export interface AdConsentsTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  device_id: ColumnType<number | null, number | null | undefined, never>;
+  account_id: ColumnType<string | null, string | null | undefined, never>;
+  choice: AdConsentChoice;
+  source: AdConsentSource;
+  text_version: string;
+  user_agent: ColumnType<string | null, string | null | undefined, never>; // ≤ AD_USER_AGENT_MAX
+  chosen_at: TimestampDefault;
+}
+
+/**
+ * A platform's click id, stored with a GRANTED choice only (migration 0065, K27 A3 and A4): its device, its account once
+ * known, its kind, the id itself (1..AD_CLICK_ID_MAX printable characters, no space) and when; once per device, kind and
+ * id. Only account_id ever changes.
+ */
+export interface AdClicksTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  device_id: number;
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  kind: AdClickKind;
+  click_id: string;
+  clicked_at: Timestamp;
+}
+
+/**
+ * An event for one platform (migration 0065, K27 A3): the outbox, once per platform, conversion and act. QUEUED → SENT,
+ * FAILED (with its error) or CANCELLED, or SKIPPED with its reason; `sent_at` exactly when SENT, `settled_at` exactly
+ * when no longer QUEUED. id, platform, conversion_id, kind and created_at never change.
+ */
+export interface AdEventsTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  platform: AdsPlatform;
+  conversion_id: number;               // acquisition_conversions.id
+  kind: AdEventKind;
+  status: WithDefault<AdEventStatus>;  // DEFAULT QUEUED
+  skip_reason: ColumnType<AdSkipReason | null, AdSkipReason | null | undefined, AdSkipReason | null>;
+  attempts: WithDefault<number>;       // smallint ≥ 0
+  not_before: TimestampDefault;
+  last_error: ColumnType<string | null, string | null | undefined, string | null>; // ≤ AD_EVENT_ERROR_MAX
+  created_at: TimestampDefault;
+  sent_at: TimestampNullable;
+  settled_at: TimestampNullable;
+}
+
+/**
  * An add-on (migration 0056, macro scope K48 D1; lot M3 plan §4.1): a catalogue item with real stock, sold with a piece,
  * its name (1..40, unique whatever the case, as the collector reads it) and line (1..120), its supplier and weight
  * (1..30 000 g), the order it is offered in, `active` (set aside when false, never deleted) and its Shopify product (S5).
@@ -4004,6 +4111,11 @@ export interface Database {
   partners: PartnersTable;
   partner_experiences: PartnerExperiencesTable;
   partner_invoices: PartnerInvoicesTable;
+  ads_settings: AdsSettingsTable;
+  ads_channel_platforms: AdsChannelPlatformsTable;
+  ad_consents: AdConsentsTable;
+  ad_clicks: AdClicksTable;
+  ad_events: AdEventsTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;

@@ -23,8 +23,9 @@ import { createTestDb, type TestDb } from '../support/db.js';
 
 const BEFORE = '0062_vault_rewards';
 const NAME = '0063_margin';
-/** The migration after it (lot M4, step M4.5: the partners), taken down first and applied again with it. */
+/** The migrations after it (lot M4, steps M4.5 and M4.9: the partners, the ad conversions), taken down first and applied again with it. */
 const LATER = '0064_partners';
+const LATEST = '0065_ad_conversions';
 const TABLES = ['currency_rates', 'shipping_cost_rates', 'margin_unit_costs', 'category_allowances'] as const;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -42,7 +43,7 @@ async function snapshotOf(db: Kysely<any>): Promise<string[]> {
   ).rows.map((r) => r.object);
 }
 
-/** Down to 0062 (0064, then 0063, reverted). */
+/** Down to 0062 (0065, 0064, then 0063, reverted). */
 async function downTo0062(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -66,7 +67,7 @@ function cases(state: { db: () => Db; schemaAt0062: () => Promise<string[] | nul
 
   it('rolls back to the schema of 0062 exactly without rows, and applies again to the latest', async () => {
     const latest = await snapshotOf(db());
-    // 0064 down first: the schema 0063 left, which this case reads.
+    // 0065 and 0064 down first: the schema 0063 left, which this case reads.
     const rs = await createMigrator(db()).migrateTo(NAME);
     if (rs.error) throw rs.error;
     const at0063 = await snapshotOf(db());
@@ -145,7 +146,7 @@ function cases(state: { db: () => Db; schemaAt0062: () => Promise<string[] | nul
       'trigger shipping_cost_rates shipping_cost_rates_touch_updated_at',
     ]);
     // Up again: no row written; each guard holds its key.
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, LATEST]);
     expect(await snapshotOf(db())).toEqual(latest);
     for (const table of TABLES) expect(await count(table), table).toBe(0);
     const args = async (trigger: string) =>
@@ -262,18 +263,18 @@ function cases(state: { db: () => Db; schemaAt0062: () => Promise<string[] | nul
     expect(counts).toEqual([3, 5, 11, 1]);
     const lastApplied = async () => (await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1);
     await expect(downTo0062(db())).rejects.toThrow('migration 0063_margin cannot be rolled back: 3 currency rates, 5 shipping cost bands, 11 unit costs and 1 category allowances exist');
-    expect(await lastApplied()).toBe(LATER);
+    expect(await lastApplied()).toBe(LATEST);
     // Each table counts on its own: one unit cost left still refuses.
     await run(`DELETE FROM currency_rates`);
     await run(`DELETE FROM shipping_cost_rates`);
     await run(`DELETE FROM margin_unit_costs WHERE key <> 'VAULT_CARD'`);
     await run(`DELETE FROM category_allowances`);
     await expect(downTo0062(db())).rejects.toThrow('migration 0063_margin cannot be rolled back: 0 currency rates, 0 shipping cost bands, 1 unit costs and 0 category allowances exist');
-    expect(await lastApplied()).toBe(LATER);
+    expect(await lastApplied()).toBe(LATEST);
     // Without rows it goes down, and up again.
     await run(`DELETE FROM margin_unit_costs`);
-    expect(await downTo0062(db())).toEqual([LATER, NAME]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER]);
+    expect(await downTo0062(db())).toEqual([LATEST, LATER, NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, LATEST]);
   });
 }
 
