@@ -1556,7 +1556,8 @@
     display: flex;
     align-items: baseline;
     gap: var(--d-s5);
-    height: calc(var(--n-fs-lb) * var(--n-lh-base));
+    height: auto;
+    min-height: calc(var(--n-fs-lb) * var(--n-lh-base));
     padding: 0;
   }
 
@@ -1564,17 +1565,27 @@
     margin: 0;
   }
 
+  /* The link's box never makes the head taller: its larger line, its underline's room (nocturne.css .n-tl: 5 px and its
+     line) hang under the head's line, as its tap zone's padding above it is given back; the head is one label's line
+     tall with it, as before. */
   html:not(.d-touch) body.nocturne .view--now .now__invitation > .d-now-head > .n-tl {
+    flex: none;
+    margin-bottom: calc(-5px - 1px - 1em);
     margin-left: auto;
   }
 
-  /* THE CIRCLE never breaks over the card's next line (lot M4, step M4.8): beside an invitation kept for PALLADIUM (a
-     partner's experience, by THE PROGRAM's default) at 1024 px the head's three words are 2 px wider than the card's
-     line, and the title gave way, its second word drawn over the next line. It keeps its width; what passes the line
-     runs into the card's padding. */
+  /* The head inside the card's frame on every window (lot M4, step M4.8): THE CIRCLE and its link keep their words on
+     one line; the invitation's kind gives way, breaking between its words where the line cannot hold it (INVITATION ·
+     PALLADIUM, INVITATION · PLATINE AND PALLADIUM beside the draw at 1024 px), the head as tall as its lines. A kind
+     that fits keeps its one line, and the head its height. */
   html:not(.d-touch) body.nocturne .view--now .now__invitation > .d-now-head > h2 {
-    flex-shrink: 0;
+    flex: none;
     white-space: nowrap;
+  }
+
+  html:not(.d-touch) body.nocturne .view--now .now__invitation > .d-now-head > .n-circle-card__kind {
+    min-width: 0;
+    white-space: normal;
   }
 
   html:not(.d-touch) body.nocturne .view--now .now__card .n-card::before,

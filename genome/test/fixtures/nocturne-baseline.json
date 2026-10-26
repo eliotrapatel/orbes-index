@@ -39401,6 +39401,53 @@
         "© ORBES · GENOME CODE · PARIS"
       ]
     },
+    "desk-partner-post-share-ticked": {
+      "title": "The partner’s invitation answered YES here, then SHARE MY NAME ticked: Your name is shared with MAISON ORVALE. (a computer, 1440 × 900)",
+      "refs": [
+        "desktop",
+        "phone: partner-post-share-ticked"
+      ],
+      "variant": "partner",
+      "as": "partnerNew",
+      "values": [
+        "ORBES",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "SCAN",
+        "PALLADIUM",
+        "THE CIRCLE",
+        "INVITATION · PALLADIUM",
+        "PARTNER EXPERIENCE",
+        "WITH MAISON ORVALE",
+        "A DINNER IN PARIS",
+        "4 OCT 2026",
+        "An evening offered with Maison Orvale: a dinner for the owners of the circle, and the pieces of the next release beside the table.",
+        "THE INVITATION",
+        "WHEN",
+        "10 OCT 2026 · 18:30 UTC 10 OCT 2026 · 20:30 on this computer (UTC+02:00)",
+        "WHERE",
+        "PARIS",
+        "PLACES",
+        "20 LEFT OF 24",
+        "YOUR ANSWER",
+        "You will come. You may change your answer until the event begins.",
+        "YES",
+        "NO",
+        "SHARE MY NAME, HUGO MARCHAND, WITH MAISON ORVALE",
+        "Your name is shared with MAISON ORVALE.",
+        "THE CLUB",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND OFF",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · GENOME CODE · PARIS"
+      ]
+    },
     "desk-vault-page": {
       "title": "THE VAULT (MK V): YOUR VAULTS · 2 WAITING, two doors (PRESS AND HOLD, the source line, WAITS UNTIL), OPENED with SAVE THE IMAGE and GIVE IT, HOW TO OBTAIN A VAULT, WHAT A VAULT CAN HOLD (a computer, 1440 × 900)",
       "refs": [

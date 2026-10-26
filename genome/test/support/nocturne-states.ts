@@ -3876,11 +3876,13 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('live-end-vault-open'), 1440, { extra: { as: 'vaultEndOpenDesk', path: release('vaultEndOpenDesk'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpenDesk'), openTheVault(run, { reduced: true })) } }),
     // ── An invitation for a partner's experience (lot M4, step M4.8; K49 P2, P3; Rule-2: the phone's information) on its
     // stage (partner): the post in each state of SHARE MY NAME, NOW's card and the feed at 1440 × 900; the box off and on
-    // also in light; the longest brand and NOW's card also at 1024 × 768 ──
+    // also in light; the longest brand and NOW's card also at 1024 × 768; then YES and the box ticked through the routes
+    // (its write, last) ──
     ...desk(1440, 'partner-post', 'partner-post-yes', 'partner-post-shared', 'partner-post-no-name', 'partner-post-closed', 'partner-post-saving', 'partner-post-error', 'partner-post-long-brand', 'partner-now', 'partner-circle'),
     onDesk(phoneState('partner-post-yes'), 1440, { light: true }),
     onDesk(phoneState('partner-post-shared-light'), 1440, { light: true, name: 'partner-post-shared' }),
     ...desk(1024, 'partner-post-long-brand', 'partner-now'),
+    onDesk(phoneState('partner-post-share-ticked'), 1440),
   ],
   // ── THE VAULT page and its surroundings on a computer (lot Q3, step Q3.11; MK V desk): its own page, /verify/account/
   // vault (also at 1024 × 768, and in light: dark all the same), none waiting, a first visit, ONE MOMENT…, could not be

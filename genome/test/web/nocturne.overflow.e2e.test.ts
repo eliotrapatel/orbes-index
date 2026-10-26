@@ -15,6 +15,8 @@ import { describe, expect, it } from 'vitest';
 import { eachState } from '../support/nocturne-stage.js';
 import { openState, overflows, settle, stateById, UI_STATES } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
+import { CIRCLE } from '../../src/web/verify/copy.js';
+import { kindLine } from '../../src/web/verify/views/invitation.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
@@ -287,5 +289,72 @@ describe.skipIf(!HAS_CHROMIUM)('CONFIRMED on a computer: WRITE TO ORBES CLIENT S
       expect(found).toEqual([]);
     },
     6 * 60_000,
+  );
+});
+
+/**
+ * NOW's THE CIRCLE head on a computer (lot M4, step M4.8): beside the draw, THE CIRCLE, the invitation's kind and THE
+ * CIRCLE's link stand inside the card's frame (its hairline, inset by var(--d-s3)) at 1024, 1280 and 1440 px, for the
+ * partner's invitation as served (INVITATION · PALLADIUM, THE PROGRAM's default) and for an invitation kept for PLATINE
+ * AND PALLADIUM (CIRCLE.reach[2], its kind written in place: the partner stage's invitations all take the default); the
+ * kind breaks between its words where the line cannot hold it, THE CIRCLE stays on one line, nothing is drawn over the
+ * card's next line, and the page never scrolls sideways.
+ */
+describe.skipIf(!HAS_CHROMIUM)('NOW on a computer: THE CIRCLE\'s head inside its card (Chromium)', () => {
+  it(
+    'keeps THE CIRCLE, the kind and the link inside the card\'s frame at 1024, 1280 and 1440 px, for PALLADIUM and for PLATINE AND PALLADIUM',
+    async () => {
+      const found: string[] = [];
+      await eachState(
+        [stateById('desk-partner-now-1024')],
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            const kind = page.locator('.now__invitation > .d-now-head > .n-circle-card__kind');
+            const size = page.viewportSize()!;
+            for (const reach of [CIRCLE.reach[3], CIRCLE.reach[2]]) {
+              const line = kindLine({ kindLabel: CIRCLE.kind.INVITATION, reach });
+              await kind.evaluate((el, text) => {
+                el.textContent = text;
+              }, line);
+              for (const width of [1024, 1280, 1440]) {
+                await page.setViewportSize({ width, height: size.height });
+                await settle(page, 300);
+                const fit = await page.evaluate(() => {
+                  const card = document.querySelector('.now__invitation')!;
+                  const head = card.querySelector(':scope > .d-now-head')!;
+                  const c = card.getBoundingClientRect();
+                  const frame = getComputedStyle(card, '::before');
+                  const left = c.left + parseFloat(frame.left);
+                  const right = c.right - parseFloat(frame.right);
+                  const title = head.querySelector(':scope > h2')!;
+                  const next = head.nextElementSibling!.getBoundingClientRect().top;
+                  const out: string[] = [];
+                  if (document.documentElement.scrollWidth > innerWidth) out.push(`the page scrolls sideways (${document.documentElement.scrollWidth} in ${innerWidth})`);
+                  for (const el of head.children) {
+                    const r = el.getBoundingClientRect();
+                    if (r.left < left - 0.5 || r.right > right + 0.5) out.push(`${el.className} at ${Math.round(r.left)}–${Math.round(r.right)}, the frame at ${Math.round(left)}–${Math.round(right)}`);
+                  }
+                  const range = document.createRange();
+                  range.selectNodeContents(title);
+                  if (range.getClientRects().length !== 1) out.push(`THE CIRCLE on ${range.getClientRects().length} lines`);
+                  for (const el of [title, head.querySelector(':scope > .n-circle-card__kind')!]) {
+                    if (el.getBoundingClientRect().bottom > next + 0.5) out.push(`${el.className} drawn over the card's next line`);
+                  }
+                  return out;
+                });
+                for (const f of fit) found.push(`${line} at ${width} px: ${f}`);
+              }
+            }
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect(found).toEqual([]);
+    },
+    4 * 60_000,
   );
 });
