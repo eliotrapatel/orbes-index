@@ -630,7 +630,7 @@ Pendant les quelques minutes où la ligne de 1 € est active, un collectionneur
 2. Dans la console, `Give a vault` à l'e-mail de B, comme au point 2 : « 1 vault given to 1 collector. »
 3. Sur B : NOW lit « A VAULT IS WAITING FOR YOU » ; YOUR ACCOUNT, la septième carte THE VAULT avec `1`. Ouvre-la : la page THE VAULT de l'ordinateur, sombre en mode clair, la porte plus grande, PRESS AND HOLD dessous.
 4. Maintiens la porte avec la souris une seconde et demie (ou la barre d'espace) : la même ouverture, les mêmes sons. La récompense : I WAS THERE, « Your card. Save it. », « 1 IN 1 ».
-5. Sous OPENED, sa ligne avec SAVE THE IMAGE : l'image `ORBES-I-WAS-THERE.png`, 1080 × 1350, ORBES, le monogramme, I WAS THERE, l'occasion et sa date. Rien n'est envoyé à ORBES.
+5. Sous OPENED, sa ligne avec SAVE THE IMAGE : l'image `ORBES-I-WAS-THERE.png`, 1080 × 1350, le monogramme, I WAS THERE, l'occasion et sa date. Rien n'est envoyé à ORBES.
 
 #### 6. Une LIVE RELEASE d'essai, THE VAULT allumé, une taille épuisée
 
@@ -698,3 +698,4 @@ Dans cet ordre, quand tu veux :
 6. **Un échange** (N8). La pièce de remplacement d'un échange n'ouvre pas de coffre, même quand la première n'avait jamais été enregistrée : cet acheteur n'en a alors aucun. On garde ?
 7. **Un palier atteint de nouveau.** Un palier donne un coffre une seule fois, pour toujours : un plafond au-dessus de 1 pour `New tier` ne change rien. On garde ?
 8. **L'avocat** : le paragraphe THE VAULT et la phrase de l'article 14 des conditions, et les phrases du lien d'invitation et des coffres, partent avec la version `2026-10-26` (la note au juriste, points 38 et 39). Sa réponse ne retient pas le déploiement.
+9. **Un ensemble (THE SET) dans la table** (D28, N12). Aujourd'hui seule une pièce (modèle) ou un add-on peut y être mis, gratuit ou au prix. Ajouter les ensembles ?

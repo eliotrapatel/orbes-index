@@ -39,6 +39,7 @@ import {
   type DemoSeedResult,
 } from '../src/server/db/seed/demo.js';
 import { PRODUCT_STATUSES } from '../src/server/db/schema.js';
+import { clearTheVaultForReset } from '../src/server/db/seed/vault-reset.js';
 import { parseDatabaseUrl, redactDatabaseUrl } from '../src/server/db/url.js';
 import { createKeyProvider, type KeyProvider } from '../src/server/keys/index.js';
 import { createManualClock, type Actor, type Logger } from '../src/server/types.js';
@@ -315,6 +316,9 @@ async function resetDemoCommand(config: AppConfig, deps: CliDeps, io: CliIO, log
       io.err('db reset-demo: the database holds products that are not the demo dataset; add --force to wipe it anyway.');
       return undefined;
     }
+    // THE VAULT's down steps refuse while its data exists (the demo seeds its example rewards): cleared first, here
+    // only; production keeps the guards (src/server/db/seed/vault-reset.ts).
+    await clearTheVaultForReset(db, applied.map((m) => m.name));
     // Roll back one migration at a time, newest first, until none is applied.
     const reverted: string[] = [];
     for (let guard = 0; guard < 1000; guard++) {

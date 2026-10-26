@@ -173,8 +173,9 @@ describe('THE VAULT page (lot Q3, step Q3.11; MK V)', () => {
     (globalThis as unknown as { Path2D: unknown }).Path2D ??= class {};
     const m = { eyebrow: 'LIVE RELEASE', name: 'MONOLITHE IN BLUE', date: '5 OCTOBER 2026' };
     drawIWasThere(ctx, m, { display: 'G', reading: 'R' });
-    expect(texts.join('')).toBe('ORBESIWASTHERELIVERELEASEMONOLITHEINBLUE5OCTOBER2026');
-    expect(iWasThereWords(m)).toEqual(['ORBES', 'I WAS THERE', 'LIVE RELEASE', 'MONOLITHE IN BLUE', '5 OCTOBER 2026']);
+    // No wordmark: the release and its date (ROUND 5).
+    expect(texts.join('')).toBe('IWASTHERELIVERELEASEMONOLITHEINBLUE5OCTOBER2026');
+    expect(iWasThereWords(m)).toEqual(['I WAS THERE', 'LIVE RELEASE', 'MONOLITHE IN BLUE', '5 OCTOBER 2026']);
     expect(nameLines('MONOLITHE IN BLUE')).toEqual(['MONOLITHE', 'IN BLUE']);
     expect([I_WAS_THERE.width, I_WAS_THERE.height]).toEqual([1080, 1350]);
   });

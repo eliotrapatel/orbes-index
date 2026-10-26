@@ -2,11 +2,9 @@
  * The I WAS THERE image (lot Q3, step Q3.11; plan §3.9; D11 "I WAS THERE card: the release and its date", round 2 "SAVE
  * IMAGE only"; N4 for a vault without a release): one 1080 × 1350 PNG drawn on the phone (or the computer) as story-card.ts
  * draws, in the vault's black, then saved through shared/download.ts. No mockup draws it: it is shown on the owner's
- * review board (N33, HANDOVER).
+ * review board (N33, HANDOVER). No wordmark: ROUND 5 "I WAS THERE card: the release and its date" (step Q3.A).
  *
  *   ┌───────────────────────────┐
- *   │          O R B E S        │   the wordmark, 40 px, tracked 0.62 em, ivory
- *   │                           │
  *   │            (◎)            │   the ORBES monogram engraved: 360 px, ivory at 0.14 (the door's emblem, faint)
  *   │                           │
  *   │      I  W A S  T H E R E  │   78 px, tracked 0.2 em, ivory
@@ -32,7 +30,6 @@ export const I_WAS_THERE = Object.freeze({
   ivory: '#f6f2ea',
   ash: '#a7a29a',
   line: 1.2,
-  wordmark: Object.freeze({ size: 40, tracking: 0.62, top: 120 }),
   monogram: Object.freeze({ side: 360, top: 250, alpha: 0.14 }),
   title: Object.freeze({ size: 78, tracking: 0.2, top: 720 }),
   horizon: Object.freeze({ gap: 56, width: 620 }),
@@ -62,7 +59,7 @@ export interface IWasThereContext {
 
 /** The image's words, top to bottom (its alternative text, and what the tests read). */
 export function iWasThereWords(m: IWasThereInput): string[] {
-  return [VAULT.image.wordmark, VAULT.image.title, m.eyebrow, m.name ?? '', m.date].filter((w) => w.length > 0);
+  return [VAULT.image.title, m.eyebrow, m.name ?? '', m.date].filter((w) => w.length > 0);
 }
 
 /** A name on its lines: the model's name first (`MONOLITHE` / `IN BLUE`), any other on one line. */
@@ -94,7 +91,7 @@ function line(ctx: IWasThereContext, text: string, centreY: number, px: number, 
   }
 }
 
-/** Draw the image: the ground, the wordmark, the monogram engraved, I WAS THERE, the horizon, the release and its date. */
+/** Draw the image: the ground, the monogram engraved, I WAS THERE, the horizon, the release and its date. */
 export function drawIWasThere(ctx: IWasThereContext, m: IWasThereInput, fonts: ShareFonts): void {
   const C = I_WAS_THERE;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -102,7 +99,6 @@ export function drawIWasThere(ctx: IWasThereContext, m: IWasThereInput, fonts: S
   ctx.fillStyle = C.ground;
   ctx.fillRect(0, 0, C.width, C.height);
   const box = (px: number) => px * C.line;
-  line(ctx, VAULT.image.wordmark, C.wordmark.top + box(C.wordmark.size) / 2, C.wordmark.size, C.wordmark.tracking, C.ivory, fonts);
 
   const scale = C.monogram.side / MONOGRAM_ARTBOARD.w;
   ctx.setTransform(scale, 0, 0, scale, (C.width - C.monogram.side) / 2, C.monogram.top);

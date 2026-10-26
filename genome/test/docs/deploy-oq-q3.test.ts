@@ -23,7 +23,7 @@
  *    mode, a test LIVE release with its switch on and a size sold out, a piece registered, the checklist's THE VAULT
  *    CARD, the A4 sheet printed, the legal pages, the ENGRAVING's ADMIN-only prices (the 25 Oct amendment);
  *  - his data after (the real table, the sources' limits with the LIVE cap above one only once the terms change, N22,
- *    the switch per LIVE release), the open questions (N4, N7, N9, N36, D70, N8, the tier, counsel), M4 after Q3
+ *    the switch per LIVE release), the open questions (N4, N7, N9, N36, D70, N8, the tier, counsel, a SET in the table), M4 after Q3
  *    (D61); one command per shell block, French, links that resolve, and the
  *    runbook linked from DEPLOYMENT and COMPLIANCE.
  *
@@ -586,8 +586,10 @@ describe('the runbook of lot THE VAULT (docs/launch/DEPLOY-OQ-Q3.md)', () => {
     expect(data).toContain(`\`${VAULT_ONLY.label}\``);
     // The open points, none blocking.
     const open = section(runbook, '## 2.');
-    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    for (const n of ['(N4)', '(N7)', '(N9)', '(N36)', '(D70)', '(N8)']) expect(open, n).toContain(n);
+    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    for (const n of ['(N4)', '(N7)', '(N9)', '(N36)', '(D70)', '(N8)', '(D28, N12)']) expect(open, n).toContain(n);
+    // Round 3's "any product from the catalog": a SET (K44) is not offered in the table yet; his answer decides (step Q3.A).
+    expect(open).toContain('9. **Un ensemble (THE SET) dans la table** (D28, N12). Aujourd\'hui seule une pièce (modèle) ou un add-on peut y être mis, gratuit ou au prix. Ajouter les ensembles ?');
     expect(open).toContain(said(VAULT_REVEAL.card.other));
     // The review of lot Q3 settled two: the account's copy of its data gives its vaults, and a VAULT EDITION's line has no
     // number (SCOPE ROUND 5 "Numbers: REMOVE").

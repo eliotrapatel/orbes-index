@@ -2382,7 +2382,6 @@ export const VAULT = Object.freeze({
   image: Object.freeze({
     title: 'I WAS THERE',
     live: 'LIVE RELEASE',
-    wordmark: 'ORBES',
     filename: 'ORBES-I-WAS-THERE.png',
     alt: (...words: string[]) => words.filter(Boolean).join('. '),
   }),
