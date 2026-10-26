@@ -86,6 +86,9 @@ import {
   VAULT_REWARD_LINE_MAX,
   VAULT_REWARD_MODES,
   VAULT_REWARD_POSITION_MAX,
+  MARGIN_COST_MINOR_MAX,
+  MARGIN_UNIT_COST_KEYS,
+  SHIPMENT_WEIGHT_G_MAX,
 } from '../db/schema.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
@@ -2939,3 +2942,42 @@ export const liveVaultBody = body({ on: z.boolean() });
 
 /** PUT /api/admin/models/:id/vault-only (OPERATOR; §4.5): VAULT ONLY on or off. */
 export const modelVaultOnlyBody = body({ vaultOnly: z.boolean() });
+
+// ── Admin: the margin's settings (routes/admin/margin.ts, plan M4 §1.2, K43 N1 and N2) ──
+
+/** A currency in the path (/api/admin/margin/rates/:currency), any case; MarginSettingsService refuses EUR (422 MARGIN_RATE_EUR). */
+export const marginRateParams = z.object({ currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'A three-letter code, such as GBP').transform((s) => s.toUpperCase()) });
+
+/** PUT /api/admin/margin/rates/:currency: the euros one unit is worth (a number, or its decimal text), six decimals at most. */
+export const marginRateBody = body({ rate: z.union([z.number(), z.string().trim().max(20, 'At most 20 characters')]) });
+
+const marginCost = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(MARGIN_COST_MINOR_MAX, `At most ${MARGIN_COST_MINOR_MAX} cents`);
+const marginCurrency = z.string().trim().regex(/^[A-Za-z]{3}$/, 'A three-letter code, such as EUR').transform((s) => s.toUpperCase());
+/** A band's country, two letters (null: ALL OTHER COUNTRIES); MarginSettingsService checks it is a country. */
+const bandCountry = z.preprocess(emptyToNull, z.string().trim().regex(/^[A-Za-z]{2}$/, 'A two-letter code, such as FR, or null for ALL OTHER COUNTRIES').transform((s) => s.toUpperCase()).nullable());
+const bandWeight = whole(1, SHIPMENT_WEIGHT_G_MAX, 'grams');
+
+export const shippingCostParams = z.object({ id: uuid });
+
+/** POST /api/admin/margin/shipping-costs: a band, its country (null: ALL OTHER COUNTRIES), weight limit, cost and currency. */
+export const createShippingCostBody = body({ country: bandCountry, maxWeightG: bandWeight, costMinor: marginCost, currency: marginCurrency });
+
+/** PATCH /api/admin/margin/shipping-costs/:id: any of its fields. At least one. */
+export const updateShippingCostBody = body({ country: bandCountry.optional(), maxWeightG: bandWeight.optional(), costMinor: marginCost.optional(), currency: marginCurrency.optional() }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the band to change',
+);
+
+/** A unit cost's key in the path (/api/admin/margin/unit-costs/:key): POUCH, CARD, VAULT_CARD, CARE_SERVICE or CLAIM_<outcome>. */
+export const unitCostParams = z.object({ key: z.enum(MARGIN_UNIT_COST_KEYS, { message: `Must be one of ${MARGIN_UNIT_COST_KEYS.join(', ')}` }) });
+
+/** PUT /api/admin/margin/unit-costs/:key: its cost and currency. */
+export const unitCostBody = body({ costMinor: marginCost, currency: marginCurrency });
+
+/** A category's id in the path (/api/admin/margin/allowances/:categoryId), 1 to 31 (a category's 5-bit index). */
+export const allowanceParams = z.object({
+  categoryId: z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,2}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a category id').min(1, 'At least 1').max(31, 'At most 31')),
+});
+
+/** PUT /api/admin/margin/allowances/:categoryId: a percent of revenue, 0 to 100, two decimals at most (12.5). */
+export const allowanceBody = body({ percent: z.union([z.number().min(0, 'At least 0').max(100, 'At most 100'), z.string().trim().max(6, 'At most 6 characters')]) });

@@ -35,7 +35,9 @@
  * cancelled by an ADMIN; WORN, plan MACRO M2 §2.2, read by an AUDITOR, its photographs published, refused and taken down by
  * an OPERATOR; the returns report and its CSV, plan MACRO M3 §2.2, read by an AUDITOR; ORDER A MODEL's split and its ADD TO
  * DRAFTS, plan MACRO M3 §3.2, by an OPERATOR, and a location's countries set by an ADMIN; the add-ons' catalogue, plan MACRO
- * M3 §4.2, read by an AUDITOR, listed, changed, priced, set aside, reinstated and linked to Shopify by an OPERATOR);
+ * M3 §4.2, read by an AUDITOR, listed, changed, priced, set aside, reinstated and linked to Shopify by an OPERATOR; the
+ * margin's settings (rates, shipping cost bands, unit costs, allowances), lot M4 plan §1.2, read by an AUDITOR and
+ * written by an ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -444,6 +446,17 @@ const PROBES: Probe[] = [
   { group: 'growth', method: 'GET', url: '/api/admin/growth?currency=JPY', min: 'AUDITOR' },
   { group: 'growth', method: 'GET', url: '/api/admin/growth/collectors?page=0', min: 'AUDITOR' },
   { group: 'growth', method: 'GET', url: '/api/admin/growth/releases', min: 'AUDITOR' },
+  // Lot M4 plan §1.2 (K43 N1, N2): the margin's settings, read by an AUDITOR, written by an ADMIN.
+  { group: 'margin', method: 'GET', url: '/api/admin/margin/settings', min: 'AUDITOR' },
+  { group: 'margin', method: 'PUT', url: '/api/admin/margin/rates/GBP', body: INVALID, min: 'ADMIN' },
+  { group: 'margin', method: 'DELETE', url: '/api/admin/margin/rates/GBPX', min: 'ADMIN' },
+  { group: 'margin', method: 'POST', url: '/api/admin/margin/shipping-costs', body: INVALID, min: 'ADMIN' },
+  { group: 'margin', method: 'PATCH', url: `/api/admin/margin/shipping-costs/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'margin', method: 'DELETE', url: `/api/admin/margin/shipping-costs/${UUID}`, min: 'ADMIN' },
+  { group: 'margin', method: 'PUT', url: '/api/admin/margin/unit-costs/VAULT_CARD', body: INVALID, min: 'ADMIN' },
+  { group: 'margin', method: 'DELETE', url: '/api/admin/margin/unit-costs/BOX', min: 'ADMIN' },
+  { group: 'margin', method: 'PUT', url: '/api/admin/margin/allowances/1', body: INVALID, min: 'ADMIN' },
+  { group: 'margin', method: 'DELETE', url: '/api/admin/margin/allowances/30', min: 'ADMIN' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },
@@ -631,6 +644,7 @@ describe('admin role enforcement', () => {
       'sizes',
       'pairs',
       'growth',
+      'margin',
       'system',
       'test-entrants',
       'suppliers',

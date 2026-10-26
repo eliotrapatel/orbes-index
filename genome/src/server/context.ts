@@ -77,6 +77,7 @@ import { OrderService } from './services/orders.js';
 import { InvoiceService } from './services/invoices.js';
 import { FulfilmentService } from './services/fulfilment.js';
 import { GrowthService } from './services/growth.js';
+import { MarginSettingsService } from './services/margin-settings.js';
 import { CollectorInsightsService } from './services/collector-insights.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
@@ -252,6 +253,8 @@ export interface AppServices {
   orderCases: OrderCaseService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
+  /** The margin's settings (plan M4 §1.2, K43 N1 and N2): the euro rates, the shipping cost bands, the unit costs (THE VAULT CARD's included), the allowances. */
+  marginSettings: MarginSettingsService;
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6): the counted collectors' figures over a period, cached, two readings at once; reads only. */
   collectorInsights: CollectorInsightsService;
   /** What they like (plan CUSTOMER INTELLIGENCE §3.2 W.8): the Collectors page's panel `likes` (tastes, most wished, most viewed, pieces held); reads only. */
@@ -448,6 +451,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages, mail: emails.orderStep });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
+    const marginSettings = new MarginSettingsService({ db, audit, clock });
     const collectorInsights = new CollectorInsightsService({ db, audit, links, clock, log });
     const likes = new LikesService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
@@ -524,6 +528,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       logistics,
       orderCases,
       growth,
+      marginSettings,
       collectorInsights,
       likes,
       claimRenewals,

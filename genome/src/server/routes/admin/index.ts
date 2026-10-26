@@ -12,7 +12,7 @@
  * pre-registration removed from the founding list, an email kind switched on or off, a test email to oneself, the
  * founding announcement sent or cancelled, a house moment switched on or off, a house message sent, scheduled or
  * cancelled, THE VAULT's sources set, a vault given to a segment, the ENGRAVING add-on's prices and YOUR ORDERS switch
- * changed); every
+ * changed, the margin's settings: rates, shipping cost bands, unit costs and allowances); every
  * mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
@@ -51,6 +51,7 @@ import { adminCollectorRoutes } from './collectors.js';
 import { adminCodeRoutes } from './codes.js';
 import { adminDashboardRoutes } from './dashboard.js';
 import { adminGrowthRoutes } from './growth.js';
+import { adminMarginRoutes } from './margin.js';
 import { adminHouseRoutes } from './house.js';
 import { adminInvoiceRoutes } from './invoices.js';
 import { adminKeyRoutes } from './keys.js';
@@ -94,6 +95,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminSystemRoutes, deps);
   await app.register(adminAnalyticsRoutes, deps);
   await app.register(adminGrowthRoutes, deps);
+  await app.register(adminMarginRoutes, deps);
   await app.register(adminDocumentRoutes, deps);
   await app.register(adminCatalogRoutes, deps);
   await app.register(adminProductRoutes, deps);
