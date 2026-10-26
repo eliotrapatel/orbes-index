@@ -2551,55 +2551,9 @@ export class VaultService {
     const waiting = await count((eb) => eb.and([inPeriod('given_at')(eb), eb('opened_at', 'is', null), eb('revoked_at', 'is', null), eb('waits_until', '>', now)]));
     const expired = await count((eb) => eb.and([inPeriod('waits_until')(eb), eb('opened_at', 'is', null), eb('revoked_at', 'is', null), eb('waits_until', '<=', now)]));
 
-    // What the period's openings gave, row by row.
-    const figures = new Map<string, { kind: VaultRewardKind; won: number; value: Map<string, number>; cost: Map<string, number>; costUnknown: number }>();
-    const of = (rewardId: string, kind: VaultRewardKind) => {
-      let f = figures.get(rewardId);
-      if (!f) figures.set(rewardId, (f = { kind, won: 0, value: new Map(), cost: new Map(), costUnknown: 0 }));
-      return f;
-    };
+    // What the period's openings gave, row by row (their won, value and cost: vaultRewardCosts, read by the margin too).
+    const figures = await vaultRewardCosts(db, start, end);
     const add = (m: Map<string, number>, currency: string, minor: number) => m.set(currency, (m.get(currency) ?? 0) + minor);
-    const won = await db
-      .selectFrom('vaults')
-      .select(['reward_id', 'reward_kind', 'currency', (eb) => eb.fn.countAll<string | number>().as('n'), (eb) => eb.fn.sum<string | number | null>('value_minor').as('value'), (eb) => eb.fn.sum<string | number | null>('cost_minor').as('cost')])
-      .where(inPeriod('opened_at'))
-      .where('reward_id', 'is not', null)
-      .groupBy(['reward_id', 'reward_kind', 'currency'])
-      .execute();
-    for (const r of won) {
-      const f = of(r.reward_id!, r.reward_kind!);
-      f.won += n(r.n);
-      if (r.currency && r.value !== null) add(f.value, r.currency, n(r.value));
-      // Written at the opening: a credit's face value (CREDIT, CREDIT TO GIVE).
-      if (r.currency && r.cost !== null && n(r.cost) > 0) add(f.cost, r.currency, n(r.cost));
-    }
-    // A piece won free (a model, a VAULT EDITION, THE PIECE) still on its way (never one cancelled: its unit went back to
-    // stock), and a free add-on's unit on an order: their supplier unit price where known.
-    const units = [
-      ...(await db
-        .selectFrom('vaults as v')
-        .innerJoin('orders as o', 'o.id', 'v.order_id')
-        .select(['v.reward_id', 'v.reward_kind', 'o.sku_id'])
-        .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
-        .where('o.price_minor', '=', 0)
-        .where('o.status', '<>', 'CANCELLED')
-        .execute()),
-      ...(await db
-        .selectFrom('vaults as v')
-        .innerJoin('order_addon_items as u', 'u.vault_id', 'v.id')
-        .select(['v.reward_id', 'v.reward_kind', 'u.sku_id'])
-        .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
-        .where('u.status', 'not in', ['REMOVED', 'CANCELLED'])
-        .execute()),
-    ];
-    const unitCost = await supplierUnitCosts(db, [...new Set(units.map((u) => u.sku_id).filter((s): s is string => s !== null))]);
-    for (const u of units) {
-      if (!u.reward_id || !u.reward_kind) continue;
-      const f = of(u.reward_id, u.reward_kind);
-      const c = u.sku_id ? unitCost.get(u.sku_id) : undefined;
-      if (c) add(f.cost, c.currency, c.minor);
-      else f.costUnknown += 1;
-    }
     const credits = { given: new Map<string, number>(), used: new Map<string, number>() };
     for (const f of figures.values()) if (f.kind === 'CREDIT' || f.kind === 'CREDIT_TO_GIVE') for (const [c, m] of f.value) add(credits.given, c, m);
     const used = await db
@@ -2711,7 +2665,7 @@ async function onSale(db: Db, modelId: string): Promise<boolean> {
 }
 
 /** The house currencies' order (EUR, GBP, USD, CHF), any other after them. */
-function byHouseCurrency(a: VaultMoney, b: VaultMoney): number {
+export function byHouseCurrency(a: VaultMoney, b: VaultMoney): number {
   const rank = (c: string) => {
     const i = (HOUSE_CURRENCIES as readonly string[]).indexOf(c);
     return i === -1 ? HOUSE_CURRENCIES.length : i;
@@ -2790,6 +2744,79 @@ export function vaultReportCsv(rep: VaultReport): string {
   money('cost', 'total', rep.totalCost);
   add('cost', 'unknown', rep.costUnknown);
   return csvDocument(rows);
+}
+
+/** What the openings of a period gave of one reward row: how many were won, their value and their cost, by currency. */
+export interface VaultRewardCost {
+  kind: VaultRewardKind;
+  won: number;
+  /** Face value by currency (a credit's, a product's usual price). */
+  value: Map<string, number>;
+  /** Cost by currency: a credit's face value (written at the opening), a product or a free add-on at its supplier unit price. */
+  cost: Map<string, number>;
+  /** The units won without a known supplier price (their cost unknown, never counted as 0). */
+  costUnknown: number;
+}
+
+/**
+ * The cost of the rewards won by the vaults opened in `[start, end)` (lot M4 plan §1.2; D61, OP-26 "the report shows the
+ * cost"), by reward row: each opening's `cost_minor` (a credit's face value, CREDIT and CREDIT TO GIVE), a piece won free
+ * (a model, a VAULT EDITION, THE PIECE) still on its way (never one cancelled: its unit went back to stock) and a free
+ * add-on's unit on an order at their supplier unit price where known, else counted in `costUnknown`; with how many were
+ * won and their value. THE VAULT's report reads it for its period of Paris days; the margin on GROWTH (services/margin.ts)
+ * for GROWTH's UTC window, as the report's own reading (every vault opened, as CLUB > THE VAULT shows it).
+ */
+export async function vaultRewardCosts(db: Db, start: Date, end: Date): Promise<Map<string, VaultRewardCost>> {
+  const n = (v: unknown) => Number(v ?? 0);
+  const figures = new Map<string, VaultRewardCost>();
+  const of = (rewardId: string, kind: VaultRewardKind) => {
+    let f = figures.get(rewardId);
+    if (!f) figures.set(rewardId, (f = { kind, won: 0, value: new Map(), cost: new Map(), costUnknown: 0 }));
+    return f;
+  };
+  const add = (m: Map<string, number>, currency: string, minor: number) => m.set(currency, (m.get(currency) ?? 0) + minor);
+  const won = await db
+    .selectFrom('vaults')
+    .select(['reward_id', 'reward_kind', 'currency', (eb) => eb.fn.countAll<string | number>().as('n'), (eb) => eb.fn.sum<string | number | null>('value_minor').as('value'), (eb) => eb.fn.sum<string | number | null>('cost_minor').as('cost')])
+    .where((eb) => eb.and([eb('opened_at', '>=', start), eb('opened_at', '<', end)]))
+    .where('reward_id', 'is not', null)
+    .groupBy(['reward_id', 'reward_kind', 'currency'])
+    .execute();
+  for (const r of won) {
+    const f = of(r.reward_id!, r.reward_kind!);
+    f.won += n(r.n);
+    if (r.currency && r.value !== null) add(f.value, r.currency, n(r.value));
+    // Written at the opening: a credit's face value (CREDIT, CREDIT TO GIVE).
+    if (r.currency && r.cost !== null && n(r.cost) > 0) add(f.cost, r.currency, n(r.cost));
+  }
+  // A piece won free (a model, a VAULT EDITION, THE PIECE) still on its way (never one cancelled: its unit went back to
+  // stock), and a free add-on's unit on an order: their supplier unit price where known.
+  const units = [
+    ...(await db
+      .selectFrom('vaults as v')
+      .innerJoin('orders as o', 'o.id', 'v.order_id')
+      .select(['v.reward_id', 'v.reward_kind', 'o.sku_id'])
+      .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
+      .where('o.price_minor', '=', 0)
+      .where('o.status', '<>', 'CANCELLED')
+      .execute()),
+    ...(await db
+      .selectFrom('vaults as v')
+      .innerJoin('order_addon_items as u', 'u.vault_id', 'v.id')
+      .select(['v.reward_id', 'v.reward_kind', 'u.sku_id'])
+      .where((eb) => eb.and([eb('v.opened_at', '>=', start), eb('v.opened_at', '<', end)]))
+      .where('u.status', 'not in', ['REMOVED', 'CANCELLED'])
+      .execute()),
+  ];
+  const unitCost = await supplierUnitCosts(db, [...new Set(units.map((u) => u.sku_id).filter((s): s is string => s !== null))]);
+  for (const u of units) {
+    if (!u.reward_id || !u.reward_kind) continue;
+    const f = of(u.reward_id, u.reward_kind);
+    const c = u.sku_id ? unitCost.get(u.sku_id) : undefined;
+    if (c) add(f.cost, c.currency, c.minor);
+    else f.costUnknown += 1;
+  }
+  return figures;
 }
 
 /**

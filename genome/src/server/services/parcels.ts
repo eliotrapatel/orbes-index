@@ -29,7 +29,7 @@
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
 import { SHIPMENT_WEIGHT_G_MAX, SHIPMENT_WEIGHT_MISSING_MAX, type AdminRole, type JsonObject, type OrderRow, type ShipmentRow, type ShipmentStatus } from '../db/schema.js';
-import { activeBoxes, boxRefs, insideVolume, modelPackings, type BoxRef } from './boxes.js';
+import { activeBoxes, boxRefs, insideVolume, modelPackings, type BoxRef, type ModelPackingRow } from './boxes.js';
 import { readySince, ORDER_ALERT_DEFAULTS } from './fulfilment.js';
 import { writeJournal } from './journal.js';
 import { parcelAddonItems, type ParcelAddonItem } from './order-addons.js';
@@ -351,6 +351,21 @@ export interface PackingSuggestion {
 export async function packingSuggestion(db: Db, orders: readonly Pick<OrderRow, 'id' | 'model_id'>[]): Promise<PackingSuggestion> {
   const packings = await modelPackings(db, orders.map((o) => o.model_id));
   const boxes = await boxRefs(db, [...packings.values()].map((p) => p.boxId));
+  return suggestPacking(orders, packings, boxes, await parcelAddonItems(db, orders.map((o) => o.id)));
+}
+
+/**
+ * The suggestion of `packingSuggestion` from what it reads (the models' packings, their boxes, the add-ons packed), so a
+ * reader of many parcels at once (the margin on GROWTH, services/margin.ts, lot M4 plan §1.1) reads them once for all.
+ * `addonItems` may hold other orders' too: the suggestion keeps those of `orders`, in the order they were given.
+ */
+export function suggestPacking(
+  orders: readonly Pick<OrderRow, 'id' | 'model_id'>[],
+  packings: ReadonlyMap<string, Pick<ModelPackingRow, 'boxId' | 'packedWeightG' | 'words'>>,
+  boxes: ReadonlyMap<string, BoxRef>,
+  addonItems: ReadonlyMap<string, ParcelAddonItem[]>,
+): PackingSuggestion {
+  const ids = new Set(orders.map((o) => o.id));
   const usable = (id: string | null): BoxRef | null => {
     const box = id ? boxes.get(id) : undefined;
     return box?.active ? box : null;
@@ -375,7 +390,7 @@ export async function packingSuggestion(db: Db, orders: readonly Pick<OrderRow, 
     modelsWithoutBox: [...withoutBox],
     weights,
     modelsWithoutWeight: [...withoutWeight],
-    addonItems: await parcelAddonItems(db, orders.map((o) => o.id)),
+    addonItems: new Map([...addonItems].filter(([id]) => ids.has(id))),
   };
 }
 

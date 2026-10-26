@@ -36,8 +36,8 @@
  * an OPERATOR; the returns report and its CSV, plan MACRO M3 §2.2, read by an AUDITOR; ORDER A MODEL's split and its ADD TO
  * DRAFTS, plan MACRO M3 §3.2, by an OPERATOR, and a location's countries set by an ADMIN; the add-ons' catalogue, plan MACRO
  * M3 §4.2, read by an AUDITOR, listed, changed, priced, set aside, reinstated and linked to Shopify by an OPERATOR; the
- * margin's settings (rates, shipping cost bands, unit costs, allowances), lot M4 plan §1.2, read by an AUDITOR and
- * written by an ADMIN);
+ * margin on GROWTH and its CSV, lot M4 plan §1.2, read by an AUDITOR, and its settings (rates, shipping cost bands, unit
+ * costs, allowances) read by an AUDITOR and written by an ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -446,7 +446,9 @@ const PROBES: Probe[] = [
   { group: 'growth', method: 'GET', url: '/api/admin/growth?currency=JPY', min: 'AUDITOR' },
   { group: 'growth', method: 'GET', url: '/api/admin/growth/collectors?page=0', min: 'AUDITOR' },
   { group: 'growth', method: 'GET', url: '/api/admin/growth/releases', min: 'AUDITOR' },
-  // Lot M4 plan §1.2 (K43 N1, N2): the margin's settings, read by an AUDITOR, written by an ADMIN.
+  // Lot M4 plan §1.2 (K43): the margin and its CSV read by an AUDITOR; its settings read by an AUDITOR, written by an ADMIN.
+  { group: 'margin', method: 'GET', url: '/api/admin/margin?months=6', min: 'AUDITOR' },
+  { group: 'margin', method: 'GET', url: '/api/admin/margin.csv?months=6', min: 'AUDITOR' },
   { group: 'margin', method: 'GET', url: '/api/admin/margin/settings', min: 'AUDITOR' },
   { group: 'margin', method: 'PUT', url: '/api/admin/margin/rates/GBP', body: INVALID, min: 'ADMIN' },
   { group: 'margin', method: 'DELETE', url: '/api/admin/margin/rates/GBPX', min: 'ADMIN' },

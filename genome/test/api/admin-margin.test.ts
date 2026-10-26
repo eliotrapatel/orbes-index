@@ -1,14 +1,18 @@
 /**
- * The margin's settings over HTTP (lot M4 plan §1.2, §1.5, step M4.2; routes/admin/margin.ts): an AUDITOR and an
- * OPERATOR read the settings (amounts and keys, nothing personal) and never write them; an ADMIN writes every setting
- * (each answer the whole settings), THE VAULT CARD's unit cost included; LOGISTICS and RETAIL are refused; malformed
- * requests answer 400, EUR's rate 422 MARGIN_RATE_EUR, a band taken 409 SHIPPING_COST_TAKEN, an unknown band 404
- * SHIPPING_COST_NOT_FOUND, an unknown category 404 CATEGORY_NOT_FOUND. The rules of each setting are
- * test/services/margin-settings.test.ts's; the margin itself and its CSV join this file with step M4.3.
+ * The margin and its settings over HTTP (lot M4 plan §1.2, §1.5, steps M4.2 and M4.3; routes/admin/margin.ts): an
+ * AUDITOR reads the margin and its CSV (amounts, counts and groups: no account, no email, no vault, no release; THE
+ * VAULT's line and its five parts) and the settings (amounts and keys, nothing personal); an AUDITOR and an OPERATOR
+ * never write the settings; an ADMIN writes every setting (each answer the whole settings), THE VAULT CARD's unit cost
+ * included; LOGISTICS and RETAIL are refused; malformed requests answer 400, EUR's rate 422 MARGIN_RATE_EUR, a band
+ * taken 409 SHIPPING_COST_TAKEN, an unknown band 404 SHIPPING_COST_NOT_FOUND, an unknown category 404
+ * CATEGORY_NOT_FOUND. The figures are test/services/margin.test.ts's, the rules of each setting
+ * test/services/margin-settings.test.ts's.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { MarginReport } from '../../src/server/services/margin.js';
 import type { MarginSettings } from '../../src/server/services/margin-settings.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
+import { MARGIN_NOW, seedMarginVault, type MarginVaultFixture } from '../support/margin.js';
 import { adminClient, createAdmin, createHarness, errorOf, safeJson, seedCatalog, type Client, type Harness } from './support.js';
 
 describe('the margin\'s settings routes (lot M4 plan §1.2)', () => {
@@ -190,5 +194,81 @@ describe('the margin\'s settings routes (lot M4 plan §1.2)', () => {
     const s = safeJson(await auditor.get('/api/admin/margin/settings')) as MarginSettings;
     expect(s.rates.map((x) => x.currency)).toEqual(['GBP']);
     expect(s.unitCosts.find((u) => u.key === 'CARD')!.costMinor).toBeNull();
+  });
+});
+
+describe('the margin\'s report routes (lot M4 plan §1.2, step M4.3)', () => {
+  let h: Harness;
+  let f: MarginVaultFixture;
+  let auditor: Client;
+  let operator: Client;
+  let admin: Client;
+  let agent: Client;
+  let seller: Client;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(MARGIN_NOW.toISOString());
+    f = await seedMarginVault(h.t.db, (await createAdmin(h.ctx, 'ADMIN')).id);
+    auditor = await adminClient(h, 'AUDITOR');
+    operator = await adminClient(h, 'OPERATOR');
+    admin = await adminClient(h, 'ADMIN');
+    agent = await adminClient(h, 'LOGISTICS');
+    seller = await adminClient(h, 'RETAIL');
+  }, 60_000);
+  afterAll(() => h?.close());
+
+  it('an AUDITOR reads the margin: in euros, by channel with VAULT, THE VAULT\'s line; no account, no email, no vault, no release', async () => {
+    const res = await auditor.get('/api/admin/margin');
+    expect(res.statusCode, res.body).toBe(200);
+    const r = safeJson(res) as MarginReport;
+    expect(r.window).toMatchObject({ months: 12, from: '2025-11', to: '2026-10', currency: 'EUR', test: false });
+    expect(r.currency).toBe('EUR');
+    expect(r.totals).toMatchObject({ orders: 5, revenueMinor: 382_500, marginMinor: 256_386 });
+    expect(r.byChannel.map((g) => g.key)).toEqual(['LIVE', 'DRAW', 'SALON', 'VAULT', 'ELSEWHERE']);
+    expect(r.vault).toMatchObject({ claimed: { orders: 1, costMinor: 21_540 }, guaranteedPieces: 1, rewardsCost: { costMinor: 49_000, costUnknown: 1 } });
+    expect(r.partnerIncome).toEqual([]);
+    const emails = (await h.t.db.selectFrom('accounts').select('email').where('id', 'in', Object.values(f.accounts)).execute()).map((a) => a.email);
+    for (const e of emails) expect(res.body).not.toContain(e);
+    for (const id of [...Object.values(f.accounts), ...Object.values(f.vaults), ...Object.values(f.orders), f.releases.live]) expect(res.body).not.toContain(id);
+    expect(res.body).not.toMatch(/release|drop/i);
+    // An OPERATOR reads it too; 24 months and the test entrants.
+    expect((await operator.get('/api/admin/margin')).statusCode).toBe(200);
+    const all = safeJson(await auditor.get('/api/admin/margin?months=24&test=true')) as MarginReport;
+    expect(all.window).toMatchObject({ months: 24, from: '2024-11', test: true });
+    expect(all.totals.orders).toBe(7);
+    expect(all.vault.claimed.orders).toBe(2);
+  });
+
+  it('an AUDITOR downloads its CSV: its columns with THE VAULT\'s five parts, named by the Paris day, never stored', async () => {
+    const csv = await auditor.get('/api/admin/margin.csv?months=12');
+    expect(csv.statusCode, csv.body).toBe(200);
+    expect(csv.headers['content-type']).toMatch(/^text\/csv/);
+    expect(csv.headers['cache-control']).toBe('no-store');
+    expect(csv.headers['content-disposition']).toBe('attachment; filename="orbes-margin-2026-10-15.csv"');
+    expect(csv.body.split('\r\n')[0]).toBe(
+      '"View","Group","Orders","Pieces","Revenue (EUR)","Piece","Inbound","Packaging","Outbound","Allowance","Perks: credits","Perks: free shipping","Perks: welcome gifts","THE VAULT: credits","THE VAULT: credits to give","THE VAULT: add-ons","THE VAULT: products won","THE VAULT: cards","Care and warranty","Margin","Margin %","Orders with estimates"',
+    );
+    expect(csv.body).toContain('"By channel","VAULT","2","2","915.00"');
+    const emails = (await h.t.db.selectFrom('accounts').select('email').where('id', 'in', Object.values(f.accounts)).execute()).map((a) => a.email);
+    for (const e of emails) expect(csv.body).not.toContain(e);
+    expect(csv.body).not.toMatch(/release|drop/i);
+  });
+
+  it('refuses another window or a malformed test 400; LOGISTICS and RETAIL 403; an ADMIN reads', async () => {
+    for (const bad of ['/api/admin/margin?months=6', '/api/admin/margin?test=maybe', '/api/admin/margin.csv?months=abc', '/api/admin/margin.csv?months=36']) {
+      const res = await auditor.get(bad);
+      expect(res.statusCode, bad).toBe(400);
+      expect(errorOf(res).code, bad).toBe('VALIDATION_FAILED');
+    }
+    for (const c of [agent, seller]) {
+      for (const url of ['/api/admin/margin', '/api/admin/margin.csv']) {
+        const res = await c.get(url);
+        expect(res.statusCode, url).toBe(403);
+        expect(errorOf(res).code, url).toBe('FORBIDDEN');
+      }
+    }
+    expect((await admin.get('/api/admin/margin.csv')).statusCode).toBe(200);
+    expect((await h.client().get('/api/admin/margin')).statusCode).toBe(401);
   });
 });

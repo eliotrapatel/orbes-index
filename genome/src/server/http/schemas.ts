@@ -2945,6 +2945,15 @@ export const modelVaultOnlyBody = body({ vaultOnly: z.boolean() });
 
 // ── Admin: the margin's settings (routes/admin/margin.ts, plan M4 §1.2, K43 N1 and N2) ──
 
+/**
+ * GET /api/admin/margin and .csv (plan M4 §1.2, K43): GROWTH's window, the last 12 (default) or 24 UTC months, and
+ * `test` for the test entrants' orders too. Every figure in euros (N2): no currency to choose.
+ */
+export const marginQuery = z.object({
+  months: growthQuery.shape.months,
+  test: queryBool,
+});
+
 /** A currency in the path (/api/admin/margin/rates/:currency), any case; MarginSettingsService refuses EUR (422 MARGIN_RATE_EUR). */
 export const marginRateParams = z.object({ currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'A three-letter code, such as GBP').transform((s) => s.toUpperCase()) });
 

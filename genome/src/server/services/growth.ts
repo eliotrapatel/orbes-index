@@ -21,6 +21,11 @@
  *   collectorValue  the client sheet's Lifetime value (OwnerService.sheet): the account's value per currency, by the
  *               rule of `collectors`.
  *
+ * The margin (services/margin.ts, macro scope K43, lot M4 plan §1.1) reads the same rules: GROWTH_WINDOWS and its
+ * months, a paid order not CANCELLED or RETURNED and never a GIFT, `notTestEntrant`, the tier from the ownership history
+ * (`heldAt`, `tierAt`); its revenue less the credits used (PERKS' and THE VAULT's) is this revenue for the same orders,
+ * in euros. Nothing here changes for it.
+ *
  * The rules (§5.1 defaults):
  *
  *   - A purchase is a paid order not CANCELLED or RETURNED, and never a GIFT order (a welcome gift is not bought), at
@@ -440,7 +445,16 @@ function collectorRows(currency: Currency): RawBuilder<CollectorRow> {
 }
 
 /** The tier of `held` pieces under `thresholds` (CLUB_TIER_THRESHOLDS unless a test stubs them), as club.ts tierForPieces. */
-const tierAt = (held: number, thresholds: readonly number[]): ClubTier => thresholds.filter((t) => held >= t).length as ClubTier;
+export const tierAt = (held: number, thresholds: readonly number[]): ClubTier => thresholds.filter((t) => held >= t).length as ClubTier;
+
+/**
+ * How many pieces an account held at `at` from its ownerships (as the funnel reads them, `tierReachDates`): those started
+ * at or before it and not ended by it. The margin's tier at payment (services/margin.ts, lot M4 plan §1.1) reads it.
+ */
+export function heldAt(intervals: readonly { start: Date; end: Date | null }[], at: Date): number {
+  const t = at.getTime();
+  return intervals.filter((i) => i.start.getTime() <= t && (i.end === null || i.end.getTime() > t)).length;
+}
 /** Names in code-point order, none last (« Not given » closes a list). */
 const byName = (a: string | null, b: string | null): number => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1);
 const dateOf = (v: Date | string | null): Date | null => (v === null ? null : v instanceof Date ? v : new Date(v));

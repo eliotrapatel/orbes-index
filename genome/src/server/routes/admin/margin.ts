@@ -1,9 +1,13 @@
 /**
- * The margin's settings (macro scope of 2026-10-20, K43 N1 and N2; lot M4 plan §1.2, step M4.2;
- * services/margin-settings.ts). An AUDITOR reads (amounts and keys, nothing personal); an ADMIN writes, as Orders →
- * Settings. Every write answers the whole settings. The margin itself (GET /api/admin/margin and its CSV) joins this
- * file in step M4.3.
+ * The margin on GROWTH and its settings (macro scope of 2026-10-20, K43 N1 to N3, D61; lot M4 plan §1.2, steps M4.2 and
+ * M4.3; services/margin.ts, services/margin-settings.ts). An AUDITOR reads the margin and its CSV (amounts, counts and
+ * groups: no account, no email, no vault, no release) and the settings (amounts and keys, nothing personal); an ADMIN
+ * writes the settings, as Orders → Settings. Every write answers the whole settings.
  *
+ *   GET    /api/admin/margin?months=12|24&test=        AUDITOR  the margin of GROWTH's window, in euros: the totals, by
+ *                                                               model, channel and tier (never by release), THE VAULT's
+ *                                                               line, the estimates and what is missing
+ *   GET    /api/admin/margin.csv?months=&test=         AUDITOR  its totals and views as a CSV (orbes-margin-<Paris day>.csv)
  *   GET    /api/admin/margin/settings                  AUDITOR  the rates (and the currencies without one), the bands, the
  *                                                               unit costs and the allowances
  *   PUT    /api/admin/margin/rates/:currency           ADMIN    a currency's euro rate (422 MARGIN_RATE_EUR for EUR)
@@ -26,6 +30,7 @@ import {
   allowanceParams,
   createShippingCostBody,
   emptyBody,
+  marginQuery,
   marginRateBody,
   marginRateParams,
   parse,
@@ -40,7 +45,20 @@ import type { AdminRouteDeps } from './index.js';
 const ADMIN = { guard: { minRole: 'ADMIN' as const } };
 
 export const adminMarginRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { marginSettings } = ctx.services;
+  const { margin, marginSettings } = ctx.services;
+
+  app.get('/api/admin/margin', async (request) => {
+    const q = parse(marginQuery, request.query);
+    return margin.report({ months: q.months, test: q.test });
+  });
+
+  app.get('/api/admin/margin.csv', async (request, reply) => {
+    const q = parse(marginQuery, request.query);
+    const file = await margin.csv({ months: q.months, test: q.test });
+    reply.header('cache-control', 'no-store');
+    reply.header('content-disposition', `attachment; filename="${file.filename}"`);
+    return reply.type(file.contentType).send(file.body);
+  });
 
   app.get('/api/admin/margin/settings', async () => marginSettings.read());
 
