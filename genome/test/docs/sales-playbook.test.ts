@@ -35,6 +35,10 @@
  *  - what a collector sees on a computer (the desktop plan of 2026-10-16): an
  *    order's own page, MESSAGES by subject, the SCAN page and UNREADABLE
  *    CODE's sentence, in the app's words as a computer shows them;
+ *  - lot M4: what a partner receives (the number of guests, the names only
+ *    of those who ticked) and, marked from the day conversions are switched
+ *    on, the answer on Meta, TikTok and Google (only with consent, what is
+ *    sent, how to turn it off in YOUR PROFILE), in the code's own words;
  *  - theorbes.com and verify.theorbes.com as its only addresses, relative
  *    links that resolve, and the playbook linked from LAUNCH §7.
  */
@@ -51,7 +55,8 @@ import { CLAIM_ATTEMPT_LIMIT, CLAIM_ATTEMPT_WINDOW_MS, TRANSFER_TTL_MS } from '.
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
 import { CLIENT_REGISTRATION } from '../../src/web/admin/model/sale.js';
-import { DESKTOP, NOW, ORDERS, PROBLEMS, RESALE_GUIDANCE, resultMessage } from '../../src/web/verify/copy.js';
+import { CIRCLE, CONSENT, DESKTOP, NOW, ORDERS, PROBLEMS, RESALE_GUIDANCE, resultMessage } from '../../src/web/verify/copy.js';
+import { partnerInvoiceNumber } from '../../src/server/services/partners.js';
 import { at, installDevice } from '../support/fake-device.js';
 import {
   LEXICON_BEGIN,
@@ -604,6 +609,42 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     // A computer window under 1024 px, or zoomed far, has the phone's layout: SCAN opens the camera, UPLOAD A PHOTO under it.
     expect(unreadable).toContain(`Sur un ordinateur (une fenêtre d'au moins 1024 px), SCAN ouvre la page ${DESKTOP.scanPage.title}.`);
     expect(unreadable).toContain(`Dans une fenêtre plus étroite ou très zoomée, SCAN ouvre l'appareil photo de l'ordinateur comme sur un téléphone, avec ${DESKTOP.scanPage.upload} dessous.`);
+  });
+
+  it('tells Client Services what a partner receives and, from the day conversions are switched on, what Meta, TikTok and Google receive (lot M4)', () => {
+    // K49 P3: the number of guests, and the names only of those who ticked; the console's words as the code has them.
+    const partners = subsection(sheet(0), '### Les expériences partenaires');
+    expect(partners).toContain('**Ce que reçoit le partenaire : le nombre d\'invités, et le nom seulement de ceux qui ont coché.**');
+    expect(partners).toContain('La plateforme n\'envoie rien au partenaire : c\'est ORBES qui télécharge la liste et la lui envoie.');
+    for (const span of ['Club', 'Circle', 'Partners', 'New partner', 'New experience', 'PARTNER EXPERIENCE', 'Guests for the partner', 'Download the list', 'Shares name', 'Issue the invoice', 'Record payment', 'Cancel the experience', 'Invoices', 'Partner experience']) {
+      expect(codeSpans(partners), span).toContain(span);
+      expect(quotesSoftware(span), span).toBe(true);
+    }
+    expect(partnerInvoiceNumber('INVOICE', 2026, 1)).toBe('P-2026-0001');
+    expect(partnerInvoiceNumber('CREDIT_NOTE', 2026, 1)).toBe('PC-2026-0001');
+    for (const number of ['P-2026-0001', 'PC-2026-0001']) expect(partners, number).toContain(number);
+    expect(partners).toContain(CIRCLE.partner.with('MAISON ORVALE'));
+    expect(quotes(partners).join(' ')).toContain('Sinon, elle reçoit seulement le nombre d\'invités.');
+    // K27 A4: marked from the day conversions are switched on; only with consent, what is sent, how to turn it off.
+    const ads = subsection(sheet(0), '### Meta, TikTok et Google (à partir du jour où les conversions sont allumées)');
+    expect(ads).toContain('Ce paragraphe s\'applique **à partir du jour où les conversions sont allumées**');
+    for (const span of ['Links', 'Ad platforms']) {
+      expect(codeSpans(ads), span).toContain(span);
+      expect(quotesSoftware(span), span).toBe(true);
+    }
+    expect(ads).toContain('**Seulement avec son accord.**');
+    expect(ads).toContain('**Ce qui est envoyé.**');
+    expect(ads).toContain('**Comment l\'arrêter.**');
+    expect(ads).toContain('**« ORBES partage-t-il mes données avec Meta, TikTok ou Google ? »**');
+    for (const words of [CONSENT.accept, CONSENT.decline, CONSENT.privacy, CONSENT.group, CONSENT.label]) expect(ads, words).toContain(words);
+    const answer = quotes(ads).join(' ');
+    expect(answer).toContain('Seulement si vous l\'acceptez.');
+    expect(answer).toContain(`Vous pouvez l'arrêter à tout moment dans YOUR PROFILE, avec ${CONSENT.label}.`);
+    // What is sent, as server/ads/event.ts says it: hashed email and id, the click id, the browser, an order's value.
+    expect(ads).toContain('son adresse e-mail et un identifiant de compte, tous deux brouillés de façon irréversible, son pays, l\'identifiant de clic de la publicité, son navigateur et, pour une commande, son montant');
+    expect(ads).toContain('Jamais son nom, son téléphone, son adresse, ses pièces ni ses tailles');
+    const event = readDoc('genome/src/server/ads/event.ts');
+    for (const field of ['emailSha256', 'externalIdSha256', 'country', 'clicks', 'userAgent', 'value']) expect(event, field).toMatch(new RegExp(`\\n  ${field}: `));
   });
 
   it('is linked from LAUNCH §7, before the first sale', () => {

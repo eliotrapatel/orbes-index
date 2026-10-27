@@ -91,6 +91,8 @@ export interface UiState {
 /** Requests a state holds open while it is captured, released when the run ends. */
 export interface Holds {
   hold(pattern: string): void;
+  /** `route` held for the state's whole life, then aborted when it closes: never let through, never reaching the server. */
+  stall(route: Route): Promise<void>;
   releaseAll(): void;
 }
 
@@ -692,6 +694,245 @@ async function invitationAnswer(page: Page, change: (inv: Record<string, unknown
     await route.fulfill({ response: res, json });
   });
 }
+
+/** The partner's experience's invitation (lot M4, step M4.8): its WITH <BRAND> line, then, once answered YES, SHARE MY NAME. */
+const PARTNER_POST = '.view--circle-post .circle-post__partner';
+const PARTNER_SHARE = '.view--circle-post .circle-post__share-block';
+
+/** SHARE MY NAME ticked or unticked on the post's page (its row: the label holds the switch). */
+const toggleShare = (run: StateRun) => run.page.locator('.view--circle-post .circle-post__share-label').click();
+
+/**
+ * An invitation for a partner's experience (lot M4, step M4.8; K49 P2, P3; plan M4 §2.4, §7) on the stage `partner`:
+ * WITH <BRAND> under its kind on the post, NOW's card and the feed's; on the post, SHARE MY NAME once the reader answered
+ * YES (off, on, in light), no name on the account, answers closed with the name shared, ONE MOMENT…, refused, the longest
+ * brand; then the whole way, YES then the box ticked (its write, last). No other stage holds a partner.
+ */
+const PARTNER_STATES: readonly UiState[] = [
+  { id: 'partner-post', title: 'An invitation WITH MAISON ORVALE, not answered: no box before a YES', refs: ['M4 P2'], variant: 'partner', as: 'partnerNew', path: post('partnerMain'), ready: PARTNER_POST },
+  { id: 'partner-post-yes', title: 'The partner’s invitation answered YES: SHARE MY NAME, INÈS LAURENT, WITH MAISON ORVALE, off, and its line', refs: ['M4 P3'], variant: 'partner', as: 'partnerOff', path: post('partnerMain'), ready: `${PARTNER_SHARE}[data-share="off"]` },
+  { id: 'partner-post-shared', title: 'The partner’s invitation answered YES, the name shared: the box on, Your name is shared with MAISON ORVALE.', refs: ['M4 P3'], variant: 'partner', as: 'partnerOn', path: post('partnerMain'), ready: `${PARTNER_SHARE}[data-share="on"]` },
+  { id: 'partner-post-shared-light', title: 'The name shared, in light mode', refs: ['M4 P3'], variant: 'partner', as: 'partnerOn', path: post('partnerMain'), light: true, ready: `${PARTNER_SHARE}[data-share="on"]` },
+  { id: 'partner-post-no-name', title: 'The partner’s invitation answered YES by an account without its last name: only the number of guests, no box', refs: ['M4 P3'], variant: 'partner', as: 'partnerNoName', path: post('partnerMain'), ready: `${PARTNER_SHARE}[data-share="line"]` },
+  {
+    id: 'partner-post-closed',
+    title: 'The partner’s invitation once its event has begun, the name shared: the choice as a line, no box',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerOn',
+    path: post('partnerMain'),
+    routes: (page) => invitationAnswer(page, (inv) => ({ ...inv, open: false })),
+    ready: `${PARTNER_SHARE}[data-share="line"]`,
+  },
+  {
+    id: 'partner-post-saving',
+    title: 'SHARE MY NAME ticked, while it is saved: the box on, ONE MOMENT…',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerOff',
+    path: post('partnerMain'),
+    // The choice held on its way, never let through (a hold released at the end would save it, and the states after this
+    // one read the box off).
+    routes: (page, holds) => page.route('**/api/v1/club/circle/*/rsvp', (route) => holds.stall(route)),
+    act: async (run) => {
+      await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor();
+      await toggleShare(run);
+    },
+    ready: '.view--circle-post .circle-post__share-line[role="status"]',
+  },
+  {
+    id: 'partner-post-error',
+    title: 'SHARE MY NAME refused: the server’s message, the box back off',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerOff',
+    path: post('partnerMain'),
+    // The server's own refusal (services/circle.ts: CIRCLE_SHARE_NAME_MISSING), the post then read again as it holds it.
+    routes: (page) =>
+      page.route('**/api/v1/club/circle/*/rsvp', (route) =>
+        route.fulfill({ status: 409, json: { error: { code: 'CIRCLE_SHARE_NAME_MISSING', message: 'Your account needs your first and last name to share them.' } } }),
+      ),
+    act: async (run) => {
+      await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor();
+      await toggleShare(run);
+    },
+    ready: `${PARTNER_SHARE}[data-share="off"] .circle-post__share-error`,
+  },
+  { id: 'partner-post-long-brand', title: 'The invitation of the longest brand, answered YES: WITH and the box wrap whole', refs: ['M4 P2', 'M4 P3'], variant: 'partner', as: 'partnerOff', path: post('partnerLong'), ready: `${PARTNER_SHARE}[data-share="off"]`, stress: true },
+  { id: 'partner-now', title: 'NOW: the next invitation is the partner’s of the longest brand, WITH under its kind', refs: ['M4 P2'], variant: 'partner', as: 'partnerOn', path: at('/verify'), ready: '.view--now[data-ready] .now__invitation .n-circle-card__partner' },
+  { id: 'partner-circle', title: 'THE CIRCLE: the two partners’ invitations, each WITH its brand under its kind', refs: ['M4 P2'], variant: 'partner', as: 'partnerOn', path: at('/verify/circle'), ready: '.view--circle article .n-circle-card__partner' },
+  {
+    id: 'partner-post-share-ticked',
+    title: 'The partner’s invitation answered YES here, then SHARE MY NAME ticked: Your name is shared with MAISON ORVALE.',
+    refs: ['M4 P3'],
+    variant: 'partner',
+    as: 'partnerNew',
+    path: post('partnerMain'),
+    mutates: true,
+    act: async (run) => {
+      await button(run, 'YES').click();
+      await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor({ timeout: 20_000 });
+      await toggleShare(run);
+      await run.page.locator(`${PARTNER_SHARE}[data-share="on"]`).waitFor({ timeout: 20_000 });
+    },
+    ready: `${PARTNER_SHARE}[data-share="on"]`,
+  },
+];
+
+/** The consent banner (lot M4, step M4.13): its band at the foot of the screen, in its state. */
+const CONSENT_BAND = '.n-consent:not([hidden])';
+/** The banner's POST /api/v1/consent alone (its GET passes): `answer` holds it or answers it. */
+const consentPost = (page: Page, answer: (route: Route) => Promise<void>) =>
+  page.route('**/api/v1/consent', (route) => (route.request().method() === 'POST' ? answer(route) : route.continue()));
+/** NOW drawn, then the banner shown on it. */
+async function bannerOnNow(run: StateRun): Promise<void> {
+  await run.page.locator('.view--now[data-ready]').waitFor({ timeout: 20_000 });
+  await run.page.locator(`${CONSENT_BAND}[data-state="shown"]`).waitFor({ timeout: 20_000 });
+}
+/**
+ * The banner as plan M4 §3.4 draws it: never modal (no dialog, nothing made inert under it), in English whatever the
+ * browser's language, ACCEPT and DECLINE of equal weight (the same size and look), PRIVACY to the privacy policy's
+ * Advertising measurement, at the foot of the window.
+ */
+async function consentBandHolds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const band = document.querySelector<HTMLElement>('.n-consent:not([hidden])');
+    if (!band) return ['no banner'];
+    const problems: string[] = [];
+    if (band.getAttribute('role') === 'dialog' || band.getAttribute('aria-modal') === 'true') problems.push('the banner is modal');
+    if (document.querySelector('.n-column')?.hasAttribute('inert')) problems.push('the page under the banner is inert');
+    if (band.lang !== 'en') problems.push(`the banner's language is «${band.lang}»`);
+    const [a, d] = [...band.querySelectorAll<HTMLButtonElement>('.n-consent__button')];
+    if (!a || !d) return [...problems, 'ACCEPT or DECLINE missing'];
+    const ra = a.getBoundingClientRect();
+    const rd = d.getBoundingClientRect();
+    if (Math.round(ra.width) !== Math.round(rd.width) || Math.round(ra.height) !== Math.round(rd.height) || a.className !== d.className) problems.push('ACCEPT and DECLINE are not of equal weight');
+    if (band.querySelector('a.n-consent__privacy')?.getAttribute('href') !== '/legal/privacy#ads') problems.push('PRIVACY does not lead to /legal/privacy#ads');
+    if (Math.abs(band.getBoundingClientRect().bottom - innerHeight) > 1) problems.push('the banner is not at the foot of the window');
+    return problems;
+  });
+}
+
+/** ACCEPT on the banner. */
+const accept = (run: StateRun) => run.page.locator(CONSENT_BAND).getByRole('button', { name: 'ACCEPT', exact: true }).click();
+/** YOUR PROFILE opened, its ADVERTISING group in view. */
+async function openAdsRow(run: StateRun): Promise<void> {
+  await openProfile(run);
+  const group = run.page.locator(`${ACCT} #profile-group-ads`);
+  await group.waitFor({ timeout: 20_000 });
+  await group.scrollIntoViewIfNeeded();
+}
+
+/** /legal/privacy drawn again once conversions read on (lot M4, step M4.14): the section and the line under the version. */
+const ADS_PRIVACY_READY = 'main.legal .legal-meta + .legal__ads-since';
+/**
+ * The privacy policy while on, as plan M4 §6 draws it: Advertising measurement right after WORN, « since » right under the
+ * version line, the cookies' sentence in its 'on' words with its link to the section, nothing wider than the window.
+ */
+async function adsPrivacyHolds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const problems: string[] = [];
+    const ids = [...document.querySelectorAll<HTMLElement>('main.legal .legal__heading[id]')].map((el) => el.id);
+    if (ids[ids.indexOf('worn') + 1] !== 'ads') problems.push(`the sections read ${ids.join(', ')}`);
+    if (!document.querySelector('main.legal .legal-meta + .legal__ads-since')) problems.push('no line under the version line');
+    const cookies = document.getElementById('cookies')?.closest('section');
+    if (!cookies?.querySelector('a.legal__link[href="#ads"]')) problems.push("the cookies' sentence does not lead to #ads");
+    if (document.documentElement.scrollWidth > innerWidth) problems.push('the page scrolls sideways');
+    return problems;
+  });
+}
+
+/**
+ * Conversions switched on (lot M4, step M4.13; K27 A4; plan M4 §3.4, §7) on the stage `ads`: the consent banner on NOW for
+ * an account that holds no choice (shown, in light, ONE MOMENT… while ACCEPT is saved, refused); YOUR PROFILE's ADVERTISING
+ * MEASUREMENT on (also in light), off, and refused. With the switch off (every other stage) none of them shows.
+ */
+const ADS_STATES: readonly UiState[] = [
+  {
+    id: 'ads-banner',
+    title: 'Conversions on, no choice held: the consent banner at the foot of NOW, ACCEPT · DECLINE, PRIVACY',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: you,
+    path: at('/verify'),
+    act: bannerOnNow,
+    ready: `${CONSENT_BAND}[data-state="shown"]`,
+    check: consentBandHolds,
+  },
+  { id: 'ads-banner-light', title: 'The consent banner, in light mode', refs: ['M4 A4'], variant: 'ads', as: you, path: at('/verify'), light: true, act: bannerOnNow, ready: `${CONSENT_BAND}[data-state="shown"]` },
+  {
+    id: 'ads-banner-saving',
+    title: 'ACCEPT pressed, while it is saved: ONE MOMENT…, both buttons held',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: you,
+    path: at('/verify'),
+    // The choice held on its way, never let through (the states after this one read the banner as shown).
+    routes: (page, holds) => consentPost(page, (route) => holds.stall(route)),
+    act: async (run) => {
+      await bannerOnNow(run);
+      await accept(run);
+    },
+    ready: `${CONSENT_BAND}[data-state="saving"]`,
+  },
+  {
+    id: 'ads-banner-error',
+    title: 'ACCEPT refused: Your choice could not be saved. Try again., both buttons again',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: you,
+    path: at('/verify'),
+    routes: (page) => consentPost(page, (route) => route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'The service is unavailable.' } } })),
+    act: async (run) => {
+      await bannerOnNow(run);
+      await accept(run);
+    },
+    ready: `${CONSENT_BAND}[data-state="error"]`,
+  },
+  {
+    id: 'ads-account-on',
+    title: 'YOUR PROFILE, conversions on: ADVERTISING, ADVERTISING MEASUREMENT (on) and its line',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: 'adsOn',
+    path: at('/verify'),
+    act: openAdsRow,
+    ready: `${ACCT} .n-profile__ads .n-sw__input:checked`,
+    viewport: true,
+  },
+  { id: 'ads-account-on-light', title: 'ADVERTISING MEASUREMENT (on), in light mode', refs: ['M4 A4'], variant: 'ads', as: 'adsOn', path: at('/verify'), light: true, act: openAdsRow, ready: `${ACCT} .n-profile__ads .n-sw__input:checked`, viewport: true },
+  {
+    id: 'ads-account-off',
+    title: 'YOUR PROFILE, conversions on: ADVERTISING MEASUREMENT (off)',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: 'adsOff',
+    path: at('/verify'),
+    act: openAdsRow,
+    ready: `${ACCT} .n-profile__ads .n-sw__input:not(:checked)`,
+    viewport: true,
+  },
+  {
+    id: 'ads-account-error',
+    title: 'ADVERTISING MEASUREMENT switched on, refused: the switch back off, Your choice could not be saved just now.',
+    refs: ['M4 A4'],
+    variant: 'ads',
+    as: 'adsOff',
+    path: at('/verify'),
+    routes: (page) => page.route('**/api/v1/account/ads-consent', (route) => (route.request().method() === 'PUT' ? route.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'The service is unavailable.' } } }) : route.continue())),
+    act: async (run) => {
+      await openAdsRow(run);
+      await run.page.locator(`${ACCT} .n-profile__ads`).click();
+    },
+    ready: `${ACCT} .n-profile__ads-error:not([hidden])`,
+    viewport: true,
+  },
+  // The privacy policy while conversions are switched on (lot M4, step M4.14; plan M4 §6, A4): its section Advertising
+  // measurement after WORN, its two sentences in their 'on' words, and the line under the version line (EN, FR, light).
+  { id: 'legal-privacy-ads', title: 'The legal pages: PRIVACY, conversions on: Advertising measurement after WORN, its two sentences, since 5 October 2026 under the version', refs: ['M4 A4'], variant: 'ads', path: at('/legal/privacy'), ready: ADS_PRIVACY_READY, check: adsPrivacyHolds },
+  { id: 'legal-privacy-ads-fr', title: 'The legal pages in French: CONFIDENTIALITÉ, conversions on: Mesure publicitaire', refs: ['M4 A4'], variant: 'ads', path: at('/legal/privacy?lang=fr'), ready: ADS_PRIVACY_READY, check: adsPrivacyHolds },
+  { id: 'legal-privacy-ads-light', title: 'PRIVACY, conversions on, in light mode', refs: ['M4 A4'], variant: 'ads', path: at('/legal/privacy'), light: true, ready: ADS_PRIVACY_READY },
+];
 
 /** The states of the phone (and the boutique board's screen): those of the NOCTURNE baseline at c3d25c2. */
 export const PHONE_STATES: readonly UiState[] = [
@@ -2510,6 +2751,12 @@ export const PHONE_STATES: readonly UiState[] = [
     stress: true,
   },
 
+  // ── THE CIRCLE, an invitation for a partner's experience (lot M4, step M4.8; K49 P2 and P3) on its stage (partner) ──
+  ...PARTNER_STATES,
+
+  // ── Conversions switched on (lot M4, step M4.13; K27 A4): the consent banner and ADVERTISING MEASUREMENT (ads) ──
+  ...ADS_STATES,
+
   // ── The legal pages ──
   { id: 'legal-privacy', title: 'The legal pages: PRIVACY', refs: ['C23'], variant: 'full', path: at('/legal/privacy'), ready: '.legal__section' },
   { id: 'legal-terms', title: 'The legal pages: TERMS', refs: ['C23'], variant: 'full', path: at('/legal/terms'), ready: '.legal__section' },
@@ -3787,6 +4034,15 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     onDesk(phoneState('vault-open'), 1440, { extra: { as: 'vaultSOpenDesk' } }),
     onDesk(phoneState('vault-open-rare'), 1440, { extra: { as: 'vaultSRareDesk' } }),
     onDesk(phoneState('live-end-vault-open'), 1440, { extra: { as: 'vaultEndOpenDesk', path: release('vaultEndOpenDesk'), act: async (run) => (await sellOutWhole(run, 'vaultEndOpenDesk'), openTheVault(run, { reduced: true })) } }),
+    // ── An invitation for a partner's experience (lot M4, step M4.8; K49 P2, P3; Rule-2: the phone's information) on its
+    // stage (partner): the post in each state of SHARE MY NAME, NOW's card and the feed at 1440 × 900; the box off and on
+    // also in light; the longest brand and NOW's card also at 1024 × 768; then YES and the box ticked through the routes
+    // (its write, last) ──
+    ...desk(1440, 'partner-post', 'partner-post-yes', 'partner-post-shared', 'partner-post-no-name', 'partner-post-closed', 'partner-post-saving', 'partner-post-error', 'partner-post-long-brand', 'partner-now', 'partner-circle'),
+    onDesk(phoneState('partner-post-yes'), 1440, { light: true }),
+    onDesk(phoneState('partner-post-shared-light'), 1440, { light: true, name: 'partner-post-shared' }),
+    ...desk(1024, 'partner-post-long-brand', 'partner-now'),
+    onDesk(phoneState('partner-post-share-ticked'), 1440),
   ],
   // ── THE VAULT page and its surroundings on a computer (lot Q3, step Q3.11; MK V desk): its own page, /verify/account/
   // vault (also at 1024 × 768, and in light: dark all the same), none waiting, a first visit, ONE MOMENT…, could not be
@@ -3803,6 +4059,17 @@ export const DESK_GROUPS: Readonly<Record<string, readonly UiState[]>> = Object.
     ),
     onDesk(phoneState('orders-vault-claim'), 1440, { extra: { act: (run) => openOrderPage(run, /MONOLITHE/), ready: '.view--order .n-vault-claim .n-vault-claim__claim' } }),
     onDesk(phoneState('vault-join'), 1440, { extra: { ready: '.view--signin' } }),
+    // ── Conversions switched on (lot M4, step M4.13; K27 A4; Rule-2: the phone's information) on their stage (ads): the
+    // consent banner across the foot of the window (shown, ONE MOMENT…, refused; also in light and at 1024 × 768) and
+    // YOUR PROFILE's page with ADVERTISING MEASUREMENT on (also in light), off and refused. Nothing here writes ──
+    ...desk(1440, 'ads-banner', 'ads-banner-saving', 'ads-banner-error', 'ads-account-on', 'ads-account-off', 'ads-account-error'),
+    onDesk(phoneState('ads-banner-light'), 1440, { light: true, name: 'ads-banner' }),
+    onDesk(phoneState('ads-account-on-light'), 1440, { light: true, name: 'ads-account-on' }),
+    ...desk(1024, 'ads-banner'),
+    // The privacy policy while on (step M4.14): its section beside the list of sections (also in light and at 1024 × 768).
+    ...desk(1440, 'legal-privacy-ads'),
+    onDesk(phoneState('legal-privacy-ads-light'), 1440, { light: true, name: 'legal-privacy-ads' }),
+    ...desk(1024, 'legal-privacy-ads'),
   ],
 });
 
@@ -4010,6 +4277,7 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
     : await mobileContext(browser);
   const page = await context.newPage();
   const gates: { open(): void }[] = [];
+  const stalled: Route[] = [];
   const holds: Holds = {
     hold: (pattern) => {
       const g = gate();
@@ -4019,9 +4287,16 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
         await route.continue().catch(() => {});
       });
     },
+    stall: (route) => {
+      stalled.push(route);
+      return new Promise<void>(() => {});
+    },
     releaseAll: () => gates.forEach((g) => g.open()),
   };
   const close = async () => {
+    // Aborted before the context goes: a request merely left paused may be let through as the context closes (CI's
+    // Chromium did, for the saving states of SHARE MY NAME and the consent banner), and the next state would find it saved.
+    await Promise.all(stalled.splice(0).map((route) => route.abort().catch(() => {})));
     holds.releaseAll();
     await context.close().catch(() => {});
   };

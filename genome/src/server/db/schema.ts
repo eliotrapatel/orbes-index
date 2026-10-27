@@ -869,6 +869,87 @@ export const VAULT_GIFT_DAYS = 30;
 /** A credit to give's one-time code, stored as its HMAC-SHA256 only (vault_gifts.code_hash). */
 export const VAULT_GIFT_CODE_HASH_BYTES = 32;
 
+/**
+ * The margin's settings (migration 0063, macro scope K43 N1 and N2; lot M4 plan §1.2): a currency's euro rate, above 0
+ * and at most CURRENCY_RATE_MAX, with CURRENCY_RATE_DECIMALS decimals (numeric(14,6)); EUR is 1 and never set
+ * (`currency_rates_not_eur`). A shipping cost band's upper limit is a parcel's weight at most (SHIPMENT_WEIGHT_G_MAX); a
+ * band's and a unit cost's amount at most MARGIN_COST_MINOR_MAX minor units; a category's returns and claims allowance in
+ * hundredths of a percent, 0 to ALLOWANCE_BP_MAX (100 %).
+ */
+export const CURRENCY_RATE_MAX = 100_000;
+export const CURRENCY_RATE_DECIMALS = 6;
+export const MARGIN_COST_MINOR_MAX = 100_000_000;
+export const ALLOWANCE_BP_MAX = 10_000;
+/** The currency every margin figure is in, never given a rate (N2). */
+export const MARGIN_CURRENCY = 'EUR';
+/**
+ * The owner's unit costs (margin_unit_costs.key, migration 0063, N1 and D61): the pouch and the card (per piece), THE
+ * VAULT CARD (per card packed, THE VAULT's cost), one PRIVATE CARE service, and what each warranty claim outcome costs
+ * (CLAIM_ and each of WARRANTY_CLAIM_OUTCOMES, in its order).
+ */
+export const MARGIN_UNIT_COST_KEYS = [
+  'POUCH', 'CARD', 'VAULT_CARD', 'CARE_SERVICE',
+  ...WARRANTY_CLAIM_OUTCOMES.map((o) => `CLAIM_${o}` as const),
+] as const;
+export type MarginUnitCostKey = (typeof MARGIN_UNIT_COST_KEYS)[number];
+
+/**
+ * Partner-paid experiences (migration 0064, macro scope K49 P1 to P4; lot M4 plan §2.2): a partner's brand (one line, unique
+ * whatever the case), its contact's and billing name, email, phone, billing address (line breaks kept), company number and
+ * note, at most; an experience's title and note, at most; its amount and an invoice's total, 1 to PARTNER_AMOUNT_MINOR_MAX
+ * minor units, in a house currency.
+ */
+export const PARTNER_BRAND_MAX = 80;
+export const PARTNER_NAME_MAX = 120;
+export const PARTNER_EMAIL_MAX = 254;
+export const PARTNER_PHONE_MAX = 40;
+export const PARTNER_BILLING_ADDRESS_MAX = 1_000;
+export const PARTNER_COMPANY_NUMBER_MAX = 60;
+export const PARTNER_NOTE_MAX = 2_000;
+export const PARTNER_EXPERIENCE_TITLE_MAX = 120;
+export const PARTNER_AMOUNT_MINOR_MAX = 100_000_000;
+/**
+ * A partner experience's states (partner_experiences.status, migration 0064, P1): DRAFT, INVOICED (its invoice issued),
+ * PAID (the date the money arrived, entered by ORBES), CANCELLED (from any of them; an invoiced one gets its credit note).
+ */
+export const PARTNER_EXPERIENCE_STATUSES = ['DRAFT', 'INVOICED', 'PAID', 'CANCELLED'] as const;
+export type PartnerExperienceStatus = (typeof PARTNER_EXPERIENCE_STATUSES)[number];
+/**
+ * A partner invoice, or the credit note that follows one (partner_invoices.kind, migration 0064, P4), each in its own
+ * series per UTC year of issue, apart from the collectors' INV- and CN-: P-2026-0001 and PC-2026-0001.
+ */
+export const PARTNER_INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type PartnerInvoiceKind = (typeof PARTNER_INVOICE_KINDS)[number];
+
+/**
+ * The server-side conversions, built and switched off (migration 0065, macro scope K27 A1 to A5; lot M4 plan §3.2): the
+ * platforms an act may go to (A2: Meta, TikTok and Google; no Snapchat), a collector's choice and where it was made (A4),
+ * a click id's kind, an event's act (A3: an ORDER conversion is sent once its order is paid), its states and the reason
+ * one is skipped.
+ */
+export const ADS_PLATFORMS = ['META', 'TIKTOK', 'GOOGLE'] as const;
+export type AdsPlatform = (typeof ADS_PLATFORMS)[number];
+export const AD_CONSENT_CHOICES = ['GRANTED', 'DECLINED'] as const;
+export type AdConsentChoice = (typeof AD_CONSENT_CHOICES)[number];
+export const AD_CONSENT_SOURCES = ['BANNER', 'ACCOUNT'] as const;
+export type AdConsentSource = (typeof AD_CONSENT_SOURCES)[number];
+export const AD_CLICK_KINDS = ['FBCLID', 'TTCLID', 'GCLID', 'GBRAID', 'WBRAID'] as const;
+export type AdClickKind = (typeof AD_CLICK_KINDS)[number];
+export const AD_EVENT_KINDS = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'PAID_ORDER'] as const;
+export type AdEventKind = (typeof AD_EVENT_KINDS)[number];
+export const AD_EVENT_STATUSES = ['QUEUED', 'SENT', 'FAILED', 'SKIPPED', 'CANCELLED'] as const;
+export type AdEventStatus = (typeof AD_EVENT_STATUSES)[number];
+/** Why an event is SKIPPED: older than its platform takes (7 days, Google 90), a Google act without a Google click id, a platform without its keys. */
+export const AD_SKIP_REASONS = ['TOO_OLD', 'NO_CLICK_ID', 'NOT_READY'] as const;
+export type AdSkipReason = (typeof AD_SKIP_REASONS)[number];
+/** A Meta or TikTok test event code, a user agent recorded with a GRANTED choice, a click id and an event's last error, at most. */
+export const ADS_TEST_EVENT_CODE_MAX = 40;
+export const AD_USER_AGENT_MAX = 400;
+export const AD_CLICK_ID_MAX = 500;
+export const AD_EVENT_ERROR_MAX = 300;
+/** A Google Ads conversion action, by its resource name (ads_settings.google_action_*). */
+export const ADS_GOOGLE_ACTION_PATTERN = /^customers\/[0-9]{1,12}\/conversionActions\/[0-9]{1,20}$/;
+
 // ── Column helpers ─────────────────────────────────────────────────────────
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -1558,6 +1639,11 @@ export interface CirclePostsTable {
   segment_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0026 (BP-19 T7): what an INVITATION is (the members' evening, a launch preview, a partner experience); null otherwise. */
   experience: ColumnType<CircleExperience | null, CircleExperience | null | undefined, CircleExperience | null>;
+  /**
+   * Migration 0064 (macro scope K49 P2): the partner experience this invitation is for (partner_experiences.id), on an
+   * invitation whose experience is PARTNER_EXPERIENCE only (`circle_posts_partner_experience`); null otherwise.
+   */
+  partner_experience_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** The photographs of a circle post (migration 0016, P-X01): at most 4, positions 1–4; post_id, sha256, created_by and created_at never change. */
@@ -1577,6 +1663,13 @@ export interface CircleRsvpsTable {
   answer: CircleRsvpAnswer;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
+  /**
+   * Migration 0064 (macro scope K49 P3): the guest chose to share their name with the invitation's partner; on a YES only
+   * (`circle_rsvps_share_name_yes`), false by default, cleared by a NO. `share_name_at`: when, set exactly while it is on
+   * (`circle_rsvps_share_name`).
+   */
+  share_name: WithDefault<boolean>;
+  share_name_at: TimestampNullable;
 }
 
 /** An account's vote in a poll of the circle (migration 0016, P-X01): one per account and post, final. */
@@ -2669,6 +2762,218 @@ export interface BoxesTable {
   created_at: TimestampDefault;
   created_by: ColumnType<string | null, string | null | undefined, never>; // admin_users.id; NULL for a script
   updated_at: TimestampDefault;
+}
+
+/**
+ * A currency's euro rate (migration 0063, macro scope K43 N2; lot M4 plan §1.2): one unit of `currency` is worth
+ * `eur_rate` euros, applied to every amount in it at reading time, the whole history included. EUR is never set. The
+ * rate is numeric(14,6), read as its decimal text ('1.150000'), written as a string or a number. Deleted when cleared.
+ * The currency never changes; updated_at is stamped on every update.
+ */
+export interface CurrencyRatesTable {
+  currency: ColumnType<string, string, never>; // ^[A-Z]{3}$, never 'EUR'
+  eur_rate: ColumnType<string, string | number, string | number>; // > 0, <= CURRENCY_RATE_MAX
+  /** admin_users.id of the ADMIN who set it last; NULL for a script. */
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A band of the outbound shipping cost table (migration 0063, K43 N1): what ORBES pays the carrier for a parcel of
+ * `country` (NULL: ALL OTHER COUNTRIES) weighing up to `max_weight_g`; a parcel takes the smallest band that holds its
+ * weight. One per country (or ALL OTHER COUNTRIES) and limit (`shipping_cost_rates_band_key`). Never a buyer's price
+ * (`shipping_rates`). Its id never changes; updated_at is stamped on every update.
+ */
+export interface ShippingCostRatesTable {
+  id: Generated<string>;
+  country: ColumnType<string | null, string | null | undefined, string | null>; // ^[A-Z]{2}$; NULL: ALL OTHER COUNTRIES
+  max_weight_g: number; // 1..SHIPMENT_WEIGHT_G_MAX
+  cost_minor: number; // bigint 0..MARGIN_COST_MINOR_MAX
+  /** An ISO 4217 code (^[A-Z]{3}$). */
+  currency: string;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * An owner's unit cost (migration 0063, K43 N1, D61): the pouch or the card per piece, THE VAULT CARD per card packed,
+ * one PRIVATE CARE service, or a warranty claim's outcome (MARGIN_UNIT_COST_KEYS). Deleted when cleared. The key never
+ * changes.
+ */
+export interface MarginUnitCostsTable {
+  key: ColumnType<MarginUnitCostKey, MarginUnitCostKey, never>;
+  cost_minor: number; // bigint 0..MARGIN_COST_MINOR_MAX
+  /** An ISO 4217 code (^[A-Z]{3}$). */
+  currency: string;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A category's returns and claims allowance (migration 0063, K43 N1): `allowance_bp` hundredths of a percent of an
+ * order's revenue (0..ALLOWANCE_BP_MAX). Deleted when cleared. The category never changes.
+ */
+export interface CategoryAllowancesTable {
+  category_id: ColumnType<number, number, never>; // categories.id
+  allowance_bp: number; // 0..ALLOWANCE_BP_MAX
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A partner (migration 0064, macro scope K49 P1; lot M4 plan §2.2): a brand that pays ORBES for an experience offered to
+ * the circle. Its brand (1..PARTNER_BRAND_MAX, one line, unique whatever the case) as the invitation shows it; its contact;
+ * its billing details as its invoices print them (the name, the address and the country required to invoice; the company
+ * number printed when given); a note; `active` (false: SET ASIDE, offered for no new experience). Never deleted. id,
+ * created_at and created_by never change; updated_at is stamped on every update.
+ */
+export interface PartnersTable {
+  id: Generated<string>;
+  brand: string;
+  contact_name: NullableText;          // ≤ PARTNER_NAME_MAX, one line
+  contact_email: NullableText;         // 3..PARTNER_EMAIL_MAX
+  contact_phone: NullableText;         // ≤ PARTNER_PHONE_MAX, one line
+  billing_name: NullableText;          // ≤ PARTNER_NAME_MAX, one line
+  billing_address: NullableText;       // ≤ PARTNER_BILLING_ADDRESS_MAX, line breaks kept
+  /** ISO 3166-1 alpha-2 (^[A-Z]{2}$). */
+  billing_country: NullableText;
+  company_number: NullableText;        // ≤ PARTNER_COMPANY_NUMBER_MAX, one line
+  note: NullableText;                  // ≤ PARTNER_NOTE_MAX, line breaks kept
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A partner's experience (migration 0064, K49 P1): the deal, its title, the event's date (Paris), the amount the partner
+ * pays and its house currency. DRAFT → INVOICED (`invoiced_at`) → PAID (`paid_on`, recorded at `paid_recorded_at` by
+ * `paid_recorded_by`), or CANCELLED (`cancelled_at`, `cancelled_by`) from any of them, keeping the times it had; each state
+ * with its own times only (the `partner_experiences_*` CHECKs). Never deleted. id, partner_id, created_at and created_by
+ * never change; updated_at is stamped on every update.
+ */
+export interface PartnerExperiencesTable {
+  id: Generated<string>;
+  partner_id: ColumnType<string, string, never>;
+  title: string;                       // 1..PARTNER_EXPERIENCE_TITLE_MAX, one line
+  /** 'YYYY-MM-DD', the event's date in Paris. */
+  event_on: string;
+  amount_minor: number;                // bigint 1..PARTNER_AMOUNT_MINOR_MAX
+  currency: HouseCurrency;
+  note: NullableText;                  // ≤ PARTNER_NOTE_MAX, line breaks kept
+  status: WithDefault<PartnerExperienceStatus>;
+  invoiced_at: TimestampNullable;
+  /** 'YYYY-MM-DD', the date the partner's money arrived. */
+  paid_on: DateNullable;
+  paid_recorded_at: TimestampNullable;
+  paid_recorded_by: NullableAdmin;
+  cancelled_at: TimestampNullable;
+  cancelled_by: NullableAdmin;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * An invoice ORBES issues to a partner, or the credit note that follows it (migration 0064, K49 P1 and P4): numbered per
+ * kind and UTC year in its own series (P-2026-0001, PC-2026-0001, under ADVISORY_LOCK.PARTNER_INVOICE_NUMBER), one INVOICE
+ * per experience, a credit note naming the invoice it cancels; its issuer, buyer and lines as issued, its currency and
+ * total, without VAT. Never changed nor deleted.
+ */
+export interface PartnerInvoicesTable {
+  id: Generated<string>;
+  kind: PartnerInvoiceKind;
+  year: number;                        // smallint 2000..2099, the UTC year of issue
+  sequence: number;                    // 1..999 999
+  experience_id: string;
+  credits_invoice_id: ColumnType<string | null, string | null | undefined, string | null>;
+  issuer: Jsonb<JsonObject>;
+  buyer: Jsonb<JsonObject>;
+  lines: Jsonb<JsonValue[]>;
+  currency: HouseCurrency;
+  total_minor: number;                 // bigint 1..PARTNER_AMOUNT_MINOR_MAX
+  issued_at: TimestampDefault;
+  issued_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id; null for a script
+}
+
+/**
+ * The conversions' switch and settings (migration 0065, K27 A1; one row, id 1, written at the console's first save; no
+ * row reads as off). `events_from`: set at the first switch on, never moved after (no act before it is sent); on needs
+ * it. `switched_at` / `switched_by`: the last switch, on or off. Each platform's test event code; the Google Ads
+ * conversion action of each act (ADS_GOOGLE_ACTION_PATTERN); the sender's watermark. updated_at is stamped on every update.
+ */
+export interface AdsSettingsTable {
+  id: WithDefault<number>;             // smallint, always 1
+  enabled: WithDefault<boolean>;       // false: off
+  events_from: TimestampNullable;
+  switched_at: TimestampNullable;
+  switched_by: NullableAdmin;
+  meta_test_event_code: NullableText;  // ≤ ADS_TEST_EVENT_CODE_MAX, one line
+  tiktok_test_event_code: NullableText; // ≤ ADS_TEST_EVENT_CODE_MAX, one line
+  google_action_signup: NullableText;
+  google_action_draw_entry: NullableText;
+  google_action_live_entry: NullableText;
+  google_action_paid_order: NullableText;
+  /** The sender's watermark: conversions written and orders paid up to it were judged (AdsService.enqueue). */
+  enqueued_until: TimestampNullable;
+  updated_by: NullableAdmin;
+  updated_at: TimestampDefault;
+}
+
+/** A link channel mapped to a platform (migration 0065, K27 A3): an act goes only to the platform the collector came from. */
+export interface AdsChannelPlatformsTable {
+  channel_id: string;
+  platform: AdsPlatform;
+}
+
+/**
+ * A collector's advertising choice (migration 0065, K27 A4), the proof of consent: on a device while signed out, on an
+ * account once known, or both (one at least). Never changed: a new choice is a new row, the latest counts. `user_agent`
+ * with a GRANTED choice only; `text_version` the advertising text's version shown ('YYYY-MM-DD').
+ */
+export interface AdConsentsTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  device_id: ColumnType<number | null, number | null | undefined, never>;
+  account_id: ColumnType<string | null, string | null | undefined, never>;
+  choice: AdConsentChoice;
+  source: AdConsentSource;
+  text_version: string;
+  user_agent: ColumnType<string | null, string | null | undefined, never>; // ≤ AD_USER_AGENT_MAX
+  chosen_at: TimestampDefault;
+}
+
+/**
+ * A platform's click id, stored with a GRANTED choice only (migration 0065, K27 A3 and A4): its device, its account once
+ * known, its kind, the id itself (1..AD_CLICK_ID_MAX printable characters, no space) and when; once per device, kind and
+ * id. Only account_id ever changes.
+ */
+export interface AdClicksTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  device_id: number;
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  kind: AdClickKind;
+  click_id: string;
+  clicked_at: Timestamp;
+}
+
+/**
+ * An event for one platform (migration 0065, K27 A3): the outbox, once per platform, conversion and act. QUEUED → SENT,
+ * FAILED (with its error) or CANCELLED, or SKIPPED with its reason; `sent_at` exactly when SENT, `settled_at` exactly
+ * when no longer QUEUED. id, platform, conversion_id, kind and created_at never change.
+ */
+export interface AdEventsTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  platform: AdsPlatform;
+  conversion_id: number;               // acquisition_conversions.id
+  kind: AdEventKind;
+  status: WithDefault<AdEventStatus>;  // DEFAULT QUEUED
+  skip_reason: ColumnType<AdSkipReason | null, AdSkipReason | null | undefined, AdSkipReason | null>;
+  attempts: WithDefault<number>;       // smallint ≥ 0
+  not_before: TimestampDefault;
+  last_error: ColumnType<string | null, string | null | undefined, string | null>; // ≤ AD_EVENT_ERROR_MAX
+  created_at: TimestampDefault;
+  sent_at: TimestampNullable;
+  settled_at: TimestampNullable;
 }
 
 /**
@@ -3801,6 +4106,18 @@ export interface Database {
   order_alert_settings: OrderAlertSettingsTable;
   club_program_settings: ClubProgramSettingsTable;
   shipping_rates: ShippingRatesTable;
+  currency_rates: CurrencyRatesTable;
+  shipping_cost_rates: ShippingCostRatesTable;
+  margin_unit_costs: MarginUnitCostsTable;
+  category_allowances: CategoryAllowancesTable;
+  partners: PartnersTable;
+  partner_experiences: PartnerExperiencesTable;
+  partner_invoices: PartnerInvoicesTable;
+  ads_settings: AdsSettingsTable;
+  ads_channel_platforms: AdsChannelPlatformsTable;
+  ad_consents: AdConsentsTable;
+  ad_clicks: AdClicksTable;
+  ad_events: AdEventsTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;

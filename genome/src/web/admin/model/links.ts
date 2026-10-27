@@ -47,6 +47,8 @@ export const LINKS_COPY = Object.freeze({
   lead: 'Links that bring people to verify.theorbes.com, and what each brought in. Test entrants, the team’s own accounts and the console’s own devices are never counted.',
   newLink: 'New link',
   channels: 'Channels',
+  /** Links → Ad platforms (lot M4 plan §3.5, K27): the server-side conversions' page, for every reader of Links. */
+  adPlatforms: 'Ad platforms',
   period: 'Period',
   currency: 'Currency',
   view: 'View',

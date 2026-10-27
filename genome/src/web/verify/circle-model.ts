@@ -16,6 +16,10 @@
  *    clock, the place, the places left) and the reader's answer, a poll's
  *    options and, once voted, its results; its links: a release's page, a
  *    model's sheet, an address of another site with its host.
+ *  - An invitation for a partner's experience (lot M4, K49 P2 and P3): WITH
+ *    <BRAND> under its kind, on its card and its page; on its page, once
+ *    the reader answered YES, the box that shares their name with the
+ *    partner and its line (shareNameModel).
  *
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, an address of this app only if it is one, and the link to
@@ -93,6 +97,15 @@ function eventLine(eventAt: string | null, place: string | null): string | null 
   return [`${t} UTC`, place && place.trim() ? upper(place) : ''].filter((x) => x.length > 0).join(' · ');
 }
 
+/** An invitation's partner as its line says it, WITH <BRAND> (lot M4, K49 P2); null for another kind or none. */
+function partnerOf(kind: CirclePostKind, p: { brand?: unknown } | null | undefined): string | null {
+  if (kind !== 'INVITATION' || !p || typeof p.brand !== 'string' || !p.brand.trim()) return null;
+  return upper(p.brand.trim());
+}
+
+/** The line of an invitation's partner: WITH <BRAND>; null without one. */
+const withLine = (brand: string | null): string | null => (brand === null ? null : CIRCLE.partner.with(brand));
+
 /** An invitation's experience in its words (CIRCLE.experience); null for another kind or none. */
 function experienceOf(kind: CirclePostKind, e: unknown): string | null {
   if (kind !== 'INVITATION' || typeof e !== 'string') return null;
@@ -106,6 +119,8 @@ export interface CircleCardModel {
   kindLabel: string;
   /** An invitation's experience (BP-19 T7), above its title: MEMBERS’ EVENING, LAUNCH PREVIEW, PARTNER EXPERIENCE; null otherwise. */
   experience: string | null;
+  /** An invitation for a partner's experience (lot M4, K49 P2): WITH <BRAND>, under its kind; null otherwise. */
+  partner: string | null;
   title: string;
   /** The day it was published: `3 OCT 2026`. */
   date: string;
@@ -159,6 +174,7 @@ export function circleCards(cards: readonly CircleCard[]): CircleCardModel[] {
       kind,
       kindLabel: CIRCLE.kind[kind],
       experience: experienceOf(kind, c.experience),
+      partner: withLine(partnerOf(kind, c.partner)),
       title,
       date: formatDate(c.publishedAt),
       reach: reachOf(c.minTier),
@@ -191,12 +207,38 @@ export interface PollModel {
   sentence: string;
 }
 
+/**
+ * The reader's name and an invitation's partner (lot M4, K49 P3), under YOUR ANSWER: the box SHARE MY NAME, <NAME>, WITH
+ * <BRAND> once the reader answered YES while answers are taken and the account has both its names, ticked or not, and
+ * its line; without both names, only the line that the number of guests is shared; once answers are closed, the choice
+ * as a line, no box; nothing before a YES.
+ */
+export interface ShareNameModel {
+  brand: string;
+  box: { label: string; on: boolean } | null;
+  line: string | null;
+}
+
+export function shareNameModel(brand: string, share: CirclePost['shareName'], answer: CircleAnswer | null, open: boolean): ShareNameModel {
+  const P = CIRCLE.partner;
+  const on = share?.on === true && answer === 'YES';
+  const name = share?.offered === true && typeof share.name === 'string' && share.name.trim() ? upper(share.name.trim()) : null;
+  if (answer !== 'YES') return { brand, box: null, line: null };
+  if (!open) return { brand, box: null, line: on ? P.shareOn(brand) : P.headcountOnly(brand) };
+  if (name === null) return { brand, box: null, line: P.headcountOnly(brand) };
+  return { brand, box: { label: P.share(name, brand), on }, line: on ? P.shareOn(brand) : P.shareOff(brand) };
+}
+
 export interface CirclePostModel {
   id: string;
   kind: CirclePostKind;
   kindLabel: string;
   /** As a card's: an invitation's experience, or null. */
   experience: string | null;
+  /** As a card's: WITH <BRAND> on an invitation for a partner's experience, or null. */
+  partner: string | null;
+  /** That invitation's box and line under YOUR ANSWER (lot M4, K49 P3); null on any other post. */
+  share: ShareNameModel | null;
   title: string;
   date: string;
   reach: string | null;
@@ -223,6 +265,8 @@ export function circlePostModel(p: CirclePost, offsetMinutes: number): CirclePos
     if (m && !photos.some((x) => x.src === m.src)) photos.push(m);
   }
   let invitation: InvitationModel | null = null;
+  let shareName: ShareNameModel | null = null;
+  const brand = partnerOf(kind, p.partner);
   const inv = p.invitation;
   if (kind === 'INVITATION' && inv && typeof inv.eventAt === 'string') {
     const when = twoClocks(inv.eventAt, offsetMinutes);
@@ -238,6 +282,7 @@ export function circlePostModel(p: CirclePost, offsetMinutes: number): CirclePos
       full,
       sentence: !open ? a.closed : answer === 'YES' ? a.yes : full ? a.full : answer === 'NO' ? a.no : a.none,
     };
+    if (brand !== null) shareName = shareNameModel(brand, p.shareName, answer, open);
   }
   let poll: PollModel | null = null;
   if (kind === 'POLL' && p.poll && Array.isArray(p.poll.options)) {
@@ -260,6 +305,8 @@ export function circlePostModel(p: CirclePost, offsetMinutes: number): CirclePos
     kind,
     kindLabel: CIRCLE.kind[kind],
     experience: experienceOf(kind, p.experience),
+    partner: withLine(brand),
+    share: shareName,
     title,
     date: formatDate(p.publishedAt),
     reach: reachOf(p.minTier),

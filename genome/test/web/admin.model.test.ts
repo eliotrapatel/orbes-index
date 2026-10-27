@@ -28,7 +28,7 @@ import {
   SECOND_PIECE_BUCKETS as SERVER_SECOND_PIECE_BUCKETS,
 } from '../../src/server/services/growth.js';
 import { CLUB_TIER_THRESHOLDS as CLUB_TIER_THRESHOLDS_FOR_GROWTH } from '../../src/server/services/club.js';
-import { parseHash } from '../../src/web/admin/router.js';
+import { href, parseHash } from '../../src/web/admin/router.js';
 import { PAIRS_FALLBACK_MAX } from '../../src/server/services/lookbook.js';
 import {
   canTick,
@@ -510,6 +510,23 @@ describe('admin enums mirror the server', () => {
     // THE SET's bounds (macro scope K44, migration 0057), as the server holds them.
     for (const name of ['SET_NAME_MAX', 'SET_PIECES_MIN', 'SET_PIECES_MAX', 'SET_PRICE_MINOR_MAX', 'DROP_SIZE_POSITION_MAX'] as const) expect(web[name], name).toBe(serverSchema[name]);
     expect(web.SET_CODE_PATTERN.source).toBe(serverSchema.SET_CODE_PATTERN.source);
+    // The margin's settings (macro scope K43, migration 0063): a rate's, a band's, a cost's and an allowance's bounds, the
+    // margin's currency and the unit costs' keys (THE VAULT CARD among them, D61), as the server holds them.
+    for (const name of ['CURRENCY_RATE_MAX', 'CURRENCY_RATE_DECIMALS', 'SHIPMENT_WEIGHT_G_MAX', 'MARGIN_COST_MINOR_MAX', 'ALLOWANCE_BP_MAX', 'MARGIN_CURRENCY'] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect([...web.MARGIN_UNIT_COST_KEYS]).toEqual([...serverSchema.MARGIN_UNIT_COST_KEYS]);
+    // Partner-paid experiences (macro scope K49, migration 0064): the partner's and the experience's bounds, the states and
+    // the invoice kinds, as the server holds them.
+    for (const name of [
+      'PARTNER_BRAND_MAX', 'PARTNER_NAME_MAX', 'PARTNER_EMAIL_MAX', 'PARTNER_PHONE_MAX', 'PARTNER_BILLING_ADDRESS_MAX', 'PARTNER_COMPANY_NUMBER_MAX',
+      'PARTNER_NOTE_MAX', 'PARTNER_EXPERIENCE_TITLE_MAX', 'PARTNER_AMOUNT_MINOR_MAX',
+    ] as const) expect(web[name], name).toBe(serverSchema[name]);
+    expect([...web.PARTNER_EXPERIENCE_STATUSES]).toEqual([...serverSchema.PARTNER_EXPERIENCE_STATUSES]);
+    expect([...web.PARTNER_INVOICE_KINDS]).toEqual([...serverSchema.PARTNER_INVOICE_KINDS]);
+    // The server-side conversions (macro scope K27, migration 0065): the platforms, the choices, the acts, the states, the
+    // reasons skipped, a test event code's bound and a Google Ads conversion action, as the server holds them.
+    for (const name of ['ADS_PLATFORMS', 'AD_CONSENT_CHOICES', 'AD_EVENT_KINDS', 'AD_EVENT_STATUSES', 'AD_SKIP_REASONS'] as const) expect([...web[name]], name).toEqual([...serverSchema[name]]);
+    expect(web.ADS_TEST_EVENT_CODE_MAX).toBe(serverSchema.ADS_TEST_EVENT_CODE_MAX);
+    expect(web.ADS_GOOGLE_ACTION_PATTERN.source).toBe(serverSchema.ADS_GOOGLE_ACTION_PATTERN.source);
     expect([...web.AUTH_POLICY_KINDS]).toEqual([...SERVER_POLICY_KINDS]);
     expect([...web.ANOMALY_SORTS]).toEqual([...SERVER_ANOMALY_SORTS]);
     expect([...web.SCAN_STAT_EVENT_TYPES]).toEqual([...serverSchema.SCAN_STAT_EVENT_TYPES]);
@@ -3601,9 +3618,9 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
   });
 
   it('reads its state from the query, the defaults for anything the server would refuse', () => {
-    expect(growthParams({})).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', page: 1 });
-    expect(growthParams({ months: '24', currency: 'GBP', ltv: 'model', rev: 'country', page: '3' })).toEqual({ months: 24, currency: 'GBP', ltv: 'model', rev: 'country', page: 3 });
-    expect(growthParams({ months: '6', currency: 'JPY', ltv: 'x', rev: 'tier', page: '-1' })).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', page: 1 });
+    expect(growthParams({})).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', mg: 'model', page: 1 });
+    expect(growthParams({ months: '24', currency: 'GBP', ltv: 'model', rev: 'country', mg: 'tier', page: '3' })).toEqual({ months: 24, currency: 'GBP', ltv: 'model', rev: 'country', mg: 'tier', page: 3 });
+    expect(growthParams({ months: '6', currency: 'JPY', ltv: 'x', rev: 'tier', mg: 'release', page: '-1' })).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', mg: 'model', page: 1 });
   });
 
   it('writes amounts in the house\'s money, a withheld one as —, and the four figures', () => {
@@ -3707,6 +3724,37 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
     expect(can('ADMIN', 'readGrowth')).toBe(true);
     expect(can('RETAIL', 'readGrowth')).toBe(false);
     expect(parseHash('#/growth?months=24').name).toBe('growth');
+  });
+
+  it('Margin settings (lot M4 plan §1.3, step M4.4): its route under Growth, read by every reader of Growth, written by an ADMIN (manageMargin, as the server); the Margin\'s tab `mg` in Growth\'s address, left out by default', () => {
+    expect(href('marginSettings')).toBe('#/growth/margin-settings');
+    expect(parseHash('#/growth/margin-settings').name).toBe('marginSettings');
+    expect(parseHash('#/growth?months=24&mg=channel')).toMatchObject({ name: 'growth', query: { months: '24', mg: 'channel' } });
+    expect(CAPABILITY_MIN_ROLE.manageMargin).toBe('ADMIN');
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'manageMargin'))).toEqual([false, false, false, false, true]);
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'readGrowth'))).toEqual([false, false, true, true, true]);
+    expect(growthParams({}).mg).toBe('model');
+    expect(['model', 'channel', 'tier', 'release', 'x'].map((mg) => growthParams({ mg }).mg)).toEqual(['model', 'channel', 'tier', 'model', 'model']);
+  });
+
+  it('Club → Partners (lot M4 plan §2.3, step M4.7): its three routes under Club, read by every reader of the Club, recorded by an OPERATOR (managePartners), invoiced by an ADMIN (invoicePartners), as the server', () => {
+    expect([href('clubPartners'), href('clubPartner', { partnerId: 'p1' }), href('partnerExperience', { experienceId: 'e1' })]).toEqual(['#/club/partners', '#/club/partners/p1', '#/club/partner-experiences/e1']);
+    expect(['#/club/partners', '#/club/partners/p1', '#/club/partner-experiences/e1', '#/club/circle/c1'].map((x) => parseHash(x).name)).toEqual(['clubPartners', 'clubPartner', 'partnerExperience', 'circlePost']);
+    expect([CAPABILITY_MIN_ROLE.managePartners, CAPABILITY_MIN_ROLE.invoicePartners]).toEqual(['OPERATOR', 'ADMIN']);
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => can(r, 'read'))).toEqual([false, false, true, true, true]);
+  });
+
+  it('Links → Ad platforms (lot M4 plan §3.5, step M4.12): its route under Links, before a link\'s page, read by every reader of Links, changed by an ADMIN (manageAdPlatforms), as the server', () => {
+    expect(href('adPlatforms')).toBe('#/links/ads');
+    expect(['#/links/ads', '#/links/collectors', '#/links/l1'].map((x) => parseHash(x).name)).toEqual(['adPlatforms', 'linkCollectors', 'link']);
+    expect(CAPABILITY_MIN_ROLE.manageAdPlatforms).toBe('ADMIN');
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).map((r) => [can(r, 'readLinks'), can(r, 'manageAdPlatforms')])).toEqual([
+      [false, false],
+      [false, false],
+      [true, false],
+      [true, false],
+      [true, true],
+    ]);
   });
 });
 

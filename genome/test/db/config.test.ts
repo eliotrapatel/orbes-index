@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, configWarnings, DEFAULT_ANOMALY_CONFIG, loadConfig, redactConfig, testConfig } from '../../src/server/config.js';
+import { ADS_ENV, ConfigError, configWarnings, DEFAULT_ANOMALY_CONFIG, loadConfig, redactConfig, testConfig } from '../../src/server/config.js';
+
+const GENOME = join(import.meta.dirname, '..', '..');
 
 const KEY32 = Buffer.alloc(32, 7).toString('base64url'); // 'BwcH…' (43 chars, no padding)
 const RANDOMISH_KEY = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 0xff)).toString('base64url');
@@ -377,6 +381,84 @@ describe('loadConfig — operations settings', () => {
     for (const value of ['hello@theorbes.com', 'clientservices@theorbes.com', 'apikey', 'smtp-Secret-0123456789']) expect(text).not.toContain(value);
     expect(redactConfig(loadConfig({})).email).toEqual({ transport: 'off' });
     expect(configWarnings(loadConfig({ ...PROD, ...SMTP }))).toEqual([]);
+  });
+
+  it('ADS_* (lot M4, K27 A2 and A5): no platform by default; a platform\'s keys all together, a missing one named; each validated; masked in the log', () => {
+    const META = { ADS_META_DATASET_ID: '123456789012345', ADS_META_ACCESS_TOKEN: 'meta-Secret-Token-0123456789' };
+    const TIKTOK = { ADS_TIKTOK_PIXEL_CODE: 'CTESTPIXEL0123', ADS_TIKTOK_ACCESS_TOKEN: 'tiktok-Secret-Token-0123456789' };
+    const GOOGLE = {
+      ADS_GOOGLE_CUSTOMER_ID: '123-456-7890',
+      ADS_GOOGLE_DEVELOPER_TOKEN: 'google-Developer-Token-0123',
+      ADS_GOOGLE_CLIENT_ID: 'orbes-ads.apps.googleusercontent.com',
+      ADS_GOOGLE_CLIENT_SECRET: 'google-Client-Secret-0123',
+      ADS_GOOGLE_REFRESH_TOKEN: '1//google-Refresh-Token-0123',
+    };
+    // None set (or set empty): no platform is ready, in every environment.
+    expect(loadConfig({}).ads).toEqual({ meta: null, tiktok: null, google: null });
+    expect(loadConfig({ ...PROD, ADS_META_DATASET_ID: '', ADS_META_ACCESS_TOKEN: '  ' }).ads).toEqual({ meta: null, tiktok: null, google: null });
+    expect(testConfig().ads).toEqual({ meta: null, tiktok: null, google: null });
+    // All of a platform's keys: ready; the Google customer kept as its digits, the login customer optional.
+    expect(loadConfig({ ...PROD, ...META, ...TIKTOK, ...GOOGLE }).ads).toEqual({
+      meta: { datasetId: '123456789012345', accessToken: 'meta-Secret-Token-0123456789' },
+      tiktok: { pixelCode: 'CTESTPIXEL0123', accessToken: 'tiktok-Secret-Token-0123456789' },
+      google: {
+        customerId: '1234567890',
+        loginCustomerId: null,
+        developerToken: 'google-Developer-Token-0123',
+        clientId: 'orbes-ads.apps.googleusercontent.com',
+        clientSecret: 'google-Client-Secret-0123',
+        refreshToken: '1//google-Refresh-Token-0123',
+      },
+    });
+    expect(loadConfig({ ...GOOGLE, ADS_GOOGLE_LOGIN_CUSTOMER_ID: '1112223333' }).ads.google).toMatchObject({ loginCustomerId: '1112223333' });
+    expect(loadConfig({ ...TIKTOK }).ads).toMatchObject({ meta: null, google: null });
+    // Some but not all: refused at start, each missing variable named, never a value.
+    expect(issues({ ADS_META_DATASET_ID: '123' })).toEqual(['ADS_META_ACCESS_TOKEN: required when another ADS_META_* key is set (a platform\'s keys go together)']);
+    expect(issues({ ADS_META_ACCESS_TOKEN: 'meta-Secret-Token-0123456789' })).toEqual(['ADS_META_DATASET_ID: required when another ADS_META_* key is set (a platform\'s keys go together)']);
+    expect(issues({ ...TIKTOK, ADS_TIKTOK_PIXEL_CODE: undefined }).map((i) => i.split(':')[0])).toEqual(['ADS_TIKTOK_PIXEL_CODE']);
+    expect(issues({ ...GOOGLE, ADS_GOOGLE_CLIENT_SECRET: undefined, ADS_GOOGLE_REFRESH_TOKEN: undefined }).map((i) => i.split(':')[0])).toEqual(['ADS_GOOGLE_CLIENT_SECRET', 'ADS_GOOGLE_REFRESH_TOKEN']);
+    expect(issues({ ADS_GOOGLE_LOGIN_CUSTOMER_ID: '1112223333' }).map((i) => i.split(':')[0])).toEqual([
+      'ADS_GOOGLE_CUSTOMER_ID',
+      'ADS_GOOGLE_DEVELOPER_TOKEN',
+      'ADS_GOOGLE_CLIENT_ID',
+      'ADS_GOOGLE_CLIENT_SECRET',
+      'ADS_GOOGLE_REFRESH_TOKEN',
+    ]);
+    expect(issues({ ...PROD, ...META, ADS_TIKTOK_ACCESS_TOKEN: 'x-token' }).map((i) => i.split(':')[0])).toEqual(['ADS_TIKTOK_PIXEL_CODE']);
+    // Each value validated, the variable named, never the value.
+    for (const [name, bad] of [
+      ['ADS_META_DATASET_ID', 'pixel-12'],
+      ['ADS_META_ACCESS_TOKEN', 'with space-secret-value'],
+      ['ADS_TIKTOK_PIXEL_CODE', 'C-1'],
+      ['ADS_GOOGLE_CUSTOMER_ID', '98-765-4321'],
+      ['ADS_GOOGLE_LOGIN_CUSTOMER_ID', '12345678901'],
+      ['ADS_GOOGLE_REFRESH_TOKEN', `x${'y'.repeat(1_024)}`],
+    ] as const) {
+      const env = { ...META, ...TIKTOK, ...GOOGLE, [name]: bad };
+      const found = issues(env);
+      expect(found.map((i) => i.split(':')[0]), name).toEqual([name]);
+      expect(found.join(' '), name).not.toContain(bad);
+    }
+    // The log says which platforms have their keys, never a key nor an id.
+    const c = loadConfig({ ...PROD, ...META, ...GOOGLE, ADS_GOOGLE_LOGIN_CUSTOMER_ID: '1112223333' });
+    expect(redactConfig(c).ads).toEqual({ meta: '[set]', tiktok: undefined, google: '[set]' });
+    const text = JSON.stringify(redactConfig(c));
+    for (const value of [...Object.values(META), ...Object.values(GOOGLE), '1234567890', '1112223333']) expect(text).not.toContain(value);
+    expect(redactConfig(loadConfig({})).ads).toEqual({ meta: undefined, tiktok: undefined, google: undefined });
+    expect(configWarnings(c)).toEqual([]);
+  });
+
+  it('genome/.env.example documents the ten ADS_* keys, commented and empty, and where they go', () => {
+    const example = readFileSync(join(GENOME, '.env.example'), 'utf8');
+    const names = [...example.matchAll(/^# (ADS_[A-Z_]+)=$/gm)].map((m) => m[1]);
+    expect(names).toEqual([...ADS_ENV.meta, ...ADS_ENV.tiktok, ...ADS_ENV.google]);
+    expect(names).toHaveLength(10);
+    expect(example).not.toMatch(/^ADS_/m);
+    const prose = example.replace(/\n# /g, ' ');
+    expect(prose).toContain("Keys go in the server's .env, never in chat; the deployment that switches conversions on passes them to the app (deploy/vps/compose.yaml) and opens its route out.");
+    // config.ts reads every one of them.
+    const source = readFileSync(join(GENOME, 'src', 'server', 'config.ts'), 'utf8');
+    for (const name of names) expect(source, name).toContain(`e.${name}`);
   });
 
   it('RATE_LIMIT_API_PER_MINUTE is the budget of the api route group, separate from the admin one', () => {

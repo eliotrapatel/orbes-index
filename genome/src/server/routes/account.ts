@@ -32,7 +32,7 @@ import { forbidden } from '../errors.js';
 import { connectionPlace } from '../geo/place.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddonParams, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, orderAddonBody, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, vaultBuyBody, vaultClaimBody, vaultGiftParams, vaultLiveParams, vaultParams, warrantyClaimParams } from '../http/schemas.js';
+import { adsConsentBody, accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddonParams, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, orderAddonBody, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emailPreferencesBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody, resetRequestBody, vaultBuyBody, vaultClaimBody, vaultGiftParams, vaultLiveParams, vaultParams, warrantyClaimParams } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { emailOff } from '../services/email.js';
@@ -602,5 +602,22 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     await vault.claim(account.id, id, { ...(b.size !== undefined ? { size: b.size } : {}), ...(b.address ? { address: b.address as OrderAddressInput } : {}) });
     noStore(reply);
     return { order: await orders.accountOrder(account.id, id) };
+  });
+
+  // ADVERTISING MEASUREMENT (lot M4 plan §3.2, §3.4; K27 A4): the account's own choice, shown only while the conversions
+  // are on (409 ADS_OFF while off, as the release notices' EMAIL_OFF); OFF (DECLINED) withdraws it at any time, cancelling
+  // what is queued and every later event. The rate group of the credentials (`auth`); CSRF on the PUT, as every change.
+  app.get('/api/v1/account/ads-consent', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    await ctx.services.ads.requireOn();
+    noStore(reply);
+    return { ads: await ctx.services.ads.state(null, account.id) };
+  });
+
+  app.put('/api/v1/account/ads-consent', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const b = parse(adsConsentBody, request.body);
+    noStore(reply);
+    return { ads: await ctx.services.ads.choose({ deviceId: null, accountId: account.id, choice: b.choice, source: 'ACCOUNT', userAgent: userAgentOf(request) }) };
   });
 };

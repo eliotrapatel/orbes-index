@@ -22,9 +22,10 @@ import { validationError } from '../errors.js';
 
 /**
  * The entities the journal names; since plan NEXT LOT §3.5 (step 5.6), a supplier order too (its lines and prices:
- * internal), and (step 5.9) a parcel's shipment for its packing photo erased (`shipment.photo.erase`, never the photo).
+ * internal), and (step 5.9) a parcel's shipment for its packing photo erased (`shipment.photo.erase`, never the photo);
+ * since lot M4 (K49 P1, P4), a partner invoice or its credit note (`partner_invoice.issue`, `.credit`: never its buyer).
  */
-export const JOURNAL_ENTITY_TYPES = Object.freeze(['order', 'stock_movement', 'bench_item', 'product', 'invoice', 'supplier_order', 'shipment'] as const);
+export const JOURNAL_ENTITY_TYPES = Object.freeze(['order', 'stock_movement', 'bench_item', 'product', 'invoice', 'supplier_order', 'shipment', 'partner_invoice'] as const);
 export type JournalEntityType = (typeof JOURNAL_ENTITY_TYPES)[number];
 
 /** A connection that reads the journal names itself so: lower case, 1 to 32 characters. */

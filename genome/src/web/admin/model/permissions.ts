@@ -8,7 +8,8 @@
  * ended, a returned piece archived, the settings of the
  * orders: their delays, the locations, the carriers and the shipping rates; a
  * conversation of the Messages board assigned; THE PROGRAM of the club's tiers; the defaults of THE HOUSE'S
- * GUARANTEE). Every role
+ * GUARANTEE; a partner's invoice issued, its payment recorded, an invoiced experience cancelled; the ad platforms' switch,
+ * channels, Google actions, test codes and test event). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -30,6 +31,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   read: 'AUDITOR',
   /** Growth (plan NEXT-NINE, BP-29): the report and COLLECTORS BY VALUE, the emails masked for an AUDITOR; never RETAIL. */
   readGrowth: 'AUDITOR',
+  /**
+   * Margin settings (lot M4 plan §1.3, K43 N1 and N2): the euro rates, the shipping cost bands, the pouch and card,
+   * the allowances, the care and claim costs, written as Orders → Settings is (server: ADMIN). Every reader of Growth reads them.
+   */
+  manageMargin: 'ADMIN',
   verifyAudit: 'AUDITOR',
   /** Customers' emails in clear (the server masks them for an AUDITOR: j***@example.com). */
   readClientEmails: 'OPERATOR',
@@ -71,6 +77,14 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   runTestEntrants: 'ADMIN',
   /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
   manageCircle: 'OPERATOR',
+  /**
+   * Club → Partners (lot M4 plan §2.3, K49 P1 to P4; routes/admin/partners.ts): a partner recorded, changed, set aside
+   * and reinstated; an experience recorded and changed, a DRAFT cancelled; the guests' names and their list. An AUDITOR
+   * reads, the contact's email and phone masked and the guests counted only.
+   */
+  managePartners: 'OPERATOR',
+  /** ISSUE THE INVOICE, RECORD PAYMENT (or its date corrected), and an invoiced or paid experience cancelled with its credit note. */
+  invoicePartners: 'ADMIN',
   /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */
   manageClubTiers: 'OPERATOR',
   /** THE PROGRAM (plan NEXT-NINE, BP-19 T2): every figure of the tiers' benefits (never a threshold). */
@@ -168,6 +182,12 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   readLinks: 'AUDITOR',
   /** Links: New link, Edit, Archive and Unarchive, the Channels (added, renamed, moved, removed while unused). */
   manageLinks: 'OPERATOR',
+  /**
+   * Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5; routes/admin/ads.ts): SWITCH ON / SWITCH OFF with the typed
+   * phrase, a channel's platforms, the Google conversion actions, the test codes and SEND A TEST EVENT. Every reader of
+   * Links reads the page (keys present or missing, never a key; no account, no email).
+   */
+  manageAdPlatforms: 'ADMIN',
   /** The Founding list (plan MACRO M1 §3.2, F3): its figures and its people, the emails masked for an AUDITOR. */
   readFounding: 'AUDITOR',
   /** The Founding list's CSV, in a Shopify customers import's columns (server: OPERATOR). */

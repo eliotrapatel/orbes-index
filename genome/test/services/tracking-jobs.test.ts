@@ -354,7 +354,7 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       lines.length = 0;
       const failed = await hk.runOnce();
       expect(Object.keys(failed)).toEqual([
-        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'birthdayCredits', 'houseMoments', 'vaults', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'emailPurge', 'wornEnded', 'sizes',
+        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'birthdayCredits', 'houseMoments', 'vaults', 'acquisitionConversions', 'adsEnqueue', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'adsPurge', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'emailPurge', 'wornEnded', 'sizes',
       ]);
       expect(failed).toMatchObject({ viewStats: 0, viewPurge: 0, devicePurge: 0 });
       expect(await h.t.db.selectFrom('tracking_devices').select('id').where('id', '=', old).execute()).toHaveLength(1);

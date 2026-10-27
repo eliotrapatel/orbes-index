@@ -28,6 +28,8 @@ import type {
   AccountMessage,
   AccountSizes,
   DeliveryAddressInput,
+  AdsChoice,
+  AdsConsentState,
   EmailPreferences,
   OrderCaseRequest,
   AccountThread,
@@ -726,9 +728,14 @@ export class ApiClient {
     return this.request<CirclePost>('GET', `/api/v1/club/circle/${encodeURIComponent(id)}`);
   }
 
-  /** YES or NO to an invitation, until its event begins (409 CIRCLE_FULL past its places). Answered with the post. */
-  circleAnswer(id: string, answer: CircleAnswer): Promise<CirclePost> {
-    return this.request<CirclePost>('POST', `/api/v1/club/circle/${encodeURIComponent(id)}/rsvp`, { answer }, { csrf: true });
+  /**
+   * YES or NO to an invitation, until its event begins (409 CIRCLE_FULL past its places). Answered with the post. On an
+   * invitation for a partner's experience (lot M4, K49 P3), `shareName` shares the reader's name with its partner (true,
+   * with a YES) or stops sharing it (false); left out, a YES keeps the choice as it was.
+   */
+  circleAnswer(id: string, answer: CircleAnswer, opts: { shareName?: boolean } = {}): Promise<CirclePost> {
+    const body = opts.shareName === undefined ? { answer } : { answer, shareName: opts.shareName };
+    return this.request<CirclePost>('POST', `/api/v1/club/circle/${encodeURIComponent(id)}/rsvp`, body, { csrf: true });
   }
 
   /** One vote in a poll, by the index of its option; final. Answered with the post, its results shown. */
@@ -826,6 +833,33 @@ export class ApiClient {
   /** EMAIL ME WHEN A RELEASE IS ANNOUNCED switched; the choice as saved. */
   async setReleaseNotices(on: boolean): Promise<EmailPreferences> {
     return checkedPreferences(await this.request<EmailPreferences>('PUT', '/api/v1/account/email-preferences', { releaseNotices: on }, { csrf: true }));
+  }
+
+  /**
+   * The advertising choice (lot M4 plan §3.3; K27 A4): `{ on, choice, textVersion }`, no session needed (the device's
+   * choice, the account's when signed in). Off: `on` false, nothing more.
+   */
+  async consent(): Promise<AdsConsentState> {
+    return checkedAds(await this.request<{ ads?: AdsConsentState }>('GET', '/api/v1/consent'));
+  }
+
+  /**
+   * The banner's ACCEPT (GRANTED) or DECLINE (DECLINED), with the click ids the address carried (kept by the server only
+   * with GRANTED; none sent with DECLINED); same origin, no CSRF token (as /api/v1/seen). 409 ADS_OFF while off.
+   */
+  async chooseConsent(choice: AdsChoice, clicks: Readonly<Record<string, string>> | null): Promise<AdsConsentState> {
+    const body = choice === 'GRANTED' && clicks && Object.keys(clicks).length > 0 ? { choice, clicks } : { choice };
+    return checkedAds(await this.request<{ ads?: AdsConsentState }>('POST', '/api/v1/consent', body));
+  }
+
+  /** YOUR PROFILE's ADVERTISING MEASUREMENT, as the account holds it; 409 ADS_OFF while conversions are switched off. */
+  async accountAdsConsent(): Promise<AdsConsentState> {
+    return checkedAds(await this.request<{ ads?: AdsConsentState }>('GET', '/api/v1/account/ads-consent'));
+  }
+
+  /** ADVERTISING MEASUREMENT switched: ON (GRANTED) or OFF (DECLINED); the choice as saved. */
+  async setAccountAdsConsent(choice: AdsChoice): Promise<AdsConsentState> {
+    return checkedAds(await this.request<{ ads?: AdsConsentState }>('PUT', '/api/v1/account/ads-consent', { choice }, { csrf: true }));
   }
 
   /** What a STOP THESE EMAILS link stops, or null for a link the server does not recognise. */
@@ -1367,6 +1401,13 @@ function checkedWorn(r: PieceWorn | undefined): PieceWorn {
 function checkedPreferences(r: EmailPreferences | undefined): EmailPreferences {
   if (!r || typeof r.releaseNotices !== 'boolean' || (r.changedAt !== null && typeof r.changedAt !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
   return { releaseNotices: r.releaseNotices, changedAt: r.changedAt };
+}
+
+/** The advertising choice as the server answers it (`{ ads }`), or BAD_RESPONSE. */
+function checkedAds(r: { ads?: AdsConsentState } | undefined): AdsConsentState {
+  const a = r?.ads;
+  if (!a || typeof a.on !== 'boolean' || (a.choice !== null && a.choice !== 'GRANTED' && a.choice !== 'DECLINED') || typeof a.textVersion !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+  return { on: a.on, choice: a.on ? a.choice : null, textVersion: a.textVersion };
 }
 
 /** YOUR ADDRESSES as the server answers it, or BAD_RESPONSE. */

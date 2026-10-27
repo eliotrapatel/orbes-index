@@ -5681,6 +5681,202 @@ fieldset.cfield--checks > .cfield__label {
   }
 }
 
+/* ── Growth's Margin and Margin settings (lot M4 plan §1.3, K43, D61) ────────
+   Growth's paper and hairlines: four figures, a table per view whose cost columns stay on one line and scroll inside
+   their frame on a narrow screen, PERKS' three parts and THE VAULT's five under their totals, a loss in the critical
+   ink; THE VAULT's line and What is missing as hairline lists, each item with its figure or where it is fixed. Margin
+   settings: Orders → Settings' tables, a country's bands one under the other with their actions. */
+
+.margin__kpis {
+  margin-top: 18px;
+}
+
+.panel--growth-margin .table .col--wide {
+  width: auto;
+  min-width: 130px;
+}
+
+/* Thirteen columns on a computer's page: tighter gutters than the house's tables, and the heads allowed a second line
+   (CARE AND / WARRANTY) rather than pushing the table past its frame. That fits from 1 280 px; below (the rules after
+   .margin__perks), down to 1 024 px with its sidebar, a 712 px frame. */
+.panel--growth-margin .table th,
+.panel--growth-margin .table td {
+  padding-right: 14px;
+}
+
+.panel--growth-margin .table th {
+  white-space: normal;
+  letter-spacing: 0.2em;
+  vertical-align: bottom;
+}
+
+.panel--growth-margin .table th:last-child,
+.panel--growth-margin .table td:last-child {
+  padding-right: 0;
+}
+
+/* MARGIN % on one line, never its sign alone under it. */
+.panel--growth-margin .table th:last-child {
+  white-space: nowrap;
+}
+
+.margin__group {
+  display: block;
+}
+
+.margin__name {
+  display: block;
+}
+
+.margin__perks .cell-sub,
+.margin__vault .cell-sub {
+  white-space: nowrap;
+}
+
+/* Below 1 280 px, down to 1 024 px with the sidebar (a 712 px frame): the table a size smaller, gutters of 6 px, the
+   heads' tracking a third, the group's column narrower, each of PERKS' and THE VAULT's parts its amount under its
+   label and its label free to break between words (Credits / to give), so the thirteen columns keep Margin and
+   Margin % in the frame (the admin e2e's margin case holds it at 1 024 px). Far larger figures than the house's
+   today would scroll inside the frame again, as on a phone. */
+@media (max-width: 1279px) {
+  .panel--growth-margin .table {
+    font-size: var(--fs-label);
+    letter-spacing: 0.02em;
+  }
+
+  .panel--growth-margin .table th,
+  .panel--growth-margin .table td {
+    padding-right: 6px;
+  }
+
+  .panel--growth-margin .table th {
+    letter-spacing: 0.06em;
+  }
+
+  .panel--growth-margin .table .col--wide {
+    min-width: 96px;
+  }
+
+  .margin__part-amount {
+    display: block;
+  }
+
+  .margin__perks .cell-sub,
+  .margin__vault .cell-sub {
+    white-space: normal;
+  }
+}
+
+.margin__money--loss {
+  color: var(--critical);
+}
+
+.margin__partner {
+  margin-top: 22px;
+}
+
+.margin__list,
+.margin-bands {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.margin__list {
+  border-top: 1px solid var(--hairline);
+}
+
+.margin__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.margin__item-text {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.margin__figure {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The way to Club → THE VAULT's report: its sentence and its link, no hairline under. */
+.margin__item--link {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.margin__fix {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.margin-bands {
+  margin: 0;
+}
+
+.margin-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 18px;
+  padding: 4px 0;
+}
+
+.margin-band + .margin-band {
+  border-top: 1px solid var(--hairline);
+}
+
+.margin-band__text {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.margin-settings__line {
+  margin: 14px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.margin-settings__missing {
+  color: var(--ink-soft);
+}
+
+/* Its link to Boxes reads in the line's own size. */
+.margin-settings__line .idlink {
+  font-size: inherit;
+  letter-spacing: inherit;
+}
+
+/* On a phone, Margin's head and Margin settings' heads wrap as the Profile's: the note under the title, the tools on
+   their own line, so nothing runs past the screen's edge (390 px). */
+@media (max-width: 599px) {
+  #growth-margin > .panel__head,
+  .view--margin-settings .panel > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  #growth-margin > .panel__head .panel__tools,
+  .view--margin-settings .panel > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+}
+
 /* ── Links (plan CUSTOMER INTELLIGENCE §3.4 A.10) ─────────────────────────
    The first link and the last link side by side, a hairline between the groups; under 600 px one block per row,
    hairlines between, no cards, the period and the view as two selects. */
@@ -8033,4 +8229,281 @@ a.collectors__kpi-link:focus-visible {
 /* A row's actions as two pairs (Edit · Deactivate, Up · Down): on a narrow screen the pairs wrap, never one button alone. */
 .table .col--wrap .row-actions.vault__pair {
   flex-wrap: nowrap;
+}
+
+/* ── Club → Partners (lot M4 plan §2.3, K49 P1 to P4) ───────────────────── */
+
+/* A long brand or title wraps, never cut, even without a space to break at. */
+.partners__brand,
+.partners__title {
+  overflow-wrap: anywhere;
+}
+
+.partners__contact-line {
+  display: block;
+}
+
+/* The billing details as the invoice prints them: one line each. */
+.partners__lines > span {
+  display: block;
+}
+
+.partners__note {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* A document's number, its day of issue and its PDF, on one line that wraps on a phone. */
+.partners__doc {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.partners__doc .cell-sub {
+  margin: 0;
+}
+
+.partners__guests {
+  margin: 0;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+/* Growth's Partner experiences: a line per currency over the window. */
+.growth__partner-totals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.growth__partner-totals .growth__headline {
+  margin-top: 6px;
+}
+
+/* On a phone, a partners page's panel heads wrap as the Profile's: the note under the title, then the tools (New
+   experience, ISSUE THE INVOICE, RECORD PAYMENT…) on their own line, so nothing runs past the screen's edge (390 px). */
+@media (max-width: 599px) {
+  .view--partners > .panel > .panel__head,
+  .view--partner > .panel > .panel__head,
+  .view--partner-experience > .panel > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .view--partners > .panel > .panel__head .panel__tools,
+  .view--partner > .panel > .panel__head .panel__tools,
+  .view--partner-experience > .panel > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+}
+
+/* ── Links → Ad platforms (lot M4 plan §3.5, K27 A1 to A5) ─────────────── */
+
+/* CONVERSIONS: OFF, the state's word beside its mark. */
+.adplat__state {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0 0;
+}
+
+.adplat__state-label {
+  font-size: var(--fs-label);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+/* A section's sentence: the off state, what a section counts, its rule. */
+.adplat__line {
+  max-width: 76ch;
+  margin: 12px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.adplat__line + .deflist,
+.adplat__line + .empty,
+.adplat__line + div > .empty {
+  margin-top: 6px;
+}
+
+/* The three platforms side by side on a desk, two at 1 024 px, one under the other on a phone. */
+.adplat__platforms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 32px 40px;
+  margin-top: 16px;
+}
+
+.adplat__platform {
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline-strong);
+}
+
+.adplat__platform-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.adplat__platform-name {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.adplat__platform-head .cell-sub {
+  margin: 0;
+}
+
+.adplat__keys {
+  flex-basis: 100%;
+  margin-top: 8px;
+}
+
+/* Queued · Sent · Failed · Skipped: four figures in a row, each over its word. */
+.adplat__counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 12px;
+  margin: 16px 0 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.adplat__count dt {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.adplat__count dd {
+  margin: 4px 0 0;
+  font-size: var(--fs-lead);
+  font-variant-numeric: tabular-nums;
+}
+
+.adplat__facts .deflist__row {
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.adplat__platform-tools {
+  margin-top: 14px;
+}
+
+.adplat__error,
+.adplat__action {
+  overflow-wrap: anywhere;
+}
+
+.adplat__figure {
+  font-variant-numeric: tabular-nums;
+}
+
+/* SEND A TEST EVENT's answer: the platform's words as it gave them, kept within the dialog. */
+.adplat__result {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 12px;
+}
+
+.adplat__result .cell-sub {
+  margin: 0;
+}
+
+.adplat__answer {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* CHANNELS: a channel, its three tick boxes and Save, one row each, hairlines between. */
+.adplat__channels {
+  margin-top: 8px;
+}
+
+.adplat__channel {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px 32px;
+  min-height: var(--row-h);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.adplat__channel-name {
+  overflow-wrap: anywhere;
+}
+
+.adplat__channel-boxes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+}
+
+.adplat__channel-platforms {
+  grid-column: 2 / -1;
+  color: var(--ink-soft);
+}
+
+.adplat__events .filters {
+  margin-top: 12px;
+}
+
+/* On a phone, the panel heads wrap (their tools on their own line), a channel's boxes go under its name with Save. */
+@media (max-width: 599px) {
+  .view--ad-platforms > .panel > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .view--ad-platforms > .panel > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+
+  .adplat__channel {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .adplat__channel-boxes {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .adplat__channel-platforms {
+    grid-column: 2;
+  }
+
+  .adplat__facts .deflist__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
+/* EVENTS: an error keeps a readable width; the table scrolls within its frame before it is squeezed (1 024 px). */
+.adplat__events .table td.col--wide {
+  min-width: 260px;
+  overflow-wrap: anywhere;
 }

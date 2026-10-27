@@ -237,7 +237,8 @@ describe('the engagement score\'s daily job (plan CUSTOMER INTELLIGENCE §3.5 SB
       await db().updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', (await db().selectFrom('account_scores').select('account_id').orderBy('account_id').executeTakeFirstOrThrow()).account_id).execute();
       lines.length = 0;
       const pass = await hk.runOnce();
-      expect(Object.keys(pass).slice(9, 16)).toEqual(['viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory']);
+      // After the conversions and lot M4's adsEnqueue (index 9).
+      expect(Object.keys(pass).slice(10, 17)).toEqual(['viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'engagement', 'collectorHistory', 'scanHistory']);
       expect(pass.viewStats).toBeGreaterThanOrEqual(1);
       expect(seen).toEqual([1]);
       // The rows changed: the row of the account deleted since the last run is removed.

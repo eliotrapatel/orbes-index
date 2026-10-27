@@ -117,7 +117,9 @@ import { unsubscribeView } from './views/unsubscribe.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
-import { readArrival, sendArrival, tabStorage } from './arrival.js';
+import { readArrival, readClicks, sendArrival, tabStorage } from './arrival.js';
+import { adsConsent, consentScreenAllowed } from './consent.js';
+import { ConsentBanner } from './views/consent-banner.js';
 import { seen } from './seen.js';
 import type { SeenAppState } from './seen-model.js';
 import { verifyingView } from './views/verifying.js';
@@ -360,6 +362,11 @@ class App {
   private pendingOrder: string | null = null;
   /** The banner of the LIVE RELEASES, over MY PIECES (and nowhere else: on NOW, the release leads the page). */
   private readonly banner = liveBannerView({ api: this.api, onRelease: (id) => this.openRelease(id) });
+  /**
+   * The consent banner (lot M4 plan §3.4; K27 A4): only while conversions are switched on and no choice is held, never
+   * on the screens consent.ts names (it waits for the next other one).
+   */
+  private readonly consentBanner = new ConsentBanner({ choose: (choice) => adsConsent.choose(choice) });
   /** NOCTURNE's chrome round the screen: the header and its account sheet, the rail, the footer, the SCAN ring. */
   private shell: Shell | null = null;
   /** The LIVE RELEASE's page on show shows its room (its own chrome): the recording's LIVE (plan CUSTOMER INTELLIGENCE §3.3 T.9). */
@@ -379,6 +386,9 @@ class App {
   private unsubscribeToken: string | null = null;
 
   start(): void {
+    // The ad platforms' click ids (lot M4 plan §3.3): read into memory only, the address left as it is until the
+    // advertising choice is known (consent.ts, started below once the first screen is drawn).
+    adsConsent.hold(readClicks(location));
     // Where the visit comes from (plan CUSTOMER INTELLIGENCE §3.4 A.9): `o` and the `utm_` tags read and taken out of the
     // address before the router's first replaceEntry, the referring page on the tab's first load; sent below.
     const arrival = readArrival(location, document, tabStorage(), history);
@@ -531,6 +541,7 @@ class App {
         },
         onHouse: (target) => this.openHouse(target),
         recoveryContact: async () => recoveryContactModel(await this.contactDetails(), '') ?? undefined,
+        consentBand: this.consentBanner.el,
       },
       this.host,
       this.banner.el,
@@ -758,6 +769,14 @@ class App {
     // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen; a
     // boutique board never scans, and is never recorded: its arrival is not sent.
     if (route === 'board') return;
+    // The advertising choice (lot M4 plan §3.3, §3.4): read once the first screen is under way; off, nothing shown or sent.
+    void adsConsent.start({
+      api: this.api,
+      location: () => location,
+      history,
+      onChange: () => this.drawConsent(),
+    });
+    this.session.subscribe(() => void adsConsent.session());
     // The arrival, once the first screen is drawn, in the recording's first batch (plan CUSTOMER INTELLIGENCE §3.4 A.9).
     const w = window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
     sendArrival(seen, arrival.arrival, {
@@ -1236,9 +1255,16 @@ class App {
     seen.screen(screen, this.seenState());
     // On NOW, the LIVE RELEASE the banner would name leads the page itself (C1): the banner is MY PIECES' PIECES tab's (C3).
     this.banner.show(screen === 'pieces' && this.piecesTab === 'pieces');
+    this.drawConsent();
     window.scrollTo(0, 0);
     if (focus) focusFirst(next);
     return true;
+  }
+
+  /** The consent banner: wanted (switched on, no choice held) and the screen on show one it may stand on. */
+  private drawConsent(): void {
+    // The screen drawn (none before the first one: the banner waits for it).
+    this.consentBanner.update(adsConsent.bannerWanted, consentScreenAllowed(document.body.dataset.screen ?? null));
   }
 
   /** What the recording reads beside the screen (seen-model.ts pageOf): the subject on show. */

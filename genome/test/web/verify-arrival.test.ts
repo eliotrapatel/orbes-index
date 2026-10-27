@@ -13,12 +13,21 @@
  *  - SeenQueue.arrive: the first batch carries it, alone with `e: []` when no view has finished, with the views waiting
  *    otherwise; one per page load (never on an in-app move); a 429 keeps it, a 400 drops it; never during a LIVE room but
  *    on a hide or a close; every batch one the server's schema takes, the arrival's fields kept by arrivalShape;
- *  - the recorder does nothing with it outside a browser (off: nothing sent).
+ *  - the recorder does nothing with it outside a browser (off: nothing sent);
+ *  - the ad platforms' click ids (lot M4 plan §3.3, §3.6 « test/web/verify-arrival.test.ts », step M4.13; arrival.ts
+ *    readClicks and cleanClicks, consent.ts AdsConsent): held in memory only, never in the arrival nor in storage; the
+ *    address untouched while conversions are switched off; taken out of it while on, once GRANTED or DECLINED; ACCEPT
+ *    sends them with the choice, DECLINE drops them; the screens the banner never covers.
  */
 import { describe, expect, it } from 'vitest';
 import { seenBody } from '../../src/server/http/schemas.js';
 import { ARRIVAL_DELAY_MS, ARRIVED_KEY, readArrival, sendArrival, type ArrivalEnv, type ArrivalHistory, type ArrivalLocation, type ArrivalStorage } from '../../src/web/verify/arrival.js';
-import { ApiClient } from '../../src/web/verify/api.js';
+import { ApiClient, ApiError } from '../../src/web/verify/api.js';
+import { AD_CLICK_ID_MAX, AD_CLICK_KINDS } from '../../src/server/db/schema.js';
+import { consentBody } from '../../src/server/http/schemas.js';
+import { CLICK_ID_MAX, CLICK_PARAMS, cleanClicks, readClicks, withoutClicks } from '../../src/web/verify/arrival.js';
+import { AdsConsent, CONSENT_NEVER_ON, consentScreenAllowed } from '../../src/web/verify/consent.js';
+import type { AdsChoice, AdsConsentState } from '../../src/web/verify/types.js';
 import { SeenQueue, type FinishedView, type SeenArrival, type SeenBatchBody, type SeenSendResult } from '../../src/web/verify/seen-model.js';
 import { seen } from '../../src/web/verify/seen.js';
 
@@ -344,5 +353,231 @@ describe('the recorder and the API with an arrival', () => {
     expect(calls[0]!.init).toMatchObject({ method: 'POST', keepalive: true, credentials: 'same-origin' });
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ v: 1, d: { s: false, t: 5, w: 390 }, a: { path: '/verify', link: 'instagram-bio' }, e: [] });
     expect(Object.keys(calls[0]!.init.headers as Record<string, string>).map((k) => k.toLowerCase())).not.toContain('x-csrf-token');
+  });
+});
+
+describe('the ad platforms\' click ids, read into memory only (lot M4 plan §3.3)', () => {
+  const CLICKED = '/verify/releases/7c21?ref=a%20b&fbclid=IwAR0abc_DEF-123&o=instagram-bio&gclid=Cj0KCQ&utm_source=ig&ttclid=E.C.P.xyz&x=1+2#top';
+
+  it('reads the five by their parameter, beside the arrival and never in it, the address and storage untouched', () => {
+    const h = historySpy({ screen: 'release', depth: 1 });
+    const storage = memory();
+    const loc = at(CLICKED);
+    expect(readClicks(loc)).toEqual({ fbclid: 'IwAR0abc_DEF-123', gclid: 'Cj0KCQ', ttclid: 'E.C.P.xyz' });
+    // readClicks reads only: no history, no storage.
+    expect(h.calls).toEqual([]);
+    const r = readArrival(loc, doc(), storage, h);
+    // The arrival keeps o and the utm_ tags only, and its address keeps the click ids byte for byte (ARRIVAL_PARAMS unchanged).
+    expect(r.arrival).toEqual({ path: '/verify/releases/7c21', link: 'instagram-bio', utm: { source: 'ig' } });
+    expect(JSON.stringify(r.arrival)).not.toMatch(/IwAR0abc|Cj0KCQ|E\.C\.P/);
+    expect(r.address).toBe('/verify/releases/7c21?ref=a%20b&fbclid=IwAR0abc_DEF-123&gclid=Cj0KCQ&ttclid=E.C.P.xyz&x=1+2#top');
+    expect([...storage.map.keys()]).toEqual([ARRIVED_KEY]);
+  });
+
+  it('keeps the first value each and leaves out what the server would refuse, its bounds the server\'s', () => {
+    expect(CLICK_ID_MAX).toBe(AD_CLICK_ID_MAX);
+    expect(CLICK_PARAMS.map((p) => p.toUpperCase())).toEqual([...AD_CLICK_KINDS]);
+    const long = 'x'.repeat(CLICK_ID_MAX + 1);
+    expect(readClicks(at(`/verify?gbraid=one&gbraid=two&wbraid=${long}&fbclid=&ttclid=a%20b&gclid=%E0%A4%A`))).toEqual({ gbraid: 'one' });
+    expect(readClicks(at(`/verify?wbraid=${'y'.repeat(CLICK_ID_MAX)}`)).wbraid).toHaveLength(CLICK_ID_MAX);
+    expect(readClicks(at('/verify'))).toEqual({});
+    // What is read is what the server's POST /api/v1/consent takes.
+    const clicks = readClicks(at(CLICKED));
+    expect(consentBody.safeParse({ choice: 'GRANTED', clicks }).success).toBe(true);
+  });
+
+  it('takes exactly the five out of the address as it stands, the rest byte for byte, nothing rewritten without them', () => {
+    expect(withoutClicks(at(CLICKED))).toBe('/verify/releases/7c21?ref=a%20b&o=instagram-bio&utm_source=ig&x=1+2#top');
+    expect(withoutClicks(at('/verify?gclid=a'))).toBe('/verify');
+    for (const address of ['/verify', '/verify/c#k=0123456789abcdef', '/verify?lang=en']) expect(withoutClicks(at(address)), address).toBeNull();
+    const h = historySpy({ screen: 'landing', depth: 0 });
+    cleanClicks(at('/verify?fbclid=1&x=2#f'), h);
+    expect(h.calls).toEqual([[{ screen: 'landing', depth: 0 }, '', '/verify?x=2#f']]);
+    const none = historySpy();
+    cleanClicks(at('/verify?x=2'), none);
+    expect(none.calls).toEqual([]);
+    const throwing: ArrivalHistory = { state: null, replaceState: () => { throw new Error('denied'); } };
+    expect(() => cleanClicks(at('/verify?fbclid=1'), throwing)).not.toThrow();
+  });
+});
+
+describe('the advertising choice and the click ids (lot M4 plan §3.3, §3.4; consent.ts)', () => {
+  const OFF: AdsConsentState = { on: false, choice: null, textVersion: '2026-10-26' };
+  const on = (choice: AdsChoice | null): AdsConsentState => ({ on: true, choice, textVersion: '2026-10-26' });
+  const ADDRESS = '/verify/circle?fbclid=IwAR0&x=1#top';
+
+  /** A consent wired to stubs: the server's answer, what was posted, the address and its history. */
+  function wired(answer: AdsConsentState | Error, post: (choice: AdsChoice) => AdsConsentState | Error = (c) => on(c)) {
+    const posted: { choice: AdsChoice; clicks: Readonly<Record<string, string>> | null }[] = [];
+    let address = at(ADDRESS);
+    const history: ArrivalHistory & { calls: unknown[][] } = {
+      state: { screen: 'circle', depth: 1 },
+      calls: [],
+      replaceState(...args: unknown[]) {
+        this.calls.push(args);
+        address = at(String(args[2]));
+      },
+    };
+    let changes = 0;
+    const consent = new AdsConsent();
+    consent.hold(readClicks(address));
+    const api = {
+      consent: async () => {
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+      chooseConsent: async (choice: AdsChoice, clicks: Readonly<Record<string, string>> | null) => {
+        posted.push({ choice, clicks: clicks ? { ...clicks } : null });
+        const r = post(choice);
+        if (r instanceof Error) throw r;
+        return r;
+      },
+    };
+    const start = () => consent.start({ api, location: () => address, history, onChange: () => void changes++ });
+    return { consent, posted, history, start, address: () => `${address.pathname}${address.search}${address.hash}`, changes: () => changes };
+  }
+
+  it('off: the click ids dropped from memory, the address left exactly as it is, nothing posted, no banner', async () => {
+    const w = wired(OFF);
+    expect(w.consent.held).toEqual({ fbclid: 'IwAR0' });
+    await w.start();
+    expect(w.consent.held).toBeNull();
+    expect(w.history.calls).toEqual([]);
+    expect(w.address()).toBe(ADDRESS);
+    expect(w.posted).toEqual([]);
+    expect(w.consent.bannerWanted).toBe(false);
+    expect(w.changes()).toBe(1);
+  });
+
+  it('a request that fails reads as off: nothing shown, nothing sent, the address untouched', async () => {
+    const w = wired(new ApiError(0, 'NETWORK', 'No answer.'));
+    await w.start();
+    expect([w.consent.held, w.consent.bannerWanted, w.posted, w.history.calls]).toEqual([null, false, [], []]);
+  });
+
+  it('on, GRANTED: sent once with the choice repeated, then taken out of the address', async () => {
+    const w = wired(on('GRANTED'));
+    await w.start();
+    expect(w.posted).toEqual([{ choice: 'GRANTED', clicks: { fbclid: 'IwAR0' } }]);
+    expect(w.address()).toBe('/verify/circle?x=1#top');
+    expect(w.history.calls[0]![0]).toEqual({ screen: 'circle', depth: 1 });
+    expect([w.consent.held, w.consent.bannerWanted]).toEqual([null, false]);
+    // A sign-in read again: nothing left to send.
+    await w.consent.session();
+    expect(w.posted).toHaveLength(1);
+  });
+
+  it('on, GRANTED without click ids: nothing posted, nothing rewritten', async () => {
+    const w = wired(on('GRANTED'));
+    w.consent.hold({});
+    await w.start();
+    expect([w.posted, w.consent.held]).toEqual([[], null]);
+    // On, a choice held: a click id's parameter left in the address (one not held) is taken out all the same.
+    expect(w.address()).toBe('/verify/circle?x=1#top');
+  });
+
+  it('on, DECLINED: dropped and taken out of the address, nothing posted', async () => {
+    const w = wired(on('DECLINED'));
+    await w.start();
+    expect([w.posted, w.consent.held, w.consent.bannerWanted]).toEqual([[], null, false]);
+    expect(w.address()).toBe('/verify/circle?x=1#top');
+  });
+
+  it('on, no choice: held in memory (the address as it is) until the banner\'s answer; ACCEPT sends them', async () => {
+    const w = wired(on(null));
+    await w.start();
+    expect(w.consent.bannerWanted).toBe(true);
+    expect(w.consent.held).toEqual({ fbclid: 'IwAR0' });
+    expect([w.posted, w.history.calls, w.address()]).toEqual([[], [], ADDRESS]);
+    await w.consent.choose('GRANTED');
+    expect(w.posted).toEqual([{ choice: 'GRANTED', clicks: { fbclid: 'IwAR0' } }]);
+    expect([w.consent.held, w.consent.bannerWanted, w.address()]).toEqual([null, false, '/verify/circle?x=1#top']);
+  });
+
+  it('on, no choice: DECLINE drops them (none posted with the choice) and takes them out of the address', async () => {
+    const w = wired(on(null));
+    await w.start();
+    await w.consent.choose('DECLINED');
+    expect(w.posted).toEqual([{ choice: 'DECLINED', clicks: null }]);
+    expect([w.consent.held, w.consent.bannerWanted, w.address()]).toEqual([null, false, '/verify/circle?x=1#top']);
+  });
+
+  it('a choice that could not be saved is thrown, the click ids kept for the next try; switched off meanwhile, as off', async () => {
+    let fail: Error | null = new ApiError(503, 'UNAVAILABLE', 'The service is unavailable.');
+    const w = wired(on(null), (c) => fail ?? on(c));
+    await w.start();
+    await expect(w.consent.choose('GRANTED')).rejects.toThrow('The service is unavailable.');
+    expect([w.consent.held, w.consent.bannerWanted, w.address()]).toEqual([{ fbclid: 'IwAR0' }, true, ADDRESS]);
+    fail = new ApiError(409, 'ADS_OFF', 'Off.');
+    await w.consent.choose('GRANTED');
+    expect([w.consent.held, w.consent.bannerWanted, w.consent.on]).toEqual([null, false, false]);
+    expect(w.address()).toBe(ADDRESS);
+    fail = null;
+  });
+
+  it('YOUR PROFILE\'s switch saved: the banner gone, the click ids dropped and taken out, none sent', async () => {
+    const w = wired(on(null));
+    await w.start();
+    w.consent.chosen('GRANTED');
+    expect([w.consent.held, w.consent.bannerWanted, w.posted, w.address()]).toEqual([null, false, [], '/verify/circle?x=1#top']);
+  });
+
+  it('never writes storage: nothing but the arrival\'s tab flag is kept by the page', () => {
+    const storage = memory();
+    readArrival(at(ADDRESS), doc(), storage, historySpy());
+    readClicks(at(ADDRESS));
+    expect([...storage.map.keys()]).toEqual([ARRIVED_KEY]);
+  });
+
+  it('never stands over the LIVE RELEASE\'s page, the scanner, a certificate, the reset, the board or THE VAULT page', () => {
+    for (const screen of ['live', 'scan', 'verifying', 'message', 'scanPage', 'certificate', 'reset', 'board', 'vault']) expect(consentScreenAllowed(screen), screen).toBe(false);
+    expect([...CONSENT_NEVER_ON].sort()).toEqual(['board', 'certificate', 'live', 'message', 'reset', 'scan', 'scanPage', 'vault', 'verifying']);
+    for (const screen of ['landing', 'pieces', 'piece', 'releases', 'release', 'circle', 'circlePost', 'club', 'account', 'order', 'messages']) expect(consentScreenAllowed(screen), screen).toBe(true);
+    expect(consentScreenAllowed(null)).toBe(false);
+  });
+
+  it('asks and answers through the API: GET /api/v1/consent, POST with the clicks only with GRANTED, same origin, no CSRF token', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const api = new ApiClient({
+      fetch: (async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return new Response(JSON.stringify({ ads: on(init.method === 'POST' ? (JSON.parse(String(init.body)) as { choice: AdsChoice }).choice : null) }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch,
+    });
+    expect(await api.consent()).toEqual(on(null));
+    expect(await api.chooseConsent('GRANTED', { gclid: 'Cj0' })).toEqual(on('GRANTED'));
+    expect(await api.chooseConsent('DECLINED', { gclid: 'Cj0' })).toEqual(on('DECLINED'));
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(['GET /api/v1/consent', 'POST /api/v1/consent', 'POST /api/v1/consent']);
+    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ choice: 'GRANTED', clicks: { gclid: 'Cj0' } });
+    expect(JSON.parse(String(calls[2]!.init.body))).toEqual({ choice: 'DECLINED' });
+    for (const c of calls) expect(Object.keys((c.init.headers ?? {}) as Record<string, string>).map((k) => k.toLowerCase())).not.toContain('x-csrf-token');
+    for (const b of calls.slice(1)) expect(consentBody.safeParse(JSON.parse(String(b.init.body))).success).toBe(true);
+  });
+});
+
+describe('the advertising choice read once (consent.ts ready)', () => {
+  it('settles once the choice is read, on or off, or found unreadable; YOUR PROFILE asks the account only while on', async () => {
+    for (const answer of [{ on: false, choice: null, textVersion: '2026-10-26' } as AdsConsentState, { on: true, choice: null, textVersion: '2026-10-26' } as AdsConsentState, new Error('no answer')]) {
+      const consent = new AdsConsent();
+      let settled = false;
+      void consent.ready.then(() => (settled = true));
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await consent.start({
+        api: {
+          consent: async () => {
+            if (answer instanceof Error) throw answer;
+            return answer;
+          },
+          chooseConsent: async () => ({ on: true, choice: 'GRANTED', textVersion: '2026-10-26' }),
+        },
+        location: () => ({ pathname: '/verify', search: '', hash: '' }),
+        history: { state: null, replaceState: () => undefined },
+        onChange: () => undefined,
+      });
+      await consent.ready;
+      expect(settled).toBe(true);
+      expect(consent.on).toBe(!(answer instanceof Error) && answer.on);
+    }
   });
 });

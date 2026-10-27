@@ -111,6 +111,11 @@ export const DESKTOP_MOVED: readonly DesktopMoved[] = [
       'account-sheet-stress',
       // Lot M1 (E2): YOUR PROFILE's release notices, on its page.
       'profile-release-notices',
+      // Lot M4 (step M4.13, K27 A4): YOUR PROFILE's ADVERTISING MEASUREMENT, on its page.
+      'ads-account-on',
+      'ads-account-on-light',
+      'ads-account-off',
+      'ads-account-error',
     ],
     reason: 'Decision 5: the account, MESSAGES and their sections are pages of their own on a computer, never a sheet over the page they were opened on.',
     now: 'On that page itself (NOW, or the piece WRITE TO ORBES CLIENT SERVICES was pressed on), at its own address.',

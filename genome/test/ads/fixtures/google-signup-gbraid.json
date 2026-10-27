@@ -1,0 +1,15 @@
+{
+  "conversions": [
+    {
+      "conversionAction": "customers/1234567890/conversionActions/111",
+      "conversionDateTime": "2026-10-26 08:30:00+00:00",
+      "gbraid": "0AAAAAfakeGbraid",
+      "orderId": "orbes-4217",
+      "consent": {
+        "adUserData": "GRANTED"
+      }
+    }
+  ],
+  "partialFailure": true,
+  "validateOnly": true
+}

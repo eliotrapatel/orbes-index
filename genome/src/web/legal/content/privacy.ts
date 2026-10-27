@@ -129,6 +129,18 @@
  *    held: `vaults`) and the vault a credit to give accepted came from
  *    (`vault_gifts.accepted_by`), neither collector named to the other, kept
  *    while the account exists and in the copy of its data (API §16.13);
+ *  - a partner's experience (lot M4, K49 P3; services/circle.ts rsvp,
+ *    services/partners.ts guests, migration 0064): with a YES to an invitation
+ *    linked to a partner's experience, the guest may share their first and
+ *    last name with that partner (`circle_rsvps.share_name`, `share_name_at`;
+ *    off by default, refused without both names, changed until the event
+ *    begins, cleared by a NO); ORBES gives the partner the names shared, for
+ *    the guest list, otherwise only the number of guests; the platform sends
+ *    nothing to a partner; kept with the answer and exported
+ *    (AccountExport.circleAnswers' shareName, shareNameAt); the circle
+ *    section's one paragraph says so, the policy's only change for K49. The
+ *    advertising measurement (K27) is privacy-ads.ts's, shown only while its
+ *    switch is on;
  *  - the sound signature (P-D07, shared/prefs.ts): the one preference the
  *    verify app keeps on the device, in local storage, under SOUND_PREF_KEY
  *    `orbes.sound`: "off", written only by SOUND OFF and removed by SOUND
@@ -254,6 +266,7 @@ const EN: LegalDocument = {
       blocks: [
         "The owners' circle is read signed in to your ORBES account, by the owners of a piece. A post may be shown only to the members of a segment (see [Segments, the client sheet and activity](#segments)). ORBES processes the data below to run the circle you take part in, under the [terms of use](/legal/terms).",
         "When you answer an invitation, ORBES records your answer: the account, the post, YES or NO, and the times of your first answer and of its latest change. ORBES staff read the answers to an invitation with the email address of their account, to welcome the guests; a staff member with read-only access sees it masked. Your answer is also written to the service's audit log, which names your account by its identifier only.",
+        "When an invitation is an experience offered with a partner, you may tick, with your YES, to share your first and last name with that partner; ORBES then gives the partner your name for the guest list, and nothing else. Without it, the partner receives only the number of guests. You may untick it until the event begins; a name already given before stays with the partner. Your choice, with its time, is kept with your answer and is in the copy of your data.",
         'When you vote in a poll, ORBES records your vote: the account, the post, the option chosen and the time. Members see the results only as totals by option, after their own vote. A vote is never written to the audit log.',
         'The visits of the circle are counted per day, as a number only: without any account, address or device.',
         'Your tier (TITANE, PLATINE or PALLADIUM) is computed at each request from the pieces registered to your account. It is not stored, except with an entry in a release or a LIVE RELEASE (above and below).',
@@ -511,6 +524,7 @@ const FR: LegalDocument = {
       blocks: [
         "Le cercle des propriétaires se lit connecté à votre compte ORBES, par les propriétaires d'une pièce. Une publication peut n'être montrée qu'aux membres d'un segment (voir [Segments, fiche client et activité](#segments)). ORBES traite les données ci-dessous pour faire vivre le cercle auquel vous participez, selon les [conditions générales d'utilisation](/legal/terms).",
         "Quand vous répondez à une invitation, ORBES enregistre votre réponse : le compte, la publication, YES ou NO, et les heures de votre première réponse et de sa dernière modification. Le personnel d'ORBES lit les réponses à une invitation avec l'adresse e-mail de leur compte, pour accueillir les invités ; un membre du personnel en lecture seule la voit masquée. Votre réponse est aussi inscrite au journal d'audit du service, qui ne désigne votre compte que par son identifiant.",
+        "Quand une invitation est une expérience offerte avec un partenaire, vous pouvez cocher, avec votre YES, le partage de vos prénom et nom avec ce partenaire ; ORBES donne alors votre nom au partenaire pour la liste des invités, et rien d'autre. Sans cela, le partenaire ne reçoit que le nombre d'invités. Vous pouvez le décocher jusqu'au début de l'événement ; un nom déjà donné reste chez le partenaire. Votre choix, avec son heure, est conservé avec votre réponse et figure dans la copie de vos données.",
         "Quand vous votez à un sondage, ORBES enregistre votre vote : le compte, la publication, l'option choisie et l'heure. Les membres ne voient les résultats qu'en totaux par option, après leur propre vote. Un vote n'est jamais inscrit au journal d'audit.",
         'Les visites du cercle sont comptées par jour, comme un simple nombre : sans aucun compte, adresse ni appareil.',
         "Votre palier (TITANE, PLATINE ou PALLADIUM) est calculé à chaque requête à partir des pièces enregistrées à votre compte. Il n'est pas conservé, sauf avec une inscription à une sortie ou une entrée à une LIVE RELEASE (ci-dessus et ci-dessous).",

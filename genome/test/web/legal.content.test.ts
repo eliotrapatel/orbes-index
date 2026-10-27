@@ -34,7 +34,13 @@
  *    packaging kit translates it;
  *  - all four in both languages: the same sections, links that lead
  *    somewhere, the lexicon of BRAND §4.5 (English, and the kit's French)
- *    without exception, and no exclamation mark.
+ *    without exception, and no exclamation mark;
+ *  - lot M4 (L2): the circle's paragraph for a partner's experience (K49
+ *    P3) against services/circle.ts and partners.ts; the Advertising
+ *    measurement prepared for the switch (K27 A4, content/privacy-ads.ts):
+ *    the two sentences' 'off' words exactly today's, their 'on' words and the
+ *    section pinned, held to services/ads.ts and server/ads/event.ts, its
+ *    own version equal to the server's and its own fingerprint.
  */
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -53,6 +59,7 @@ import { EMAIL_RETENTION_DAYS } from '../../src/server/services/email.js';
 import { FOUNDING_CONSENT_VERSION } from '../../src/server/services/founding.js';
 import { ABSENCE_DAYS, CREDIT_EXPIRING_DAYS } from '../../src/server/services/house-moments.js';
 import { WORN_CONSENT_VERSION } from '../../src/server/services/worn.js';
+import { AD_CLICK_RETENTION_DAYS, AD_CLICK_WINDOW_DAYS, AD_EVENT_RETENTION_DAYS, AD_MAX_AGE_DAYS, ADS_TEXT_VERSION as SERVER_ADS_TEXT_VERSION, CLICK_PARAMS } from '../../src/server/services/ads.js';
 import { CARE_LABEL_RETENTION_MS } from '../../src/server/services/care.js';
 import { INVOICE_ISSUER, setLineWords } from '../../src/server/services/invoices.js';
 import { RECOVERY_CODE_TTL_MS, TRANSFER_FREEZE_MS } from '../../src/server/services/account-recovery.js';
@@ -65,10 +72,11 @@ import { cookieName, SESSION_COOKIE } from '../../src/server/services/sessions.j
 import { RESALE_GUIDANCE_FR } from '../../src/web/legal/content/faq.js';
 import { DOCUMENTS, LANGS, LANGUAGE_NAMES, LEGAL_VERSION, WORDS, type Block, type Lang, type LegalDocument } from '../../src/web/legal/content/index.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
+import { ADS_AFTER, ADS_SECTION, ADS_SECTION_ID, ADS_SENTENCES, ADS_SINCE, ADS_TEXT_VERSION, privacyWithAds } from '../../src/web/legal/content/privacy-ads.js';
 import { parseBlock, plainText } from '../../src/web/legal/model.js';
 import { LEGAL_PAGES } from '../../src/web/shared/legal.js';
 import { setSoundPref, SOUND_OFF, SOUND_PREF_KEY } from '../../src/web/shared/prefs.js';
-import { RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
+import { CONSENT, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
 import { PACKAGING_KIT, REPO, findForbidden, forbiddenTerms, readDoc, section } from '../docs/lexicon.js';
 
 const MIN = 60_000;
@@ -984,6 +992,166 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
+  it('says a partner\'s experience in one paragraph of the circle (lot M4, K49 P3, P-legal, L2): the name shared with a YES only, the headcount otherwise, untick until the event, the choice in the copy of the data; the terms unchanged', () => {
+    // The code (services/circle.ts rsvp, services/partners.ts guests; TERMS-FACTS §31): a YES only, both names needed, the
+    // event's start closes the answers (the choice with them), the names shared alone given, every YES counted.
+    const circle = readDoc('genome/src/server/services/circle.ts');
+    for (const x of [
+      "if (opts.shareName === true && answer !== 'YES') throw validationError('A name is shared with a YES only.');",
+      'if (p.event_at && now.getTime() >= p.event_at.getTime()) throw eventBegun();',
+      'if (!names?.first_name || !names.last_name) throw shareNameMissing();',
+      'shareName: r.share_name, shareNameAt: r.share_name_at',
+    ])
+      expect(circle).toContain(x);
+    const partners = readDoc('genome/src/server/services/partners.ts');
+    for (const x of ['if (!r.share_name || !r.first_name || !r.last_name) continue;', 'return { experienceId: id, headcount: rows.length, sharedCount: shared.length, shared };']) expect(partners).toContain(x);
+    // The plan's sentence (§6) word for word, then the right of access's for the choice.
+    const plan = {
+      en: 'When an invitation is an experience offered with a partner, you may tick, with your YES, to share your first and last name with that partner; ORBES then gives the partner your name for the guest list, and nothing else. Without it, the partner receives only the number of guests. You may untick it until the event begins; a name already given before stays with the partner.',
+      fr: "Quand une invitation est une expérience offerte avec un partenaire, vous pouvez cocher, avec votre YES, le partage de vos prénom et nom avec ce partenaire ; ORBES donne alors votre nom au partenaire pour la liste des invités, et rien d'autre. Sans cela, le partenaire ne reçoit que le nombre d'invités. Vous pouvez le décocher jusqu'au début de l'événement ; un nom déjà donné reste chez le partenaire.",
+    } as const;
+    const access = { en: 'Your choice, with its time, is kept with your answer and is in the copy of your data.', fr: 'Votre choix, avec son heure, est conservé avec votre réponse et figure dans la copie de vos données.' } as const;
+    for (const lang of LANGS) {
+      const blocks = DOCUMENTS.privacy[lang].sections.find((x) => x.id === 'circle')!.blocks;
+      const paragraph = `${plan[lang]} ${access[lang]}`;
+      // Its own paragraph, right after the answer's (an existing block unchanged: values added, none moved).
+      expect(blocks, lang).toContain(paragraph);
+      expect(String(blocks[blocks.indexOf(paragraph) - 1]), lang).toMatch(/^(?:When you answer an invitation|Quand vous répondez à une invitation)/);
+      // Said once; the terms name no partner's guest list (unchanged).
+      expect(readText(DOCUMENTS.privacy[lang], lang).split(lang === 'en' ? 'the guest list' : 'la liste des invités').length - 1, lang).toBe(1);
+      expect(readText(DOCUMENTS.terms[lang], lang), lang).not.toMatch(/guest list|liste des invités|share your first and last name|partage de vos prénom/i);
+    }
+  });
+
+  it('prepares the Advertising measurement for the switch (lot M4, K27 A4, L2): off, exactly today\'s page; on, the section after WORN and the two sentences in their pinned words, as the code sends and keeps', () => {
+    // The two sentences: their 'off' words are today's, word for word (the page while off).
+    const today = {
+      en: ['The verification service sets only the cookies below, its own. It sets no advertising or audience-measurement cookie and loads no script from another site.', 'DB-IP supplies the location database, which ORBES installs on its own server: nothing is sent to DB-IP. ORBES sells no data and shares none for advertising.'],
+      fr: ["Le service de vérification ne dépose que les cookies ci-dessous, les siens. Il ne dépose aucun cookie publicitaire ni de mesure d'audience et ne charge aucun script d'un autre site.", "DB-IP fournit la base de localisation, qu'ORBES installe sur son propre serveur : rien n'est envoyé à DB-IP. ORBES ne vend aucune donnée et n'en partage aucune à des fins publicitaires."],
+    } as const;
+    // Their 'on' words (plan §6, the first plan's words): the cookies' second half, the DB-IP sentence kept word for word.
+    const on = {
+      en: [
+        'The verification service sets only the cookies below, its own. It sets no advertising or audience-measurement cookie, loads no script from another site; with your consent, it tells ad platforms about some of your acts from its server (see [Advertising measurement](#ads)).',
+        'DB-IP supplies the location database, which ORBES installs on its own server: nothing is sent to DB-IP. ORBES sells no data; it shares data for advertising only with your consent, as [Advertising measurement](#ads) says.',
+      ],
+      fr: [
+        "Le service de vérification ne dépose que les cookies ci-dessous, les siens. Il ne dépose aucun cookie publicitaire ni de mesure d'audience, ne charge aucun script d'un autre site ; avec votre consentement, il informe des plateformes publicitaires de certains de vos actes depuis son serveur (voir [Mesure publicitaire](#ads)).",
+        "DB-IP fournit la base de localisation, qu'ORBES installe sur son propre serveur : rien n'est envoyé à DB-IP. ORBES ne vend aucune donnée ; il ne partage des données à des fins publicitaires qu'avec votre consentement, comme le dit [Mesure publicitaire](#ads).",
+      ],
+    } as const;
+    const firstPlan = {
+      en: ['sets no advertising or audience-measurement cookie, loads no script from another site; with your consent, it tells ad platforms about some of your acts from its server (see Advertising measurement).', 'ORBES sells no data; it shares data for advertising only with your consent, as Advertising measurement says.'],
+    } as const;
+    const lexicon = forbiddenTerms();
+    for (const lang of LANGS) {
+      const off = DOCUMENTS.privacy[lang];
+      expect(ADS_SENTENCES[lang].map((x) => x.section), lang).toEqual(['cookies', 'recipients']);
+      expect(ADS_SENTENCES[lang].map((x) => x.off), lang).toEqual(today[lang]);
+      expect(ADS_SENTENCES[lang].map((x) => x.on), lang).toEqual(on[lang]);
+      expect(sectionText(off, 'cookies'), lang).toContain(today[lang][0]);
+      expect(sectionText(off, 'recipients'), lang).toContain(today[lang][1]);
+      // The page while off is today's: no section, no 'on' word.
+      expect(off.sections.map((x) => x.id), lang).not.toContain(ADS_SECTION_ID);
+      expect(readText(off, lang), lang).not.toMatch(/Meta|TikTok|Google|Advertising measurement|Mesure publicitaire/);
+      // On: the off page, its section after WORN and its two sentences, nothing else.
+      const withAds = privacyWithAds(off, lang);
+      expect(withAds.sections.map((x) => x.id), lang).toEqual([...off.sections.flatMap((x) => (x.id === ADS_AFTER ? [x.id, ADS_SECTION_ID] : [x.id]))]);
+      const back = { ...withAds, sections: withAds.sections.filter((x) => x.id !== ADS_SECTION_ID).map((x) => ({ ...x, blocks: x.blocks.map((b) => ADS_SENTENCES[lang].find((y) => y.on === b)?.off ?? b) })) };
+      expect(JSON.stringify(back), lang).toBe(JSON.stringify(off));
+      for (const sentence of on[lang]) expect(textBlocks(withAds), lang).toContain(sentence);
+      if (lang === 'en') for (const [i, words] of firstPlan.en.entries()) expect(plainText(parseBlock(on.en[i], 'en')), words).toContain(words);
+      // Read as it reads on the page: its links lead somewhere (its anchors on the page, https addresses), no word of the
+      // lexicon, no exclamation mark; the banner's PRIVACY lands on it.
+      const ids = new Set(withAds.sections.map((x) => x.id));
+      for (const block of [...ADS_SECTION[lang].blocks, ...on[lang]].filter((b): b is string => typeof b === 'string')) {
+        const written = [...block.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]);
+        const parsed = parseBlock(block, lang);
+        expect((parsed.kind === 'list' ? parsed.items.flat() : parsed.runs).filter((r) => r.kind === 'link').length, block).toBe(written.length);
+        for (const t of written) expect(t.startsWith('#') ? ids.has(t.slice(1)) : t.startsWith('https://'), `${lang}: ${t}`).toBe(true);
+      }
+      const read = readText(withAds, lang);
+      expect(findForbidden(read, lexicon), lang).toEqual([]);
+      expect(read.match(/!/g) ?? [], lang).toEqual([]);
+      expect(() => privacyWithAds(withAds, lang), lang).toThrow();
+    }
+    expect(CONSENT.privacyHref).toBe(`/legal/privacy#${ADS_SECTION_ID}`);
+    // The section, as the code sends and keeps (services/ads.ts, server/ads/event.ts, views/consent-banner.ts, account.ts).
+    expect(ADS_TEXT_VERSION).toBe(SERVER_ADS_TEXT_VERSION);
+    expect([AD_CLICK_WINDOW_DAYS, AD_CLICK_RETENTION_DAYS, AD_EVENT_RETENTION_DAYS, AD_MAX_AGE_DAYS.META, AD_MAX_AGE_DAYS.TIKTOK, AD_MAX_AGE_DAYS.GOOGLE]).toEqual([90, 90, 90, 7, 7, 90]);
+    const event = readDoc('genome/src/server/ads/event.ts');
+    expect(event).toContain('Never a name, a phone, an address, an IP address, a piece, a model, a size or a release.');
+    const fields = /export interface AdEvent \{([\s\S]*?)\n\}/.exec(event)?.[1] ?? '';
+    expect([...fields.matchAll(/^ {2}(\w+): /gm)].map((m) => m[1])).toEqual(['id', 'kind', 'at', 'emailSha256', 'externalIdSha256', 'country', 'clicks', 'userAgent', 'value']);
+    const ads = readDoc('genome/src/server/services/ads.ts');
+    for (const x of [
+      "if (c.consent !== 'GRANTED') continue;",
+      "WHERE a.status = 'ACTIVE' AND ${notTestEntrant('cand.account_id')} AND NOT ${houseAccount('cand.account_id')}",
+      "if (order.channel === 'GIFT' || order.channel === 'EXCHANGE' || order.exchange_of_order_id !== null) return false;",
+      "if (order.channel === 'VAULT' && order.price_minor !== null && Number(order.price_minor) === 0) return false;",
+      'return order.shopify_order_id === null;',
+      "if (!PLATFORM_CLICKS.GOOGLE.some((k) => clickKinds.includes(k))) return 'NO_CLICK_ID';",
+    ])
+      expect(ads).toContain(x);
+    const says = {
+      en: [
+        'To measure its ads on Meta, TikTok and Google, and only with your consent',
+        'from its own server',
+        'No pixel, script or cookie of these platforms is placed in your browser',
+        'ORBES processes these data on your consent, given in the banner the app shows (ACCEPT), or refused there (DECLINE).',
+        'You may withdraw it at any time in YOUR PROFILE, with ADVERTISING MEASUREMENT',
+        'Withdrawing it has no effect on what was sent before.',
+        `in the ${AD_CLICK_WINDOW_DAYS} days before the act`,
+        'Nothing you did before ORBES switched this measurement on is ever sent.',
+        'ORBES never sends your name, your phone, your address, your IP address, a piece, a model, a size or a release.',
+        `older than ${AD_MAX_AGE_DAYS.META} days for Meta and TikTok, or ${AD_MAX_AGE_DAYS.GOOGLE} days for Google`,
+        'for an account that is locked or deleted',
+        'An online store of ORBES, once it opens, measures its own orders under its own privacy policy and the consent it asks for itself, not under this section.',
+        `(${Object.values(CLICK_PARAMS).slice(0, -1).join(', ')} or ${Object.values(CLICK_PARAMS).at(-1)})`,
+        'independent controllers',
+        'outside the European Union',
+        `Each event is kept ${AD_EVENT_RETENTION_DAYS} days after it is sent, fails, is skipped or is cancelled; each click identifier, ${AD_CLICK_RETENTION_DAYS} days after the click; a choice made on a device while signed out, 13 months`,
+      ],
+      fr: [
+        'Pour mesurer ses publicités sur Meta, TikTok et Google, et seulement avec votre consentement',
+        'depuis son propre serveur',
+        "Aucun pixel, script ni cookie de ces plateformes n'est déposé dans votre navigateur",
+        "ORBES traite ces données sur votre consentement, donné dans le bandeau que montre l'application (ACCEPT), ou refusé là (DECLINE).",
+        'Vous pouvez le retirer à tout moment dans YOUR PROFILE, avec ADVERTISING MEASUREMENT',
+        'Le retrait est sans effet sur ce qui a été envoyé avant.',
+        `dans les ${AD_CLICK_WINDOW_DAYS} jours avant l'acte`,
+        "Rien de ce que vous avez fait avant qu'ORBES active cette mesure n'est jamais envoyé.",
+        "ORBES n'envoie jamais votre nom, votre téléphone, votre adresse, votre adresse IP, une pièce, un modèle, une taille ni une sortie.",
+        `de plus de ${AD_MAX_AGE_DAYS.META} jours pour Meta et TikTok, ou de ${AD_MAX_AGE_DAYS.GOOGLE} jours pour Google`,
+        'pour un compte verrouillé ou supprimé',
+        "Une boutique en ligne d'ORBES, une fois ouverte, mesure ses propres commandes selon sa propre politique de confidentialité et le consentement qu'elle demande elle-même, non selon cette section.",
+        `(${Object.values(CLICK_PARAMS).slice(0, -1).join(', ')} ou ${Object.values(CLICK_PARAMS).at(-1)})`,
+        'responsables de traitement indépendants',
+        "hors de l'Union européenne",
+        `Chaque événement est conservé ${AD_EVENT_RETENTION_DAYS} jours après son envoi, son échec, son abandon ou son annulation ; chaque identifiant de clic, ${AD_CLICK_RETENTION_DAYS} jours après le clic ; un choix fait sur un appareil sans être connecté, 13 mois`,
+      ],
+    } as const;
+    for (const lang of LANGS) {
+      // As read, the French spaces before « : » and « ; » made plain again.
+      const text = ADS_SECTION[lang].blocks.filter((b): b is string => typeof b === 'string').map((b) => plainText(parseBlock(b, lang)).replace(/[\u00a0\u202f]/g, ' ')).join('\n');
+      for (const x of says[lang]) expect(text, `${lang}: ${x}`).toContain(x);
+      // The app's own words: its banner's buttons and YOUR PROFILE's switch.
+      for (const label of [CONSENT.accept, CONSENT.decline, CONSENT.label]) expect(text, label).toContain(label);
+    }
+    expect(ADS_SECTION.en.title).toBe(CONSENT.region);
+    // The line under the version line, the Paris day of the switch on in words.
+    expect([ADS_SINCE.en('2026-10-27'), ADS_SINCE.fr('2026-11-01')]).toEqual(['Advertising measurement: since 27 October 2026', 'Mesure publicitaire : depuis le 1er novembre 2026']);
+    // Its own version: the date of its final commit, recorded with each choice; its words pinned to it.
+    const PUBLISHED_ADS: Readonly<Record<string, string>> = {
+      // Lot M4 (K27 A4; step M4.14): prepared for the switch, never shown while it is off; to counsel before it is on (the
+      // online store's own policy named for the store, S1; an account locked or deleted, in the step's verification).
+      '2026-10-26': 'af35ea545206565a',
+    };
+    const fingerprint = createHash('sha256').update(JSON.stringify({ section: ADS_SECTION, sentences: ADS_SENTENCES, since: { en: ADS_SINCE.en('2000-01-01'), fr: ADS_SINCE.fr('2000-01-01') } })).digest('hex').slice(0, 16);
+    expect({ version: ADS_TEXT_VERSION, fingerprint }).toEqual({ version: ADS_TEXT_VERSION, fingerprint: PUBLISHED_ADS[ADS_TEXT_VERSION] });
+    expect(Object.keys(PUBLISHED_ADS).sort().at(-1)).toBe(ADS_TEXT_VERSION);
+  });
+
   it('covers what the plan names: data collected, the IP hash, the device cookie, the location, accounts, retention, hosting, DB-IP', () => {
     const ids = DOCUMENTS.privacy.en.sections.map((s) => s.id);
     expect(ids).toEqual(expect.arrayContaining(['controller', 'verification', 'account', 'cookies', 'recipients', 'location', 'retention', 'rights', 'live', 'orders', 'segments', 'founding-list', 'emails', 'house-messages', 'worn']));
@@ -1207,6 +1375,13 @@ describe('legal pages: both languages, links, lexicon', () => {
       // won free claimed within 30 days, PAID at no cost, cancelled unclaimed; one bought under its 24-hour right to buy),
       // and the privacy policy's invitation block adds the vaults and the vault a credit to give accepted came from.
       '2026-10-26': '6d4d2397d714e97a',
+      // Lot M4 of the macro scope (K49 P3, P-legal, L2; step M4.14): the privacy policy's circle gains one paragraph, a
+      // partner's experience (with a YES, the guest may tick to share their first and last name with the partner, who
+      // otherwise receives only the number of guests; untick until the event begins; the choice in the copy of the data).
+      // The terms unchanged. The advertising measurement (K27 A4) is outside DOCUMENTS (privacy-ads.ts, its own version and
+      // fingerprint), shown only while its switch is on. The date of the lot's final legal commit, never Q3's published
+      // 2026-10-26: that commit falls on 26 October in Paris, so the day after it.
+      '2026-10-27': '40f770d6df7d8e6d',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
