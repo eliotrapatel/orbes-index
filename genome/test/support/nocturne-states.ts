@@ -91,6 +91,8 @@ export interface UiState {
 /** Requests a state holds open while it is captured, released when the run ends. */
 export interface Holds {
   hold(pattern: string): void;
+  /** `route` held for the state's whole life, then aborted when it closes: never let through, never reaching the server. */
+  stall(route: Route): Promise<void>;
   releaseAll(): void;
 }
 
@@ -731,7 +733,7 @@ const PARTNER_STATES: readonly UiState[] = [
     path: post('partnerMain'),
     // The choice held on its way, never let through (a hold released at the end would save it, and the states after this
     // one read the box off).
-    routes: (page) => page.route('**/api/v1/club/circle/*/rsvp', () => new Promise<void>(() => {})),
+    routes: (page, holds) => page.route('**/api/v1/club/circle/*/rsvp', (route) => holds.stall(route)),
     act: async (run) => {
       await run.page.locator(`${PARTNER_SHARE}[data-share="off"]`).waitFor();
       await toggleShare(run);
@@ -866,7 +868,7 @@ const ADS_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify'),
     // The choice held on its way, never let through (the states after this one read the banner as shown).
-    routes: (page) => consentPost(page, () => new Promise<void>(() => {})),
+    routes: (page, holds) => consentPost(page, (route) => holds.stall(route)),
     act: async (run) => {
       await bannerOnNow(run);
       await accept(run);
@@ -4275,6 +4277,7 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
     : await mobileContext(browser);
   const page = await context.newPage();
   const gates: { open(): void }[] = [];
+  const stalled: Route[] = [];
   const holds: Holds = {
     hold: (pattern) => {
       const g = gate();
@@ -4284,9 +4287,16 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
         await route.continue().catch(() => {});
       });
     },
+    stall: (route) => {
+      stalled.push(route);
+      return new Promise<void>(() => {});
+    },
     releaseAll: () => gates.forEach((g) => g.open()),
   };
   const close = async () => {
+    // Aborted before the context goes: a request merely left paused may be let through as the context closes (CI's
+    // Chromium did, for the saving states of SHARE MY NAME and the consent banner), and the next state would find it saved.
+    await Promise.all(stalled.splice(0).map((route) => route.abort().catch(() => {})));
     holds.releaseAll();
     await context.close().catch(() => {});
   };
