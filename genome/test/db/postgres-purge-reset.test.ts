@@ -67,8 +67,8 @@ import { PlatformResetService, type PlatformResetServiceDeps, type ResetResult }
 import { testPhrase, type TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
 import type { Actor } from '../../src/server/types.js';
 import { createHarness, PASSWORD, type Harness } from '../api/support.js';
-import { poolDraw } from '../support/draws.js';
-import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { giveSizes, poolDraw } from '../support/draws.js';
+import { createAccount, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
 const APP = `orbes_t13_${randomBytes(4).toString('hex')}`;
@@ -515,6 +515,12 @@ describe.skipIf(!pgUrl)('TEST PURGE and PLATFORM RESET through the app\'s role, 
     await owner.updateTable('accounts').set({ email: `test-${n}@orbes.test`, email_normalized: `test-${n}@orbes.test`, password_hash: '!test-entrant: never signs in' }).where('id', '=', A.disguised).execute();
     A.fromId = Number((await owner.selectFrom('audit_logs').select('id').where('action', '=', 'test_run.start').where('target_id', '=', A.run).executeTakeFirstOrThrow()).id);
     expect(A.early).toBeLessThan(A.fromId);
+
+    // One offered model SKU for (e) and (f) to hold a write on: poolDraw takes away the SKUs it made, so the fixture's
+    // model holds none; a model of its own, of one size, whose SKU stays (the reset keeps skus).
+    const sized = await createModel(owner, 'T13 SIZES');
+    await giveSizes(owner, sized);
+    expect(await count(owner, `skus WHERE model_id = '${sized}' AND set_aside_at IS NULL`)).toBe(1);
 
     main = appDb(1);
   }, 300_000);
