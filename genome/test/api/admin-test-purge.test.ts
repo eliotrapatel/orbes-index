@@ -6,8 +6,9 @@
  * Every refusal through the route, each with its code and its words: the body, the phrase, every answer of the
  * step-up (no second factor, a session opened without the code, a wrong code, the code of the sign-in, 429
  * ACCOUNT_LOCKED, then 429 STEP_UP_LOCKED once another ADMIN unlocked, the 24-hour rule after an enrolment made in the
- * console), the 409s of a window (Paris time first), a running test and the test's state, a drawn draw holding a real
- * collector's entry; an OPERATOR and an AUDITOR 403, CSRF, the `auth` budget. None answers 401: the session lives on
+ * console), the 409s of a window (Paris time first), a running test and the test's state, another test of the release
+ * not ended, a drawn draw holding a real collector's entry; an OPERATOR and an AUDITOR 403, CSRF, the `auth` budget;
+ * PURGE ALL's own step-up refusals (no second factor, a session without the code, a wrong code, consume's re-check). None answers 401: the session lives on
  * after each (the console signs out on a 401). Then the 202s: a purge, its resume when PAUSED (H12), 409
  * PURGE_IN_PROGRESS while it is under way, OFFER NEXT refused while it is PURGING and answering as today once it is
  * PAUSED with PURGE_NOT_TEST (G14), consume's re-checks at the route (the password or the role changed between verify
@@ -77,6 +78,16 @@ function leaves(v: unknown, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * Whether `text` holds the secret `s`. A code (`123456`, or spelt `123 456`) counts wherever it stands between two
+ * non-digits, inside a longer string too; the identifiers and hashes (runs of 16 or more hex characters and hyphens)
+ * are set aside first, as a code's six digits fall inside one of them by chance. Anything else: anywhere.
+ */
+function holds(text: string, s: string): boolean {
+  if (!/^\d{6}$|^\d{3} \d{3}$/.test(s)) return text.includes(s);
+  return new RegExp(`(^|\\D)${s}(\\D|$)`).test(text.replace(/[0-9a-f-]{16,}/gi, '~'));
+}
+
 interface Staff {
   id: string;
   addr: string;
@@ -98,6 +109,8 @@ describe('admin: TEST PURGE over HTTP', () => {
   let auditor: Client;
   /** A drawn draw's ended test, purged last by the first 202. */
   let a: Run;
+  /** A cancelled release's two tests, the second STOPPED while the first was refused, then ENDED: PURGE ALL purges both. */
+  const twoTests: Run[] = [];
   const lines: string[] = [];
   const sink = { write: (s: string) => lines.push(s) };
   /** Every code, password and session token the tests typed or were given: none may reach an audit row or the log. */
@@ -135,12 +148,12 @@ describe('admin: TEST PURGE over HTTP', () => {
       const rows = await db.selectFrom('audit_logs').select(['action', 'actor_id', 'target_type', 'target_id', 'details', 'ip_hash']).execute();
       for (const r of rows) {
         const values = [r.action, r.actor_id, r.target_type, r.target_id, r.ip_hash, ...leaves(r.details)].filter((x): x is string => typeof x === 'string');
-        for (const s of secrets) for (const v of values) if (/^\d{6}$/.test(s) ? v === s : v.includes(s)) throw new Error(`a secret is in the audit row ${r.action}`);
+        for (const s of secrets) for (const v of values) if (holds(v, s)) throw new Error(`a secret is in the audit row ${r.action}`);
       }
       expect(lines.length).toBeGreaterThan(0);
       for (const line of lines) {
         for (const s of secrets) {
-          if (/^\d{6}$/.test(s) ? new RegExp(`(^|\\D)${s}(\\D|$)`).test(line) : line.includes(s)) throw new Error(`a secret is in the log: ${line.slice(0, 120)}`);
+          if (holds(line, s)) throw new Error(`a secret is in the log: ${line.slice(0, 120)}`);
         }
       }
       // Never a 401 from the purge routes.
@@ -293,10 +306,12 @@ describe('admin: TEST PURGE over HTTP', () => {
 
   const offerNext = (dropId: string) => operator.post(`/api/admin/drops/${dropId}/offer-next`, {});
 
-  /** The body of a purge: its phrase and the next code (spelt `000 000` when `spaced`). */
+  /** The body of a purge: its phrase and the next code (spelt `000 000` when `spaced`, that spelling a secret too). */
   const body = (runId: string, s: Staff = purger, spaced = false) => {
     const c = code(s);
-    return { phrase: purgePhrase(runId), totp: spaced ? `${c.slice(0, 3)} ${c.slice(3)}` : c };
+    const totpTyped = spaced ? `${c.slice(0, 3)} ${c.slice(3)}` : c;
+    secrets.add(totpTyped);
+    return { phrase: purgePhrase(runId), totp: totpTyped };
   };
 
   /** Nothing written by a refusal: the run as it was, no step-up row, no code used (the sealed counter unchanged). */
@@ -355,11 +370,14 @@ describe('admin: TEST PURGE over HTTP', () => {
     await nothingWritten(a.id, purger, sealed, 0);
   });
 
-  it('the step-up through the route: no second factor, a session opened without the code, a wrong code (counted), the sign-in\'s own code; each with its words, none a 401', async () => {
+  it('the step-up through both routes: no second factor, a session opened without the code, a wrong code (counted), the sign-in\'s own code; each with its words, none a 401', async () => {
     // An ADMIN without a second factor (ADMIN_REQUIRE_MFA off here): 403, whatever the code.
     const bare = await adminClient(h, 'ADMIN');
     clients.push(bare);
     expect(await refused(purge(bare, a.id, body(a.id)), bare, 403, 'STEP_UP_TOTP_NOT_ENABLED')).toBe('Turn on two-factor authentication on the Security page first.');
+    expect(await refused(purgeAll(bare, { phrase: PURGE_ALL_PHRASE, totp: code(purger) }), bare, 403, 'STEP_UP_TOTP_NOT_ENABLED')).toBe(
+      'Turn on two-factor authentication on the Security page first.',
+    );
     // A session opened with the password alone, the second factor enrolled since (from the shell): 403.
     const creds = await createAdmin(h.ctx, 'ADMIN');
     const late = h.client();
@@ -373,7 +391,11 @@ describe('admin: TEST PURGE over HTTP', () => {
       .execute();
     const lateStaff: Staff = { id: creds.id, addr: creds.email, key: base32Decode(lateSecret) };
     expect(await refused(purge(late, a.id, body(a.id, lateStaff)), late, 403, 'STEP_UP_SESSION_WITHOUT_CODE')).toBe('Sign out, then sign in again with your authenticator code.');
+    expect(await refused(purgeAll(late, { phrase: PURGE_ALL_PHRASE, totp: code(lateStaff) }), late, 403, 'STEP_UP_SESSION_WITHOUT_CODE')).toBe(
+      'Sign out, then sign in again with your authenticator code.',
+    );
     expect(await failures(creds.id)).toEqual([]);
+    expect(await auditOf('test_run.purge_all.start', creds.id)).toEqual([]);
 
     // A wrong code: 400, counted (via step_up), the session alive.
     const sealed = await sealedOf(purger.id);
@@ -487,6 +509,34 @@ describe('admin: TEST PURGE over HTTP', () => {
     expect(listed.find((r) => r.id === running.id)!.purgeable).toEqual({ reason: 'PURGE_RELEASE_NOT_OVER', message: 'Purge once the release is over.' });
     for (const id of [a.id, b.id, running.id]) await nothingWritten(id, purger, await sealedOf(purger.id), 0);
     expect((await failures(purger.id)).length).toBe(2); // the wrong code and the sign-in's code of the step-up case only
+  });
+
+  it('409 PURGE_RUNS_NOT_ENDED before the code is read: an ENDED test whose release is over while another test of it is STOPPED, not ended; the Ended tests page says the same', async () => {
+    const drop = await openDraw('TWO TESTS', 3 * 24 * HOUR);
+    const first = await h.app.testEntrants.start(drop, press(drop, 1), f.admin);
+    await drive(0);
+    if ((await h.app.testEntrants.view(first.id)).status === 'RUNNING') await h.app.testEntrants.stop(first.id, f.admin);
+    expect((await h.app.testEntrants.end(first.id, testPhrase(drop, true), f.admin)).status).toBe('ENDED');
+    const second = await h.app.testEntrants.start(drop, press(drop, 1), f.admin);
+    expect((await h.app.testEntrants.stop(second.id, f.admin)).status).toBe('STOPPED');
+    // The release over (cancelled), the second test still STOPPED.
+    await h.ctx.services.drops.cancel(drop, f.admin);
+    const sealed = await sealedOf(purger.id);
+    const rows = (await stepUps(purger.id)).length;
+    const counted = (await failures(purger.id)).length;
+    const words = 'Another test of this release has not ended. END TEST on it first.';
+    expect(await refused(purge(admin, first.id, body(first.id)), admin, 409, 'PURGE_RUNS_NOT_ENDED')).toBe(words);
+    // Before the code is read: a wrong code answers the same, nothing counted.
+    expect(await refused(purge(admin, first.id, { phrase: purgePhrase(first.id), totp: wrongCode(purger) }), admin, 409, 'PURGE_RUNS_NOT_ENDED')).toBe(words);
+    expect(await failures(purger.id)).toHaveLength(counted);
+    await nothingWritten(first.id, purger, sealed, rows);
+    expect((await runRow(second.id)).purge_state).toBeNull();
+    const listed = (safeJson(await auditor.get('/api/admin/test-runs/ended')) as { runs: { id: string; purgeable: unknown }[] }).runs;
+    expect(listed.find((r) => r.id === first.id)!.purgeable).toEqual({ reason: 'PURGE_RUNS_NOT_ENDED', message: words });
+    expect(listed.find((r) => r.id === second.id)).toBeUndefined();
+    // END TEST on the second: both wait for PURGE ALL (below).
+    expect((await h.app.testEntrants.end(second.id, testPhrase(drop, true), f.admin)).status).toBe('ENDED');
+    twoTests.push({ id: first.id, drop }, { id: second.id, drop });
   });
 
   it('PURGE: 202 { run } PURGING, the code (spelt 000 000) consumed once, test_run.purge.start; a second POST 409 PURGE_IN_PROGRESS; OFFER NEXT 409 RELEASE_BEING_PURGED meanwhile; ended reads its progress; DONE; then 409 PURGE_DONE and OFFER NEXT as today', async () => {
@@ -627,21 +677,72 @@ describe('admin: TEST PURGE over HTTP', () => {
     await passes();
   });
 
-  it('PURGE ALL: 202 { runs, resumed, skipped }, the skipped with their words, one step-up; refused in a window and while a test runs (above)', async () => {
+  it('PURGE ALL: a wrong code 400 (counted, nothing written); consume\'s re-check (the role changed between verify and consume) commits nothing; the same code then 202 { runs, resumed, skipped }, the skipped with their words, one step-up; refused in a window and while a test runs (above)', async () => {
     const g = await drawRun(1, 'G');
+    const purgeable = [g.id, ...twoTests.map((r) => r.id)];
+    expect(twoTests).toHaveLength(2);
     const rows = (await stepUps(purger.id)).length;
-    const res = await purgeAll(admin, { phrase: 'purge all tests', totp: code(purger) });
-    expect(res.statusCode, res.body).toBe(202);
-    const out = safeJson(res) as { runs: string[]; resumed: string[]; skipped: { runId: string; reason: string; message: string }[] };
-    expect(Object.keys(out).sort()).toEqual(['resumed', 'runs', 'skipped']);
-    expect(out.runs).toEqual([g.id]);
-    expect(out.resumed).toEqual([]);
-    const reasons = new Set(out.skipped.map((s) => s.reason));
-    expect([...reasons].sort()).toEqual(['PURGE_NOT_TEST', 'PURGE_RELEASE_NOT_OVER']);
-    for (const s of out.skipped) expect(s.message.length).toBeGreaterThan(10);
-    expect((await stepUps(purger.id)).slice(rows)).toEqual([{ purpose: 'test_run.purge_all' }]);
-    await passes();
-    expect((await runRow(g.id)).purge_state).toBe('DONE');
+    const sealed = await sealedOf(purger.id);
+    const counted = (await failures(purger.id)).length;
+    const startRows = (await auditOf('test_run.purge_all.start', purger.id)).length;
+    /** Nothing written: no test asked, no step-up row, no code used, no PURGE ALL row. */
+    const untouched = async () => {
+      for (const id of purgeable) expect((await runRow(id)).purge_state).toBeNull();
+      expect(await stepUps(purger.id)).toHaveLength(rows);
+      expect(await sealedOf(purger.id)).toBe(sealed);
+      expect(await auditOf('test_run.purge_all.start', purger.id)).toHaveLength(startRows);
+    };
+
+    // A wrong code: 400 with its words, counted once via the step-up, the session alive.
+    h.clock.advance(30 * SECOND);
+    expect(await refused(purgeAll(admin, { phrase: PURGE_ALL_PHRASE, totp: wrongCode(purger) }), admin, 400, 'STEP_UP_CODE_INVALID')).toBe(
+      'The code is not valid. Check the time on your device and try again.',
+    );
+    const failed = await failures(purger.id);
+    expect(failed).toHaveLength(counted + 1);
+    expect(failed.at(-1)!.details).toEqual({ reason: 'totp', failedLogins: 1, locked: false, via: 'step_up' });
+    await untouched();
+
+    // The role changed between verify and consume: 403, rolled back with the transaction.
+    const auth = h.ctx.services.auth;
+    const real = auth.verifyAdminStepUp.bind(auth);
+    let between: (() => Promise<void>) | null = null;
+    auth.verifyAdminStepUp = async (input, meta) => {
+      const v = await real(input, meta);
+      if (between) await between();
+      return v;
+    };
+    try {
+      const same = { phrase: 'purge all tests', totp: code(purger) };
+      const at = h.clock.now();
+      between = async () => {
+        await db.updateTable('admin_users').set({ role: 'OPERATOR' }).where('id', '=', purger.id).execute();
+      };
+      await refused(purgeAll(admin, same), admin, 403, 'INSUFFICIENT_ROLE');
+      await db.updateTable('admin_users').set({ role: 'ADMIN' }).where('id', '=', purger.id).execute();
+      between = null;
+      await untouched();
+
+      // The same code, at the same time: it was never used, so PURGE ALL starts now.
+      h.clock.set(at);
+      const res = await purgeAll(admin, same);
+      expect(res.statusCode, res.body).toBe(202);
+      const out = safeJson(res) as { runs: string[]; resumed: string[]; skipped: { runId: string; reason: string; message: string }[] };
+      expect(Object.keys(out).sort()).toEqual(['resumed', 'runs', 'skipped']);
+      expect(out.runs).toEqual([...purgeable].sort());
+      expect(out.resumed).toEqual([]);
+      const reasons = new Set(out.skipped.map((s) => s.reason));
+      expect([...reasons].sort()).toEqual(['PURGE_NOT_TEST', 'PURGE_RELEASE_NOT_OVER']);
+      for (const s of out.skipped) expect(s.message.length).toBeGreaterThan(10);
+      expect((await stepUps(purger.id)).slice(rows)).toEqual([{ purpose: 'test_run.purge_all' }]);
+      expect(await sealedOf(purger.id)).not.toBe(sealed);
+      expect(await auditOf('test_run.purge_all.start', purger.id)).toHaveLength(startRows + 1);
+    } finally {
+      delete (auth as { verifyAdminStepUp?: unknown }).verifyAdminStepUp;
+    }
+    expect(auth.verifyAdminStepUp).toBe(Object.getPrototypeOf(auth).verifyAdminStepUp);
+    for (let i = 0; i < purgeable.length; i++) await passes();
+    for (const id of purgeable) expect((await runRow(id)).purge_state).toBe('DONE');
   });
 
   it('GET ended: every ENDED test of every release, the newest ended first, with its release, purge and purgeable; no test still running or stopped', async () => {
