@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { AUDIT_GENESIS_HASH, AuditService, canonicalJson, computeAuditHash } from '../../src/server/services/audit.js';
+import { CompiledQuery } from 'kysely';
+import { AUDIT_GENESIS_HASH, AuditService, canonicalJson, chainBatch, computeAuditHash } from '../../src/server/services/audit.js';
 import { DomainError } from '../../src/server/errors.js';
 import { isGuardViolation } from '../../src/server/db/pg-errors.js';
 import { createManualClock, type Actor } from '../../src/server/types.js';
@@ -396,6 +397,45 @@ describe('AuditService.verifyChain over the purge\'s tombstones', () => {
       await purge(t, [ids[3]!]);
       for (const batchSize of [1, 3, 1000]) {
         expect(await audit.verifyChain({ batchSize })).toEqual({ ok: false, checked: 3, firstBadId: ids[3], purged: 1 });
+      }
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('reads a batch in time bounded by the batch, whatever the log\'s size or the cursor\'s depth (index walks and probes, never a scan or sort of a table)', async () => {
+    // A large seeded log (the hashes do not chain: only the batch statement's plan is read here), one tombstone in 40.
+    const t = await createTestDb();
+    try {
+      const size = 40_000;
+      await t.pglite.query(`INSERT INTO audit_logs (id, occurred_at, actor_type, action, prev_hash, hash)
+        SELECT i, now(), 'system', 'test.seed', sha256(int8send(i - 1)), sha256(int8send(i)) FROM generate_series(1, ${size}) i WHERE i % 40 <> 0`);
+      await t.pglite.query(`INSERT INTO audit_purge_gaps (id, prev_hash, hash) SELECT i, sha256(int8send(i - 1)), sha256(int8send(i)) FROM generate_series(40, ${size}, 40) i`);
+      await t.pglite.query('ANALYZE audit_logs');
+      await t.pglite.query('ANALYZE audit_purge_gaps');
+      type PlanNode = Record<string, unknown> & { Plans?: PlanNode[] };
+      const n = 500;
+      for (const afterId of [0, size / 2, size - 2 * n]) {
+        const q = chainBatch(afterId, n).compile(t.db);
+        const r = await t.db.executeQuery<{ 'QUERY PLAN': { Plan: PlanNode }[] }>(CompiledQuery.raw(`EXPLAIN (ANALYZE, FORMAT JSON) ${q.sql}`, [...q.parameters]));
+        const nodes: PlanNode[] = [];
+        const walk = (node: PlanNode): void => {
+          nodes.push(node);
+          for (const child of node.Plans ?? []) walk(child);
+        };
+        walk(r.rows[0]!['QUERY PLAN'][0]!.Plan);
+        const reads = nodes.filter((x) => x['Relation Name'] === 'audit_logs' || x['Relation Name'] === 'audit_purge_gaps');
+        expect(reads.length).toBe(4);
+        for (const x of reads) expect(['Index Scan', 'Index Only Scan']).toContain(x['Node Type']);
+        expect(nodes.filter((x) => String(x['Node Type']).includes('Sort'))).toEqual([]);
+        // Each leaf reads at most n entries of its own table and one probe per entry of the other: about 2n, never the log.
+        const touched = reads.reduce((sum, x) => sum + Number(x['Actual Rows']) * Number(x['Actual Loops']), 0);
+        expect(touched).toBeLessThanOrEqual(2 * n);
+        const batch = await chainBatch(afterId, n).execute(t.db);
+        expect(batch.rows.length).toBe(n);
+        expect(batch.rows.map((x) => Number(x.id))).toEqual(Array.from({ length: n }, (_, i) => afterId + 1 + i));
+        expect(batch.rows.filter((x) => x.gap).map((x) => Number(x.id) % 40)).toEqual(batch.rows.filter((x) => x.gap).map(() => 0));
+        expect(batch.rows.some((x) => x.shadowed)).toBe(false);
       }
     } finally {
       await t.close();

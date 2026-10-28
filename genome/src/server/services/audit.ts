@@ -33,7 +33,7 @@
  * no tombstone the walk and its verdict are exactly those of the log alone.
  */
 import { createHash } from 'node:crypto';
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { jsonText, toBytes, type AuditLogRow, type JsonObject, type JsonValue } from '../db/schema.js';
 import { validationError } from '../errors.js';
@@ -332,9 +332,10 @@ export class AuditService {
    * The entries are `audit_logs` and the purge's tombstones (`audit_purge_gaps`) merged in id order (header). Each
    * batch is read in ONE statement, so it sees one snapshot of both tables: a purge batch committing between two
    * batches only turns ids above the cursor into tombstones, which the next statement sees consistently (never two
-   * cursors, one per table, that could each see a different moment). Ordered by id alone, both primary keys are read
-   * in order and merged. Each entry also says whether its id is in the other table too, so an id present in both is
-   * BROKEN whichever of the two comes first and wherever a batch ends. `betweenBatches` (tests only) runs after each
+   * cursors, one per table, that could each see a different moment). Each table's primary key is walked from the
+   * cursor, bounded to the batch, and the two merged (`chainBatch`), so a batch costs the same at any depth of the
+   * log. Each entry also says whether its id is in the other table too, so an id present in both is BROKEN whichever
+   * of the two comes first and wherever a batch ends. `betweenBatches` (tests only) runs after each
    * full batch, before the next is read.
    */
   async verifyChain(opts: { batchSize?: number; betweenBatches?: (afterId: number) => Promise<void> } = {}): Promise<ChainVerification> {
@@ -352,20 +353,7 @@ export class AuditService {
       ...(purged > 0 ? { purged } : {}),
     });
     for (;;) {
-      const { rows } = await sql<ChainItem>`
-        SELECT false AS gap, l.id, l.occurred_at, l.actor_type, l.actor_id, l.action, l.target_type, l.target_id,
-               l.details, l.ip_hash, l.prev_hash, l.hash,
-               EXISTS (SELECT 1 FROM audit_purge_gaps s WHERE s.id = l.id) AS shadowed
-          FROM audit_logs l
-         WHERE l.id > ${afterId}
-        UNION ALL
-        SELECT true AS gap, g.id, NULL::timestamptz, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text,
-               NULL::jsonb, NULL::text, g.prev_hash, g.hash,
-               EXISTS (SELECT 1 FROM audit_logs s WHERE s.id = g.id) AS shadowed
-          FROM audit_purge_gaps g
-         WHERE g.id > ${afterId}
-         ORDER BY id
-         LIMIT ${batchSize}`.execute(this.db);
+      const { rows } = await chainBatch(afterId, batchSize).execute(this.db);
       for (const r of rows) {
         const id = Number(r.id);
         if (r.shadowed) return verdict(id);
@@ -423,6 +411,33 @@ export class AuditService {
       page,
     );
   }
+}
+
+/**
+ * One batch of `verifyChain`: the next `n` entries above `afterId`, live rows and tombstones merged in id order, in
+ * ONE statement (one snapshot of both tables). Each leaf walks its own primary key from the cursor and stops at `n`
+ * (`ORDER BY id LIMIT n`) BEFORE anything else, then looks up each of its rows' twin in the other table by that table's
+ * primary key (`LEFT JOIN LATERAL ... WHERE t.id = ... LIMIT 1`: one index probe per row, never a merge join that
+ * walks the other table from its start, nor a hashed scan of all of it). A batch thus reads about 4n index entries
+ * whatever the log's size or the cursor's depth, and the whole check stays linear: never an Append of every row above
+ * the cursor sorted to keep n. The first n of the merge are within the first n of each leaf, so the outer `ORDER BY id LIMIT n` gives the
+ * same entries as one unbounded merge would. Exported for the plan test (audit.test.ts).
+ */
+export function chainBatch(afterId: number, n: number): RawBuilder<ChainItem> {
+  return sql<ChainItem>`
+    (SELECT false AS gap, l.id, l.occurred_at, l.actor_type, l.actor_id, l.action, l.target_type, l.target_id,
+            l.details, l.ip_hash, l.prev_hash, l.hash, (s.id IS NOT NULL) AS shadowed
+       FROM (SELECT * FROM audit_logs WHERE id > ${afterId} ORDER BY id LIMIT ${n}) l
+       LEFT JOIN LATERAL (SELECT t.id FROM audit_purge_gaps t WHERE t.id = l.id LIMIT 1) s ON true
+      ORDER BY l.id)
+    UNION ALL
+    (SELECT true AS gap, g.id, NULL::timestamptz, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text,
+            NULL::jsonb, NULL::text, g.prev_hash, g.hash, (s.id IS NOT NULL) AS shadowed
+       FROM (SELECT id, prev_hash, hash FROM audit_purge_gaps WHERE id > ${afterId} ORDER BY id LIMIT ${n}) g
+       LEFT JOIN LATERAL (SELECT t.id FROM audit_logs t WHERE t.id = g.id LIMIT 1) s ON true
+      ORDER BY g.id)
+    ORDER BY id
+    LIMIT ${n}`;
 }
 
 function fromRow(r: AuditLogRow): Omit<AuditEntry, 'prevHash' | 'hash'> {
