@@ -377,8 +377,15 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
       expect(await can(fn), fn).toBe(false);
     }
     await expect(asApp(`SELECT orbes_purge_scope('{}')`)).rejects.toThrow(/permission denied/);
-    // Called by the app's role, a batch runs as its owner: its first refusal, not a permission error.
-    await refused(asApp(`SELECT orbes_purge_test_run_batch(gen_random_uuid(), 10)`) as Promise<unknown>, 'PURGE_NOT_FOUND');
+    // Called by the app's role, a batch runs as its owner: its first refusal, not a permission error. (CI runs at any
+    // hour: the forbidden windows answered open for this call, their own definition put back after.)
+    const windowSource = (await one<{ def: string }>(`SELECT pg_get_functiondef('orbes_maintenance_window(timestamptz)'::regprocedure) AS def`)).def;
+    await run(`CREATE OR REPLACE FUNCTION orbes_maintenance_window(p_at timestamptz) RETURNS text LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT NULL::text $$`);
+    try {
+      await refused(asApp(`SELECT orbes_purge_test_run_batch(gen_random_uuid(), 10)`) as Promise<unknown>, 'PURGE_NOT_FOUND');
+    } finally {
+      await run(windowSource);
+    }
   });
 
   it('the plan: purge_delete_tables and orbes_purge_plan() are db/purge-plan.ts\'s; every foreign key the purge meets is classed (pg_constraint), by the owner-column rule; the BLOCK-by-name ones BLOCK; the bypass\'s tables are the guarded ones it deletes from', async () => {
