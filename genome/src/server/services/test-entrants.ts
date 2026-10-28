@@ -69,6 +69,10 @@
  * per account, ever, never deleted, with no revocation in the tier program): END TEST gives back what the test used of
  * them, a gift and a credit, and the next test that sets the account at that tier finds them again.
  *
+ * Once an ended test's purge is asked (lot PURGE, services/test-purge.ts), its view reads the figures the request stored
+ * (`purge_summary`), as the rows they are counted from are being deleted; every view and list says where its purge
+ * stands (`purge`) and whether PURGE can be pressed on it (`purgeable`).
+ *
  * Audited `test_run.start`, `.add`, `.stop`, `.confirm`, `.release`, `.end` (the ADMIN as actor); each bot's own actions
  * are audited by the routes as any account's; END TEST's clean-up `drop.withdraw`, `drop.entry.lapse` and
  * `drop.live.interest.withdraw` with `reason: "test_ended"`, `drop.live.remove`, `order.cancel` (a GIFT order's too) and
@@ -93,6 +97,7 @@ import { orderReference } from './orders.js';
 import { sessionCookieName } from './sessions.js';
 import { stockLevel } from './stock.js';
 import { currentRunPeaks, startRunPeaks, stopRunPeaks } from './system-status.js';
+import type { Purgeable, TestPurgeView } from './test-purge.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -247,6 +252,10 @@ export interface TestRunView {
   errors: { at: Date; message: string }[];
   report: TestReport | null;
   peaks: JsonObject | null;
+  /** Its purge (lot PURGE, services/test-purge.ts) once asked, with its state, reason and figures; null before. */
+  purge: TestPurgeView | null;
+  /** Whether PURGE can be pressed on it now: true, or why not (its reason and the console's words). */
+  purgeable: Purgeable;
 }
 
 /** GET /api/admin/drops/:id/test-runs: a release's tests, newest first. */
@@ -262,6 +271,10 @@ export interface TestRunSummary {
   checksTotal: number | null;
   report: TestReport | null;
   peaks: JsonObject | null;
+  /** Its purge (lot PURGE, services/test-purge.ts) once asked, with its state, reason and figures; null before. */
+  purge: TestPurgeView | null;
+  /** Whether PURGE can be pressed on it now: true, or why not (its reason and the console's words). */
+  purgeable: Purgeable;
 }
 
 /** GET /api/admin/test-runs/active: the RUNNING test, whatever its release. */
@@ -398,6 +411,113 @@ export function testRunSettings(input: TestRunSettingsInput, base: Readonly<Omit
 }
 
 const pressSettings = (p: TestRunPress): Omit<TestRunSettings, 'tiers'> => ({ arrival: p.arrival, behaviour: p.behaviour, choices: p.choices, profile: p.profile });
+
+/**
+ * A run's figures as the console reads them (TestEntrantService.view): its bots by tier and by what they did, the
+ * release's entries (real, test, all) and the test entrants holding a place. On `db`, which may be a transaction: the
+ * test purge stores them in its request's transaction (services/test-purge.ts), as the view showed them, before its
+ * batches delete the rows they are counted from.
+ */
+export async function testRunFigures(
+  db: Db,
+  run: { id: string; drop_id: string; mode: DropMode; status: TestRunStatus },
+): Promise<Pick<TestRunView, 'byTier' | 'release' | 'selected'>> {
+  const live = run.mode === 'LIVE';
+  const entries = live ? 'live_entries' : 'drop_entries';
+  const counted = await sql<{ tier: number; status: string | null; n: number }>`
+    SELECT (r.plan->>'tier')::int AS tier, e.status, count(*)::int AS n
+      FROM test_run_entrants AS r
+      LEFT JOIN ${sql.table(entries)} AS e ON e.drop_id = ${run.drop_id} AND e.account_id = r.account_id
+     WHERE r.run_id = ${run.id}
+     GROUP BY 1, 2`.execute(db);
+  const byTier: TestRunTier[] = TEST_TIER_LABELS.map((label, tier) => ({
+    tier: tier as ClubTier, label, entered: 0, inRoom: 0, selected: 0, confirmed: 0, lapsed: 0, released: 0, missed: 0, left: 0, withdrawn: 0,
+  }));
+  for (const c of counted.rows) {
+    const t = byTier[Math.min(3, Math.max(0, Number(c.tier)))]!;
+    const n = Number(c.n);
+    if (c.status === null) continue;
+    t.entered += n;
+    const s = c.status;
+    if (live) {
+      if ((LIVE_OPEN_STATUSES as readonly string[]).includes(s)) t.inRoom += n;
+      if (s === 'TURN' || s === 'SECURED') t.selected += n;
+      if (s === 'CONFIRMED') t.confirmed += n;
+      if (s === 'EXPIRED') t.lapsed += n;
+      if (s === 'RELEASED') t.released += n;
+      if (s === 'MISSED') t.missed += n;
+      if (s === 'LEFT') t.left += n;
+    } else {
+      if (s === 'ENTERED' || s === 'WAITLISTED') t.inRoom += n;
+      if (s === 'SELECTED') t.selected += n;
+      if (s === 'CONFIRMED') t.confirmed += n;
+      if (s === 'LAPSED') t.lapsed += n;
+      if (s === 'WITHDRAWN') t.withdrawn += n;
+    }
+  }
+  const totals = await sql<{ total: number; test: number }>`
+    SELECT count(*)::int AS total, count(t.account_id)::int AS test
+      FROM ${sql.table(entries)} AS e LEFT JOIN test_entrants AS t ON t.account_id = e.account_id
+     WHERE e.drop_id = ${run.drop_id}`.execute(db);
+  const total = Number(totals.rows[0]?.total ?? 0);
+  const test = Number(totals.rows[0]?.test ?? 0);
+  const open = run.status !== 'ENDED';
+  const held = live
+    ? await db
+        .selectFrom('test_run_entrants as r')
+        .innerJoin('live_entries as e', (j) => j.onRef('e.account_id', '=', 'r.account_id').on('e.drop_id', '=', run.drop_id))
+        .innerJoin('accounts as a', 'a.id', 'r.account_id')
+        .select((eb) => [
+          'r.account_id', 'a.email', 'r.plan', 'e.status',
+          eb.fn.coalesce('e.hold_expires_at', 'e.turn_expires_at').as('respond_by'),
+          eb.selectFrom('orders as o').select('o.id').whereRef('o.live_entry_id', '=', 'e.id').orderBy('o.piece').limit(1).as('order_id'),
+        ])
+        .where('r.run_id', '=', run.id)
+        .where('e.status', 'in', ['TURN', 'SECURED', 'CONFIRMED'])
+        .orderBy('e.status')
+        .orderBy('a.email')
+        .limit(SELECTED_MAX)
+        .execute()
+    : await db
+        .selectFrom('test_run_entrants as r')
+        .innerJoin('drop_entries as e', (j) => j.onRef('e.account_id', '=', 'r.account_id').on('e.drop_id', '=', run.drop_id))
+        .innerJoin('accounts as a', 'a.id', 'r.account_id')
+        .select((eb) => [
+          'r.account_id', 'a.email', 'r.plan', 'e.status', 'e.respond_by',
+          eb.selectFrom('orders as o').select('o.id').whereRef('o.drop_entry_id', '=', 'e.id').limit(1).as('order_id'),
+        ])
+        .where('r.run_id', '=', run.id)
+        .where('e.status', 'in', ['SELECTED', 'CONFIRMED'])
+        .orderBy('e.status')
+        .orderBy('a.email')
+        .limit(SELECTED_MAX)
+        .execute();
+  const selected: TestRunSelected[] = held.map((h) => ({
+    accountId: h.account_id,
+    email: h.email,
+    tier: Math.min(3, Math.max(0, Number((h.plan as unknown as BotPlan).tier) || 0)) as ClubTier,
+    status: h.status,
+    respondBy: h.respond_by ? new Date(h.respond_by) : null,
+    orderRef: h.order_id ? orderReference(h.order_id) : null,
+    canConfirm: open && (live ? h.status === 'TURN' || h.status === 'SECURED' : h.status === 'SELECTED'),
+    canRelease: open && live && h.status === 'SECURED',
+  }));
+  return { byTier, release: { real: total - test, test, total }, selected };
+}
+
+/**
+ * The figures a purge request stored (`purge_summary`, services/test-purge.ts), as the view gives them: a place's time
+ * back to a Date.
+ */
+function storedFigures(summary: unknown): Pick<TestRunView, 'byTier' | 'release' | 'selected'> | null {
+  const s = summary as Partial<Pick<TestRunView, 'byTier' | 'release' | 'selected'>> | null;
+  if (!s || !Array.isArray(s.byTier) || !s.release || !Array.isArray(s.selected)) return null;
+  return {
+    byTier: s.byTier,
+    release: s.release,
+    selected: s.selected.map((x) => ({ ...x, respondBy: x.respondBy ? new Date(x.respondBy) : null })),
+  };
+}
 
 // ── Shares and draws ───────────────────────────────────────────────────────
 
@@ -788,11 +908,14 @@ export class TestEntrantService {
     const rows = await this.db
       .selectFrom('test_runs as r')
       .innerJoin('admin_users as a', 'a.id', 'r.created_by')
+      .leftJoin('admin_users as p', 'p.id', 'r.purge_requested_by')
       .select(['r.id', 'r.status', 'r.created_at', 'r.ended_at', 'a.email', 'r.entrants', 'r.report', 'r.peaks'])
+      .select(['r.purge_state', 'r.purge_reason', 'r.purge_requested_at', 'p.email as purge_requested_email', 'r.purged_at', 'r.purge_summary', 'r.purge_result'])
       .where('r.drop_id', '=', id)
       .orderBy('r.created_at', 'desc')
       .orderBy('r.id')
       .execute();
+    const purgeable = await this.ctx.services.testPurge.purgeability(rows.map((r) => r.id));
     return rows.map((r) => {
       const report = r.report as unknown as TestReport | null;
       return {
@@ -806,6 +929,8 @@ export class TestEntrantService {
         checksTotal: report ? report.total : null,
         report,
         peaks: (r.peaks as JsonObject | null) ?? null,
+        purge: this.ctx.services.testPurge.purgeOf(r),
+        purgeable: purgeable.get(r.id) ?? { reason: 'TEST_RUN_NOT_FOUND', message: 'This test no longer exists.' },
       };
     });
   }
@@ -827,91 +952,15 @@ export class TestEntrantService {
     const run = await this.db
       .selectFrom('test_runs as r')
       .innerJoin('admin_users as a', 'a.id', 'r.created_by')
+      .leftJoin('admin_users as p', 'p.id', 'r.purge_requested_by')
       .selectAll('r')
-      .select('a.email as created_email')
+      .select(['a.email as created_email', 'p.email as purge_requested_email'])
       .where('r.id', '=', id)
       .executeTakeFirst();
     if (!run) throw testRunNotFound();
-    const live = run.mode === 'LIVE';
-    const entries = live ? 'live_entries' : 'drop_entries';
-    const counted = await sql<{ tier: number; status: string | null; n: number }>`
-      SELECT (r.plan->>'tier')::int AS tier, e.status, count(*)::int AS n
-        FROM test_run_entrants AS r
-        LEFT JOIN ${sql.table(entries)} AS e ON e.drop_id = ${run.drop_id} AND e.account_id = r.account_id
-       WHERE r.run_id = ${id}
-       GROUP BY 1, 2`.execute(this.db);
-    const byTier: TestRunTier[] = TEST_TIER_LABELS.map((label, tier) => ({
-      tier: tier as ClubTier, label, entered: 0, inRoom: 0, selected: 0, confirmed: 0, lapsed: 0, released: 0, missed: 0, left: 0, withdrawn: 0,
-    }));
-    for (const c of counted.rows) {
-      const t = byTier[Math.min(3, Math.max(0, Number(c.tier)))]!;
-      const n = Number(c.n);
-      if (c.status === null) continue;
-      t.entered += n;
-      const s = c.status;
-      if (live) {
-        if ((LIVE_OPEN_STATUSES as readonly string[]).includes(s)) t.inRoom += n;
-        if (s === 'TURN' || s === 'SECURED') t.selected += n;
-        if (s === 'CONFIRMED') t.confirmed += n;
-        if (s === 'EXPIRED') t.lapsed += n;
-        if (s === 'RELEASED') t.released += n;
-        if (s === 'MISSED') t.missed += n;
-        if (s === 'LEFT') t.left += n;
-      } else {
-        if (s === 'ENTERED' || s === 'WAITLISTED') t.inRoom += n;
-        if (s === 'SELECTED') t.selected += n;
-        if (s === 'CONFIRMED') t.confirmed += n;
-        if (s === 'LAPSED') t.lapsed += n;
-        if (s === 'WITHDRAWN') t.withdrawn += n;
-      }
-    }
-    const totals = await sql<{ total: number; test: number }>`
-      SELECT count(*)::int AS total, count(t.account_id)::int AS test
-        FROM ${sql.table(entries)} AS e LEFT JOIN test_entrants AS t ON t.account_id = e.account_id
-       WHERE e.drop_id = ${run.drop_id}`.execute(this.db);
-    const total = Number(totals.rows[0]?.total ?? 0);
-    const test = Number(totals.rows[0]?.test ?? 0);
-    const open = run.status !== 'ENDED';
-    const held = live
-      ? await this.db
-          .selectFrom('test_run_entrants as r')
-          .innerJoin('live_entries as e', (j) => j.onRef('e.account_id', '=', 'r.account_id').on('e.drop_id', '=', run.drop_id))
-          .innerJoin('accounts as a', 'a.id', 'r.account_id')
-          .select((eb) => [
-            'r.account_id', 'a.email', 'r.plan', 'e.status',
-            eb.fn.coalesce('e.hold_expires_at', 'e.turn_expires_at').as('respond_by'),
-            eb.selectFrom('orders as o').select('o.id').whereRef('o.live_entry_id', '=', 'e.id').orderBy('o.piece').limit(1).as('order_id'),
-          ])
-          .where('r.run_id', '=', id)
-          .where('e.status', 'in', ['TURN', 'SECURED', 'CONFIRMED'])
-          .orderBy('e.status')
-          .orderBy('a.email')
-          .limit(SELECTED_MAX)
-          .execute()
-      : await this.db
-          .selectFrom('test_run_entrants as r')
-          .innerJoin('drop_entries as e', (j) => j.onRef('e.account_id', '=', 'r.account_id').on('e.drop_id', '=', run.drop_id))
-          .innerJoin('accounts as a', 'a.id', 'r.account_id')
-          .select((eb) => [
-            'r.account_id', 'a.email', 'r.plan', 'e.status', 'e.respond_by',
-            eb.selectFrom('orders as o').select('o.id').whereRef('o.drop_entry_id', '=', 'e.id').limit(1).as('order_id'),
-          ])
-          .where('r.run_id', '=', id)
-          .where('e.status', 'in', ['SELECTED', 'CONFIRMED'])
-          .orderBy('e.status')
-          .orderBy('a.email')
-          .limit(SELECTED_MAX)
-          .execute();
-    const selected: TestRunSelected[] = held.map((h) => ({
-      accountId: h.account_id,
-      email: h.email,
-      tier: Math.min(3, Math.max(0, Number((h.plan as unknown as BotPlan).tier) || 0)) as ClubTier,
-      status: h.status,
-      respondBy: h.respond_by ? new Date(h.respond_by) : null,
-      orderRef: h.order_id ? orderReference(h.order_id) : null,
-      canConfirm: open && (live ? h.status === 'TURN' || h.status === 'SECURED' : h.status === 'SELECTED'),
-      canRelease: open && live && h.status === 'SECURED',
-    }));
+    // Once its purge started, the figures the request stored: the rows they are counted from are being deleted.
+    const stored = run.purge_state !== null && run.purge_summary !== null ? storedFigures(run.purge_summary) : null;
+    const { byTier, release, selected } = stored ?? (await testRunFigures(this.db, run));
     return {
       id: run.id,
       dropId: run.drop_id,
@@ -923,11 +972,13 @@ export class TestEntrantService {
       settings: run.settings as unknown as TestRunPress[],
       entrants: run.entrants,
       byTier,
-      release: { real: total - test, test, total },
+      release,
       selected,
       errors: [...(this.errors.get(id) ?? [])],
       report: (run.report as unknown as TestReport | null) ?? null,
       peaks: (run.peaks as JsonObject | null) ?? null,
+      purge: this.ctx.services.testPurge.purgeOf(run),
+      purgeable: (await this.ctx.services.testPurge.purgeability([id])).get(id) ?? { reason: 'TEST_RUN_NOT_FOUND', message: 'This test no longer exists.' },
     };
   }
 

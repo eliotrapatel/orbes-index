@@ -2522,7 +2522,7 @@ export class DropService {
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const d = await this.lock(tx, id);
+      const d = await this.lockUnpurged(tx, id);
       if (d.mode === 'LIVE') throw dropLive();
       if (!d.drawn_at) throw dropNotDrawn();
       if (d.set_id !== null) return this.offerNextSet(tx, d, actor, now, input.sizeId ?? null);
@@ -2605,7 +2605,7 @@ export class DropService {
     let leftOut: LeftOutAddon[] = [];
     await inTransaction(this.db, async (tx) => {
       const now = this.clock();
-      const d = await this.lock(tx, id);
+      const d = await this.lockUnpurged(tx, id);
       // No sale on a cancelled release (its direct reservations stay SELECTED); its places may still lapse.
       if (to === 'CONFIRMED' && d.cancelled_at) throw dropCancelled();
       const e = await tx.selectFrom('drop_entries').select(['id', 'status', 'rank', 'respond_by']).where('id', '=', entry).where('drop_id', '=', id).forUpdate().executeTakeFirst();
@@ -2696,6 +2696,26 @@ export class DropService {
   private async lock(tx: Db, id: string): Promise<DropRow> {
     const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).forUpdate().executeTakeFirst();
     if (!d) throw dropNotFound();
+    return d;
+  }
+
+  /**
+   * The drop's row FOR UPDATE for the staff's draw actions on a place (OFFER NEXT and its set variant, Confirm, Lapse),
+   * refused 409 RELEASE_BEING_PURGED while a test of the release (or of the release it is the after-room of) is being
+   * purged: PURGING, or PAUSED for a forbidden window or a running test (plan PURGE §N, §A.4, G14). An offer between
+   * two purge batches would delete a live offer or leave the test half purged for good. A purge paused for any other
+   * reason (a refusal that does not clear by itself) lifts the guard. The purge's batches take this same row lock first.
+   */
+  private async lockUnpurged(tx: Db, id: string): Promise<DropRow> {
+    const d = await this.lock(tx, id);
+    const purging = await tx
+      .selectFrom('test_runs')
+      .select('id')
+      .where('drop_id', 'in', d.parent_drop_id ? [d.id, d.parent_drop_id] : [d.id])
+      .where((eb) => eb.or([eb('purge_state', '=', 'PURGING'), eb.and([eb('purge_state', '=', 'PAUSED'), eb('purge_reason', 'in', ['PURGE_WINDOW', 'PURGE_TEST_RUNNING'])])]))
+      .limit(1)
+      .executeTakeFirst();
+    if (purging) throw conflict('RELEASE_BEING_PURGED', 'A test of this release is being purged. Try again once it is done.');
     return d;
   }
 

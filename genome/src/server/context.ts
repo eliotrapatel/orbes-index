@@ -93,6 +93,8 @@ import { FoundingService } from './services/founding.js';
 import { deriveEmailUnsubscribeKey, EmailService } from './services/email.js';
 import { EmailTriggers } from './services/email-triggers.js';
 import { TrackingService } from './services/tracking.js';
+import { TestPurgeService } from './services/test-purge.js';
+import { TestEntrantAccounts } from './services/population.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
 import { ScanReportService } from './services/scan-reports.js';
@@ -286,6 +288,8 @@ export interface AppServices {
   houseSender: HouseSender;
   /** THE VAULT (lot Q3): the vaults given by their sources, their opening and delivery, THE VAULT page's data, CLUB > THE VAULT's sources and table. */
   vault: VaultService;
+  /** TEST PURGE (lot PURGE, plan §A.4): an ended test's purge asked with a step-up, and its loop of bounded batches. */
+  testPurge: TestPurgeService;
 }
 
 export interface AppContext {
@@ -447,11 +451,14 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const ads = new AdsService({ db, audit, keys: config.ads, cookieSecret: config.cookieSecret, publicOrigin: config.publicOrigin, clock, log, ...(overrides.adsTestOrigin ? { testOrigin: overrides.adsTestOrigin } : {}) });
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
+    // The test entrants' accounts the views leave out: one set, read again by the test purge once it deleted some.
+    const testEntrantAccounts = new TestEntrantAccounts(db, clock);
     const tracking = new TrackingService({
       db,
       places,
       clock,
       log,
+      testEntrants: testEntrantAccounts,
       waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0,
       arrive: (input) => acquisition.arrive(input),
       attach: async (tx, deviceId, accountId, via, now) => {
@@ -563,6 +570,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       worn,
       houseSender,
       vault,
+      // The test purge (lot PURGE): its requests' step-up, the views written before accounts go, the rooms built again.
+      testPurge: new TestPurgeService({ db, audit, auth, clock, log, testEntrantAccounts, tracking, liveFrames }),
       ...overrides.services,
     };
 
@@ -585,6 +594,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
         await services.email.stop();
         await services.houseSender.stop();
         await services.ads.stop();
+        // The test purge's loop stops before the views' last write (lot PURGE, plan §A.4).
+        await services.testPurge.stop();
         // The views still in memory are written before the database closes (§3.3 T.8.3).
         await services.tracking.stop();
         if (ownsDb) await closeDb(db);
@@ -631,6 +642,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     // The ad events' sender (plan M4 §3.2, K27): a pass every 30 s once a platform has its keys, nothing while the
     // console's switch is off; tests drive sendDue.
     if (overrides.timers ?? config.env !== 'test') services.ads.start();
+    // The test purge (lot PURGE, plan §A.4): the purges left under way go on, then its loop (every second); tests drive pass.
+    await services.testPurge.boot();
+    if (overrides.timers ?? config.env !== 'test') services.testPurge.start();
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});

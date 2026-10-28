@@ -1000,6 +1000,8 @@ describe('test releases only (D15, G1): a drawn draw holding an entry outside th
     expect(place.status).toBe('SELECTED');
     await request(w, r.id);
     await refusedUnchanged(() => batch(db, r.id), 'PURGE_RELEASE_NOT_OVER', 'a real place still to answer');
+    // As the loop does with that refusal (PURGE.5): PAUSED with it, which lifts the staff's guard on the release.
+    await db.updateTable('test_runs').set({ purge_state: 'PAUSED', purge_reason: 'PURGE_RELEASE_NOT_OVER' }).where('id', '=', r.id).execute();
     await w.h.ctx.services.drops.confirm(r.drop, place.id, null, w.f.admin);
     await refusedUnchanged(() => batch(db, r.id), 'PURGE_NOT_TEST', 'a real winner confirmed');
   }, 240_000);

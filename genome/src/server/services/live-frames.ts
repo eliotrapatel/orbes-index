@@ -228,6 +228,16 @@ export class LiveFrameGate {
     return r.pending.find((p) => !p.giving && !p.settled) ?? null;
   }
 
+  /**
+   * The test purge (services/test-purge.ts, plan PURGE §A.4) deleted entries of an ended release: the readings this
+   * process keeps of its entries are dropped, and a frame is asked for, so the hub drops the frame it cached and builds
+   * the room again from the database (publishFrame). The batch counters stay as they are. Never rejects.
+   */
+  async forget(dropId: string): Promise<void> {
+    this.releases.get(dropId)?.readings.clear();
+    await this.ask(dropId);
+  }
+
   /** A pending batch done with (given or refused): out of the queue. */
   drop(dropId: string, p: PendingBatch): void {
     const r = this.of(dropId);

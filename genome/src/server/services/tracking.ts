@@ -476,6 +476,22 @@ export class ViewBuffer {
     return n;
   }
 
+  /**
+   * The buffered rows that name one of `accountIds` (accounts the test purge deleted) take no account: each stays as
+   * the device's anonymous view, as before its link, so no flush ever inserts a row naming a deleted account (its
+   * foreign key would refuse the whole chunk, real collectors' views with it). Returns how many.
+   */
+  forgetAccounts(accountIds: ReadonlySet<string>): number {
+    let n = 0;
+    for (const r of this.rows) {
+      if (r.accountId !== null && accountIds.has(r.accountId)) {
+        r.accountId = null;
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   /** Remove the device's buffered rows and its pending sight (a device marked staff). Returns how many rows. */
   dropDevice(deviceId: number): number {
     const before = this.rows.length;
@@ -837,6 +853,37 @@ export class TrackingService {
     await this.backfilling;
     const r = await this.buffer.flush({ force: true });
     if (r.failed) this.log.warn({ held: this.buffer.size }, 'views left unwritten at shutdown');
+  }
+
+  /**
+   * The test purge (services/test-purge.ts, plan PURGE §A.4), before it deletes test accounts: the scans being recorded
+   * and the buffer written now, whatever the pool says (`flush({ force: true })`), and the flush awaited. `left`: the
+   * rows still waiting (pushed by requests meanwhile, or kept after a refused write: `failed`). Nothing else changes.
+   */
+  async flushNow(): Promise<FlushResult & { left: number }> {
+    await Promise.all([...this.scans]);
+    const r = await this.buffer.flush({ force: true });
+    await this.buffer.settled();
+    return { ...r, left: this.buffer.size };
+  }
+
+  /**
+   * The test purge, after a call that deleted accounts (and once more when a purge is done): what this process still
+   * holds of them is forgotten, so a later flush never names one: a device's cached entry linked to one is dropped
+   * (the next view reads the device's row again), and a buffered row naming one takes no account (ViewBuffer
+   * forgetAccounts). Returns how many of each.
+   */
+  forgetAccounts(accountIds: Iterable<string>): { devices: number; rows: number } {
+    const gone = new Set(accountIds);
+    if (gone.size === 0) return { devices: 0, rows: 0 };
+    let devices = 0;
+    for (const [hash, d] of [...this.devices]) {
+      if (d.accountId !== null && gone.has(d.accountId)) {
+        this.devices.delete(hash);
+        devices += 1;
+      }
+    }
+    return { devices, rows: this.buffer.forgetAccounts(gone) };
   }
 
   /** One batch of views from `POST /api/v1/seen` (see the header). Never thrown: a dropped batch is an outcome. */
