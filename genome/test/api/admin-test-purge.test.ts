@@ -539,7 +539,7 @@ describe('admin: TEST PURGE over HTTP', () => {
     twoTests.push({ id: first.id, drop }, { id: second.id, drop });
   });
 
-  it('the dialogs\' previews (step PURGE.7), read only and ADMIN only: one test\'s phrase, purgeable, drawn draw and blocking orders, a window\'s words; PURGE ALL\'s tests, paused, skipped with their words and the pool\'s accounts it may delete', async () => {
+  it('the dialogs\' previews (step PURGE.7), read only and ADMIN only: one test\'s phrase, purgeable, drawn draw and blocking orders, a window\'s words; PURGE ALL\'s tests, paused, skipped with their words, the pool\'s accounts it may delete and its tests of a drawn draw', async () => {
     const sealed = await sealedOf(purger.id);
     const rows = (await stepUps(purger.id)).length;
     const audits = (await db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n;
@@ -568,7 +568,7 @@ describe('admin: TEST PURGE over HTTP', () => {
     expect((await h.ctx.services.testPurge.preview(a.id)).hold).toEqual({ reason: 'PURGE_WINDOW', message: windowWords(h.clock.now(), MAINTENANCE_MARGIN_MS.purgeBatch) });
     h.clock.set(back);
 
-    const all = (safeJson(await admin.get('/api/admin/test-runs/purge-all')) as { preview: { runs: string[]; resumed: string[]; skipped: { runId: string; reason: string; message: string }[]; hold: unknown; accounts: number } }).preview;
+    const all = (safeJson(await admin.get('/api/admin/test-runs/purge-all')) as { preview: { runs: string[]; resumed: string[]; skipped: { runId: string; reason: string; message: string }[]; hold: unknown; accounts: number; drawn: number } }).preview;
     expect(all.runs).toEqual(expect.arrayContaining([a.id, ...twoTests.map((r) => r.id)]));
     expect(all.resumed).toEqual([]);
     expect(all.hold).toBeNull();
@@ -579,6 +579,20 @@ describe('admin: TEST PURGE over HTTP', () => {
     const held = new Set((await db.selectFrom('test_run_entrants').select('account_id').where('run_id', 'in', all.skipped.map((x) => x.runId)).execute()).map((r) => r.account_id));
     expect(all.accounts).toBe(pool.filter((x) => !held.has(x)).length);
     expect(all.accounts).toBeGreaterThan(0);
+    // D15: how many of the tests it purges are of a drawn draw (its release or its after-room drawn): a's is, the
+    // cancelled release's two tests are not; the skipped ones are not counted.
+    const drawnOf = async (runId: string) => {
+      const r = await db.selectFrom('test_runs').select('drop_id').where('id', '=', runId).executeTakeFirstOrThrow();
+      const drops = await db.selectFrom('drops').select('drawn_at').where((eb) => eb.or([eb('id', '=', r.drop_id), eb('parent_drop_id', '=', r.drop_id)])).execute();
+      return drops.some((d) => d.drawn_at !== null);
+    };
+    const going = [...all.runs, ...all.resumed];
+    const drawnRuns = (await Promise.all(going.map(async (x) => ((await drawnOf(x)) ? x : null)))).filter((x) => x !== null);
+    expect(drawnRuns).toContain(a.id);
+    for (const t of twoTests) expect(drawnRuns).not.toContain(t.id);
+    expect(all.drawn).toBe(drawnRuns.length);
+    const skippedDrawn = all.skipped.find((x) => x.reason === 'PURGE_NOT_TEST')!.runId;
+    expect(await drawnOf(skippedDrawn)).toBe(true);
 
     // Read only: nothing written, no code used.
     expect((await db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n).toBe(audits);

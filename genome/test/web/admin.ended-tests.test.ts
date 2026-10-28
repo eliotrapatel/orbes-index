@@ -40,7 +40,7 @@ function run(id: string, p: Partial<EndedTestRun> = {}): EndedTestRun {
   };
 }
 
-const preview = (p: Partial<TestPurgeAllPreview> = {}): TestPurgeAllPreview => ({ runs: [A], resumed: [], skipped: [], hold: null, accounts: 12, ...p });
+const preview = (p: Partial<TestPurgeAllPreview> = {}): TestPurgeAllPreview => ({ runs: [A], resumed: [], skipped: [], hold: null, accounts: 12, drawn: 0, ...p });
 
 describe('the Ended tests page', () => {
   it('is #/settings/tests, reached from the Settings page', () => {
@@ -69,7 +69,7 @@ describe('the Ended tests page', () => {
     expect(PURGE_ALL_PHRASE).toBe('PURGE ALL TESTS');
   });
 
-  it('says in PURGE ALL’s dialog how many tests, the paused purges resumed, what goes, the pool’s accounts, each test skipped with its release (Paris) and why, and a window now', () => {
+  it('says in PURGE ALL’s dialog how many tests, the paused purges resumed, what goes, how many are of a drawn draw (0, 1, N), the pool’s accounts, each test skipped with its release (Paris) and why, and a window now', () => {
     const rows = [
       run(A),
       run(B, { dropName: 'THE VAULT RING', mode: 'LIVE', endedAt: '2026-07-14T10:00:00.000Z' }),
@@ -99,12 +99,15 @@ describe('the Ended tests page', () => {
         ],
         hold: { reason: 'PURGE_WINDOW', message: night },
         accounts: 1204,
+        drawn: 1,
       }),
       rows,
     );
     expect(text.lines[0]).toBe('2 ended tests are purged, and 1 paused purge goes on.');
     expect(text.lines.at(-1)).toBe('3 ended tests are skipped:');
-    expect(text.lines[2]).toMatch(/^Then the test pool’s accounts no other test uses are deleted: up to 1.204 \(/);
+    // D15: a drawn draw among them, said after what goes, as the single test's dialog says it.
+    expect(text.lines[2]).toBe('1 of these tests is of a drawn draw: once purged, its public ranked list no longer matches its seed.');
+    expect(text.lines[3]).toMatch(/^Then the test pool’s accounts no other test uses are deleted: up to 1.204 \(/);
     // Each skipped test by its release and when it ended, Paris time (summer: UTC + 2; winter: UTC + 1), with the server's words.
     expect(text.skipped).toEqual([
       'THE VAULT RING · ended 14 JUL 2026 · 12:00 Paris: Purge once the release is over.',
@@ -118,6 +121,12 @@ describe('the Ended tests page', () => {
     expect(purgeAllDialogText(preview({ runs: [] }), rows).lines[0]).toBe('No ended test can be purged now.');
     // Every account of the pool still used by a test that stays.
     expect(purgeAllDialogText(preview({ accounts: 0 }), rows).lines[2]).toBe('No test account of the pool is deleted now: a test that stays still uses each of them.');
+    // No drawn draw: no line (the default preview above has none, so its lines are first, what goes, the accounts).
+    expect(purgeAllDialogText(preview({ drawn: 0 }), rows).lines.some((l) => /drawn draw/.test(l))).toBe(false);
+    expect(purgeAllDialogText(preview({ runs: [A, C], resumed: [B], drawn: 3 }), rows).lines[2]).toBe(
+      '3 of these tests are of drawn draws: once purged, their public ranked lists no longer match their seeds.',
+    );
+    expect(purgeAllDialogText(preview({ drawn: 1 }), rows).lines).toHaveLength(4);
     expect(purgeAllDialogText(preview({ skipped: [{ runId: B, reason: 'PURGE_RELEASE_NOT_OVER', message: 'Purge once the release is over.' }] }), rows).lines.at(-1)).toBe('1 ended test is skipped:');
   });
 });

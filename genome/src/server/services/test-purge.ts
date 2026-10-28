@@ -170,8 +170,9 @@ export interface TestPurgePreview extends PurgePlanFigures {
 /**
  * GET /api/admin/test-runs/purge-all (lot PURGE, step PURGE.7): what PURGE ALL ENDED TESTS would do now, read only:
  * the tests it would purge, the paused purges it would resume, the others skipped with their words, a window or a
- * running test that would refuse it now, and at most how many of the pool's test accounts its sweep deletes (those no
- * test outside it still uses; an order, a founding-list row or an invitation may keep some).
+ * running test that would refuse it now, at most how many of the pool's test accounts its sweep deletes (those no
+ * test outside it still uses; an order, a founding-list row or an invitation may keep some), and how many of its tests
+ * are of a drawn draw (D15: their public ranked lists no longer match their seeds once purged).
  */
 export interface TestPurgeAllPreview {
   runs: string[];
@@ -179,6 +180,8 @@ export interface TestPurgeAllPreview {
   skipped: { runId: string; reason: string; message: string }[];
   hold: { reason: string; message: string } | null;
   accounts: number;
+  /** Of `runs` and `resumed`, the tests whose release or its after-room was drawn (planOf's `drawn`). */
+  drawn: number;
 }
 
 /** A run's purge as the console reads it (TestEntrantService.view and list). */
@@ -677,7 +680,30 @@ export class TestPurgeService {
         ),
       )
       .executeTakeFirstOrThrow();
-    return { runs, resumed, skipped, hold: await this.holdWords(now), accounts: Number(accounts.n) };
+    // Of the tests it purges or resumes, those whose release or its after-room was drawn (D15, as planOf's `drawn`).
+    const asked = [...runs, ...resumed];
+    const drawn =
+      asked.length === 0
+        ? 0
+        : Number(
+            (
+              await this.db
+                .selectFrom('test_runs as r')
+                .select((eb) => eb.fn.countAll<number>().as('n'))
+                .where('r.id', 'in', asked)
+                .where((eb) =>
+                  eb.exists(
+                    eb
+                      .selectFrom('drops as d')
+                      .select('d.id')
+                      .where((w) => w.or([w('d.id', '=', w.ref('r.drop_id')), w('d.parent_drop_id', '=', w.ref('r.drop_id'))]))
+                      .where('d.drawn_at', 'is not', null),
+                  ),
+                )
+                .executeTakeFirstOrThrow()
+            ).n,
+          );
+    return { runs, resumed, skipped, hold: await this.holdWords(now), accounts: Number(accounts.n), drawn };
   }
 
   /** A window or a running test that would refuse a request now, with its words (Paris time first), or null. */

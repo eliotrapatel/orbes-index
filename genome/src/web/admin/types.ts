@@ -5251,6 +5251,8 @@ export interface TestPurgeAllPreview {
   hold: TestPurgeHold | null;
   /** At most this many of the pool's test accounts deleted by its sweep. */
   accounts: number;
+  /** How many of its tests (purged or resumed) are of a drawn draw: their public ranked lists no longer match their seeds. */
+  drawn: number;
 }
 
 /** GET /api/admin/test-runs/active: the RUNNING test, whatever its release (the Drops tab). */

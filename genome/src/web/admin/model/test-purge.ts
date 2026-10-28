@@ -10,8 +10,8 @@
  *  - PURGE (ADMIN) when the server says it can be pressed; on a PAUSED purge the same request resumes it.
  *  - The dialogs: the phrase (PURGE TEST <the test's first 8>, PURGE ALL TESTS), the authenticator code (a fresh one:
  *    the code of the sign-in was used), what goes and what stays, a drawn draw's ranked list, the orders that keep their
- *    accounts, a window or a running test that would refuse it now; PURGE ALL: how many tests, which are skipped and
- *    why, and at most how many of the pool's test accounts go.
+ *    accounts, a window or a running test that would refuse it now; PURGE ALL: how many tests, how many of them are of
+ *    a drawn draw, which are skipped and why, and at most how many of the pool's test accounts go.
  */
 import { formatCount, humanize } from '../format.js';
 import type { AdminRole, EndedTestRun, TestPurgeAllPreview, TestPurgePreview, TestRunPurge, TestRunSummary } from '../types.js';
@@ -62,6 +62,14 @@ export const PURGE_ALL_WHAT =
 
 /** A drawn draw (D15): its ranked list is public. */
 export const PURGE_DRAWN_LINE = 'This draw was drawn: once purged, its public ranked list no longer matches its seed.';
+
+/** PURGE ALL's tests of a drawn draw (D15), or null when none. */
+export function drawnAllLine(n: number): string | null {
+  if (n <= 0) return null;
+  return n === 1
+    ? '1 of these tests is of a drawn draw: once purged, its public ranked list no longer matches its seed.'
+    : `${formatCount(n)} of these tests are of drawn draws: once purged, their public ranked lists no longer match their seeds.`;
+}
 
 /** The orders a purge keeps with their accounts. */
 export function blockingLine(n: number): string | null {
@@ -142,8 +150,8 @@ export function purgeDialogText(preview: Pick<TestPurgePreview, 'drawn' | 'block
 }
 
 /**
- * PURGE ALL's dialog: how many tests (and paused purges resumed), what goes, the pool's accounts, and each test skipped
- * with its release and its words.
+ * PURGE ALL's dialog: how many tests (and paused purges resumed), what goes, how many are of a drawn draw (D15), the
+ * pool's accounts, and each test skipped with its release and its words.
  */
 export function purgeAllDialogText(preview: TestPurgeAllPreview, rows: readonly Pick<EndedTestRun, 'id' | 'dropName' | 'endedAt'>[]): { lines: string[]; skipped: string[]; hold: string | null } {
   const n = preview.runs.length;
@@ -161,6 +169,7 @@ export function purgeAllDialogText(preview: TestPurgeAllPreview, rows: readonly 
     lines: [
       first,
       PURGE_ALL_WHAT,
+      ...[drawnAllLine(preview.drawn)].filter((l): l is string => l !== null),
       preview.accounts > 0
         ? `Then the test pool’s accounts no other test uses are deleted: up to ${formatCount(preview.accounts)} (an order, the founding list or an invitation keeps an account).`
         : 'No test account of the pool is deleted now: a test that stays still uses each of them.',
