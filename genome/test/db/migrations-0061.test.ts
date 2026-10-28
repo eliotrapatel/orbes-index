@@ -46,6 +46,8 @@ const PARTNERS = '0064_partners';
 const LATEST = '0065_ad_conversions';
 /** Lot PURGE, step PURGE.2: the test purge, taken down first and applied again with the others. */
 const PURGE = '0066_test_purge';
+/** Lot PURGE, step PURGE.8: the platform reset, taken down first and applied again with the others. */
+const RESET = '0067_platform_reset';
 const NOW = new Date('2026-10-01T09:00:00.000Z');
 const DAY = 86_400_000;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
@@ -64,7 +66,7 @@ async function snapshotOf(db: Kysely<any>): Promise<string[]> {
   ).rows.map((r) => r.object);
 }
 
-/** Down to 0060 (0066, 0065, 0064, 0063, 0062, then 0061, reverted). */
+/** Down to 0060 (0067, 0066, 0065, 0064, 0063, 0062, then 0061, reverted). */
 async function downTo0060(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -109,8 +111,8 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     // 0061 rolled back and applied again on the demo: `up` writes the tiers held then. The demo's example rewards (step
     // Q3.12, OP-27), never given, are taken out first: `down` refuses while a reward other than the floor exists.
     await db().deleteFrom('vault_rewards').where('kind', '<>', 'I_WAS_THERE').where('given', '=', 0).execute();
-    expect(await downTo0060(db())).toEqual([PURGE, LATEST, PARTNERS, MARGIN, LATER, NAME]);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, MARGIN, PARTNERS, LATEST, PURGE]);
+    expect(await downTo0060(db())).toEqual([RESET, PURGE, LATEST, PARTNERS, MARGIN, LATER, NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, MARGIN, PARTNERS, LATEST, PURGE, RESET]);
     const keys = async (account: string) =>
       (await db().selectFrom('vault_occasions_before').select('occasion_key').where('account_id', '=', account).orderBy('occasion_key').execute()).map((r) => r.occasion_key);
     expect(await keys(lucas.id)).toEqual(['TIER:1', 'TIER:2']);
@@ -126,7 +128,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
 
   it('rolls back to the schema of 0060 exactly without rows, and applies again to the latest', async () => {
     const latest = await snapshotOf(db());
-    // 0066, 0065, 0064, 0063 and 0062 down first: the schema 0061 left, which this case reads.
+    // 0067, 0066, 0065, 0064, 0063 and 0062 down first: the schema 0061 left, which this case reads.
     const rs = await createMigrator(db()).migrateTo(NAME);
     if (rs.error) throw rs.error;
     const at0061 = await snapshotOf(db());
@@ -146,7 +148,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     ]);
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger accounts accounts_invited_once']);
     expect(added.filter((o) => o.startsWith('constraint house_deliveries ')).map((o) => o.split(' ')[2]).sort()).toEqual(['house_deliveries_source', 'house_deliveries_source_check']);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, MARGIN, PARTNERS, LATEST, PURGE]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, MARGIN, PARTNERS, LATEST, PURGE, RESET]);
     expect(await snapshotOf(db())).toEqual(latest);
   });
 
@@ -371,7 +373,7 @@ function cases(state: { db: () => Db; ctx: () => AppContext; clock: () => Manual
     await expect(downTo0060(db())).rejects.toThrow(
       `migration 0061_the_vault cannot be rolled back: ${vaults} vaults, 1 invitations, 1 invited accounts, 1 vault messages, ${rewards} vault rewards, 2 vault source settings, 1 releases with their vault on and 1 vault-only models exist`,
     );
-    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(PURGE);
+    expect((await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1)).toBe(RESET);
   });
 }
 

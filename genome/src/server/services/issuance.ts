@@ -1150,7 +1150,7 @@ function errorFields(e: unknown): Record<string, unknown> {
 // ── Reserved identities (plan LIVE RELEASE+, L6) ──────────────────────────
 
 /** The advisory lock of the serials of a year and category: max+1 is race-free under it. */
-const serialLockKey = (year: number, categoryIndex: number): number => (year - 2000) * 32 + categoryIndex;
+export const serialLockKey = (year: number, categoryIndex: number): number => (year - 2000) * 32 + categoryIndex;
 
 /** The next serial of a year and category (max+1, never one used before), under their advisory lock. */
 async function allocateSerial(trx: Db, year: number, categoryIndex: number): Promise<number> {

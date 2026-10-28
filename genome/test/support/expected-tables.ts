@@ -1,0 +1,16 @@
+/**
+ * Every table the migrations create in `public` (Kysely's own two apart), in name order: test/db/migrations.test.ts
+ * checks the schema against it, test/db/reset-plan.test.ts the PLATFORM RESET's plan (lot PURGE, plan §B.1). A new
+ * table goes here with its migration.
+ */
+export const EXPECTED_TABLES: readonly string[] = [
+  'account_addresses', 'account_notes', 'account_profiles', 'account_recovery_codes', 'account_scores', 'account_sizes', 'account_sources', 'account_tags', 'account_tastes', 'account_wishes', 'accounts', 'acquisition_conversions', 'acquisition_daily', 'acquisition_sources', 'acquisition_state', 'acquisition_touches', 'activity_hourly', 'ad_clicks', 'ad_consents', 'ad_events', 'addon_choices', 'addon_conversions', 'addon_item_prices', 'addon_items', 'admin_user_locations', 'admin_users', 'ads_channel_platforms', 'ads_settings', 'after_room_guests', 'anomalies', 'audit_logs', 'audit_purge_gaps',
+  'authentication_events', 'bench_items', 'boxes', 'card_prints', 'care_requests', 'carriers', 'categories', 'category_allowances', 'circle_daily_visits', 'circle_poll_votes',
+  'circle_post_images', 'circle_posts', 'circle_rsvps', 'claim_code_renewals', 'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes',
+  'collections', 'collector_history', 'collector_places', 'collector_view_months', 'collector_view_totals', 'collector_views', 'credit_uses', 'cryptographic_keys', 'currency_rates', 'device_daily_stats', 'drop_addons', 'drop_entries', 'drop_entry_sizes', 'drop_sizes', 'drops', 'email_outbox', 'email_preferences', 'email_state', 'email_templates', 'engagement_runs', 'event_journal', 'genomes', 'geo_places', 'guarantee_settings', 'heard_options',
+  'house_deliveries', 'house_guarantees', 'house_messages', 'house_moment_settings', 'invitations', 'invoices', 'link_channels', 'links', 'live_access_models', 'live_entries', 'live_entry_sizes', 'live_interest', 'live_interest_sizes', 'live_messages',
+  'live_tier_windows', 'margin_unit_costs', 'media_objects', 'model_images', 'model_pairs', 'model_wish_months', 'models', 'order_addon_items', 'order_alert_settings', 'order_cases', 'order_events', 'orders', 'ownership',
+  'ownership_certificates', 'ownership_transfers', 'partner_experiences', 'partner_invoices', 'partners', 'platform_reset_gate', 'platform_reset_plan', 'preregistrations', 'product_status_history', 'products', 'purge_delete_tables', 'reception_lines', 'receptions', 'release_answers', 'retailers', 'returns', 'revocations',
+  'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'set_models', 'set_sales', 'sets', 'shipment_items', 'shipments', 'shipping_cost_rates', 'shipping_rates', 'shop_requests',
+  'sku_thresholds', 'skus', 'stock_corrections', 'stock_location_countries', 'stock_locations', 'stock_movements', 'supplier_order_lines', 'supplier_orders', 'supplier_returns', 'suppliers', 'test_entrants', 'test_run_entrants', 'test_runs', 'tier_grants', 'tracking_device_accounts', 'tracking_devices', 'tracking_state', 'vault_gifts', 'vault_occasions_before', 'vault_rewards', 'vault_sources', 'vaults', 'view_daily_stats', 'warranties', 'warranty_claims', 'wish_months_counted', 'worn_photos',
+];

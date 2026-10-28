@@ -634,6 +634,14 @@ export type TestRunStatus = (typeof TEST_RUN_STATUSES)[number];
 export const TEST_RUN_PURGE_STATES = ['PURGING', 'PAUSED', 'DONE'] as const;
 export type TestRunPurgeState = (typeof TEST_RUN_PURGE_STATES)[number];
 
+/** A table's class in the PLATFORM RESET (platform_reset_plan.kind, migration 0067; db/reset-plan.ts RESET_PLAN). */
+export const PLATFORM_RESET_CLASSES = ['KEEP', 'PARTLY', 'WIPE'] as const;
+export type PlatformResetClass = (typeof PLATFORM_RESET_CLASSES)[number];
+
+/** What the reset gate's single-use authorization is for (platform_reset_gate.authorized_purpose, migration 0067). */
+export const PLATFORM_RESET_PURPOSES = ['platform.reset', 'platform.reset.lock'] as const;
+export type PlatformResetPurpose = (typeof PLATFORM_RESET_PURPOSES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -3966,6 +3974,38 @@ export interface PurgeDeleteTablesTable {
   ord: number;
 }
 
+/**
+ * The PLATFORM RESET's plan (migration 0067, lot PURGE): every table of the schema with its class; written by the
+ * migrations' superuser only, read by the reset function (db/reset-plan.ts RESET_PLAN, kept equal by test).
+ */
+export interface PlatformResetPlanTable {
+  tbl: string;
+  kind: PlatformResetClass;
+}
+
+/**
+ * The PLATFORM RESET's gate (migration 0067): one row (id 1), written by the reset's database functions only (a
+ * superuser); the app reads it. The holder recorded at the deploy; LOCK RESET one way; the last reset; the single-use
+ * authorization a step-up writes and the reset or LOCK RESET uses within 5 minutes.
+ */
+export interface PlatformResetGateTable {
+  id: number;
+  /** The reset holder: the oldest active ADMIN with two-factor authentication at the deploy; NULL: none (refused). */
+  holder_admin_id: string | null;
+  /** LOCK RESET: set once, never back (with launched_by). */
+  launched_at: TimestampNullable;
+  launched_by: string | null;
+  last_reset_at: TimestampNullable;
+  last_reset_by: string | null;
+  /** How many resets were done; never goes down. */
+  resets: number;
+  /** What the last reset captured before the wipe: the old head, the holder's second factor, the request, recent24h, the lists. */
+  last_reset_details: JsonbNullable<JsonObject>;
+  authorized_by: string | null;
+  authorized_at: TimestampNullable;
+  authorized_purpose: PlatformResetPurpose | null;
+}
+
 /** A bot of a run (migration 0024_z): its network, what it was drawn to do, what it did; a draw's confirmation due. */
 export interface TestRunEntrantsTable {
   run_id: string;
@@ -4221,6 +4261,8 @@ export interface Database {
   test_run_entrants: TestRunEntrantsTable;
   audit_purge_gaps: AuditPurgeGapsTable;
   purge_delete_tables: PurgeDeleteTablesTable;
+  platform_reset_plan: PlatformResetPlanTable;
+  platform_reset_gate: PlatformResetGateTable;
   claim_code_renewals: ClaimCodeRenewalsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;

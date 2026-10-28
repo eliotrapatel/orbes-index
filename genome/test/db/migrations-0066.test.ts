@@ -40,6 +40,8 @@ import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.
 
 const BEFORE = '0065_ad_conversions';
 const NAME = '0066_test_purge';
+/** Lot PURGE, step PURGE.8: the platform reset, after it, taken down first and applied again with it. */
+const RESET = '0067_platform_reset';
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
 const APP_ROLE = `orbes_t66_${randomBytes(4).toString('hex')}`;
 
@@ -134,6 +136,10 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
 
   it('rolls back to the schema of 0065 exactly without rows: what 0066 added, 0001\'s orbes_reject_mutation back byte for byte; and applies again to the latest, its list written', async () => {
     const latest = await snapshotOf(db());
+    // 0067 down first: the schema 0066 left, which this case reads.
+    const rs = await createMigrator(db()).migrateTo(NAME);
+    if (rs.error) throw rs.error;
+    const withIt = await snapshotOf(db());
     expect(await downTo0065(db())).toEqual([NAME]);
     const before = await snapshotOf(db());
     const at0065 = await state.schemaAt0065();
@@ -141,16 +147,16 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
     const reject = (s: string[]) => s.filter((o) => o.startsWith('function orbes_reject_mutation('));
     // 0001's body exactly (its md5 at 0065 is the one 0001 wrote; 0066 replaced it; down put it back).
     expect(reject(before)).toHaveLength(1);
-    expect(reject(latest)).toHaveLength(1);
-    expect(reject(latest)).not.toEqual(reject(before));
+    expect(reject(withIt)).toHaveLength(1);
+    expect(reject(withIt)).not.toEqual(reject(before));
     const src = (await one<{ src: string }>(`SELECT prosrc AS src FROM pg_proc WHERE proname = 'orbes_reject_mutation'`)).src;
     expect(src).toBe(`
    BEGIN
      RAISE EXCEPTION '% on % is not allowed (%)', TG_OP, TG_TABLE_NAME, COALESCE(TG_ARGV[0], 'immutable')
        USING ERRCODE = 'OR001';
    END `);
-    const added = latest.filter((o) => !before.includes(o) && !notNull(o));
-    const removed = before.filter((o) => !latest.includes(o) && !notNull(o));
+    const added = withIt.filter((o) => !before.includes(o) && !notNull(o));
+    const removed = before.filter((o) => !withIt.includes(o) && !notNull(o));
     expect(removed).toEqual(reject(before));
     expect(added.filter((o) => !of0066(o))).toEqual([]);
     expect(before.filter((o) => of0066(o) && !o.startsWith('function orbes_reject_mutation('))).toEqual([]);
@@ -237,7 +243,7 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
       'orbes_test_runs_purge_guard()',
     ]);
     // Up again: the same schema, the list written, nothing else.
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, RESET]);
     expect(await snapshotOf(db())).toEqual(latest);
     expect(await count('audit_purge_gaps')).toBe(0);
     expect(await count('purge_delete_tables')).toBe(PURGE_DELETE_TABLES.length);
@@ -259,9 +265,10 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
         FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE NOT t.tgisinternal AND t.tgfoid = 'orbes_reject_mutation'::regproc AND n.nspname = 'public'
        ORDER BY 1, 2`);
-    // 0066 adds its own two (the tombstones' append-only and no-truncate); the 57 of 0065 are unchanged.
+    // 0066 adds its own two (the tombstones' append-only and no-truncate), 0067 the reset gate's no-truncate (its own
+    // cases are migrations-0067's); the 57 of 0065 are unchanged.
     expect(uses.filter((u) => u.tbl === 'audit_purge_gaps').map((u) => u.tgname)).toEqual(['audit_purge_gaps_append_only', 'audit_purge_gaps_no_truncate']);
-    const old = uses.filter((u) => u.tbl !== 'audit_purge_gaps');
+    const old = uses.filter((u) => u.tbl !== 'audit_purge_gaps' && u.tbl !== 'platform_reset_gate');
     expect(old).toHaveLength(57);
     // Each one fired on a copy of its table outside public, alone, for each of its events: its own words, as 0001 says them.
     await run(`DROP SCHEMA IF EXISTS t66 CASCADE`);
@@ -319,7 +326,7 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
     const a = await audit({ action: 't66.row' });
     // Without the setting, or with another purpose: refused as always.
     await guarded(run(`DELETE FROM audit_logs WHERE id = ${a}`), 'DELETE on audit_logs is not allowed (audit_logs is append-only)');
-    await guarded(bypass(`DELETE FROM audit_logs WHERE id = ${a}`, 'reset'), 'DELETE on audit_logs is not allowed (audit_logs is append-only)');
+    await guarded(bypass(`DELETE FROM audit_logs WHERE id = ${a}`, 'purge_all'), 'DELETE on audit_logs is not allowed (audit_logs is append-only)');
     await guarded(bypass(`DELETE FROM audit_logs WHERE id = ${a}`, 'PURGE'), 'DELETE on audit_logs is not allowed (audit_logs is append-only)');
     // An UPDATE never, a TRUNCATE never, even with it.
     await guarded(bypass(`UPDATE audit_logs SET action = 't66.changed' WHERE id = ${a}`), 'UPDATE on audit_logs is not allowed (audit_logs is append-only)');
@@ -357,11 +364,11 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
     expect(src).toContain(`TG_TABLE_NAME IN (${PURGE_GUARDED_TABLES.map((t) => `'${t}'`).join(',')})`);
   });
 
-  it('the definer functions: SECURITY DEFINER, owned by a superuser, their exact settings, the only ones of public; the helpers out of PUBLIC\'s reach, the batches and the windows not', async () => {
+  it('the definer functions: SECURITY DEFINER, owned by a superuser, their exact settings, the purge\'s only ones (the reset\'s are migrations-0067\'s, which lists them all); the helpers out of PUBLIC\'s reach, the batches and the windows not', async () => {
     const definers = await all<{ name: string; su: boolean; config: string[] }>(`
       SELECT p.proname AS name, r.rolsuper AS su, p.proconfig AS config
         FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
-       WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef ORDER BY 1`);
+       WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND p.proname LIKE 'orbes\\_purge\\_%' ORDER BY 1`);
     expect(definers).toEqual(
       ['orbes_purge_test_pool_batch', 'orbes_purge_test_run_batch'].map((name) => ({
         name,
@@ -973,7 +980,7 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
       const lastApplied = async () => (await createMigrator(db()).getMigrations()).filter((m) => m.executedAt).map((m) => m.name).at(-1);
       const message = (n: readonly number[]) => `migration 0066_test_purge cannot be rolled back: ${n[0]} audit tombstones and ${n[1]} test purges exist`;
       await expect(downTo0065(db())).rejects.toThrow(message(counts));
-      expect(await lastApplied()).toBe(NAME);
+      expect(await lastApplied()).toBe(RESET);
       await run(`ALTER TABLE audit_purge_gaps DISABLE TRIGGER audit_purge_gaps_append_only`);
       await run(`DELETE FROM audit_purge_gaps`);
       await run(`ALTER TABLE audit_purge_gaps ENABLE TRIGGER audit_purge_gaps_append_only`);
@@ -982,9 +989,9 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
       await run(`UPDATE test_runs SET ${['purge_state', 'purge_requested_at', 'purge_requested_by', 'purged_at', 'purge_summary', 'purge_step_up_id', 'purge_windows', 'purge_reason', 'purge_result'].map((c) => `${c} = NULL`).join(', ')}`);
       await run(`ALTER TABLE test_runs ENABLE TRIGGER test_runs_purge_guard`);
       const runs = await count('test_runs');
-      expect(await downTo0065(db())).toEqual([NAME]);
+      expect(await downTo0065(db())).toEqual([RESET, NAME]);
       expect(await count('test_runs')).toBe(runs);
-      expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+      expect((await migrateToLatest(db())).applied).toEqual([NAME, RESET]);
       expect(await count('purge_delete_tables')).toBe(PURGE_DELETE_TABLES.length);
       await windowsOpen();
     });
