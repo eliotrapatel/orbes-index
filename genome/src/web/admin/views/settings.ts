@@ -27,8 +27,9 @@
  *    Add-ons, ENGRAVING, where its prices and its YOUR ORDERS switch are set.
  *  - House guarantee (plan NEXT-NINE, IN-01): the Grant dialog's defaults, valid for 90 days (1 to 730), 1 piece (1 to
  *    5), shown to the client; who set them and when. Changed by an ADMIN, audited `guarantee.settings`.
- * Its header leads to the Orders board, Logistics, the Emails page (plan MACRO M1 §4.3, views/emails.ts) and the Ended
- * tests page (lot PURGE, views/ended-tests.ts).
+ * Its header leads to the Orders board, Logistics, the Emails page (plan MACRO M1 §4.3, views/emails.ts), the Ended
+ * tests page (lot PURGE, views/ended-tests.ts) and, for the reset holder only, the Platform reset page (lot PURGE,
+ * views/platform-reset.ts).
  */
 import { countryName } from '../../../shared/countries.js';
 import { h, mount } from '../../shared/dom.js';
@@ -38,6 +39,7 @@ import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, ENGRAVING_SET
 import { GUARANTEE_LIMITS, PIECES_OPTIONS, piecesText, settingsInput, settingsProblem, settingsValues } from '../model/guarantees.js';
 import { countriesMovingHere, countriesSavedToast, countryAddOptions, LOCATION_COUNTRIES_TEXT, movingLine, sameCountries, servedNames } from '../model/location-countries.js';
 import { can } from '../model/permissions.js';
+import { mayAskHolder } from '../model/platform-reset.js';
 import { rateField, rateText, ratesChanged, ratesInput, ratesProblem, ratesValues, SHIPPING_SERVICE_LABELS } from '../model/program.js';
 import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type BoxView, type Carrier, type GuaranteeSettings, type HouseCurrency, type LocationCountriesResult, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
 import { href } from '../router.js';
@@ -52,13 +54,16 @@ const EXAMPLE_TRACKING = '6A12345678901';
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
-  const [alerts, locations, carriers, boxes, rates, guarantee] = await Promise.all([
+  const [alerts, locations, carriers, boxes, rates, guarantee, resetHolder] = await Promise.all([
     ctx.api.orderAlerts(),
     ctx.api.locations(),
     ctx.api.carriers(),
     ctx.api.boxes(),
     ctx.api.shippingRates(),
     ctx.api.guaranteeSettings(),
+    // Lot PURGE (plan §B.5): an ADMIN asks whether he is the reset holder; the page is linked for the holder only, and a
+    // failed ask shows no link (the Settings page itself never depends on it).
+    mayAskHolder(ctx.session.admin.role) ? ctx.api.platformResetHolder().then((x) => x.holder === true, () => false) : Promise.resolve(false),
   ]);
   const admin = can(ctx.session.admin.role, 'manageLogistics');
   const done = (msg: string) => (v: unknown) => {
@@ -79,6 +84,8 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
         linkButton('Emails', href('emailSettings'), 'ghost'),
         // Lot PURGE (plan §A.6): every ended test, PURGE and PURGE ALL.
         linkButton('Ended tests', href('endedTests'), 'ghost'),
+        // Lot PURGE (plan §B.5): the reset holder only.
+        resetHolder ? linkButton('Platform reset', href('platformReset'), 'ghost') : null,
       ],
     }),
     alertsSection(ctx, alerts, admin, done),

@@ -85,6 +85,7 @@ import { invoicesView } from './views/invoices.js';
 import { foundingView } from './views/founding.js';
 import { emailsView } from './views/emails.js';
 import { endedTestsView } from './views/ended-tests.js';
+import { platformResetView } from './views/platform-reset.js';
 import { houseMessagesView } from './views/house-messages.js';
 import { wornView } from './views/worn.js';
 import { segmentsView, segmentView } from './views/segments.js';
@@ -239,6 +240,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   emailSettings: { view: emailsView, title: 'Emails', nav: 'founding' },
   // Lot PURGE (plan §A.6): the Ended tests page, from Settings; the sidebar marks Orders, as for Settings.
   endedTests: { view: endedTestsView, title: 'Ended tests', nav: 'orders' },
+  // Lot PURGE (plan §B.5): the Platform reset page, from Settings, for the reset holder; the sidebar marks Orders, as for Settings.
+  platformReset: { view: platformResetView, title: 'Platform reset', nav: 'orders' },
   orders: { view: ordersView, title: 'Orders', nav: 'orders' },
   orderReturns: { view: orderReturnsView, title: 'Returns', nav: 'orders' },
   order: { view: orderView, title: 'Order', nav: 'orders' },

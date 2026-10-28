@@ -3,6 +3,7 @@
  * page, its press and LOCK RESET.
  *
  *   GET  /api/admin/platform-reset        ADMIN  the holder: the state and the preview (read only); anyone else { holder: false }
+ *        ?part=holder                    ADMIN  { holder: true | false } and nothing else (the Settings page's link; one read)
  *   POST /api/admin/platform-reset        ADMIN  RESET PLATFORM (phrase, password, code, what the page showed): 202
  *   POST /api/admin/platform-reset/lock   ADMIN  LOCK RESET (phrase, password, code): 200, for good
  *
@@ -36,6 +37,8 @@ export const adminPlatformResetRoutes: FastifyPluginAsync<AdminRouteDeps> = asyn
 
   app.get('/api/admin/platform-reset', { config: ADMIN }, async (request) => {
     const adminId = requireAdmin(request).admin.id;
+    // The Settings page's link: whether he is the holder, without the state's and the preview's reads.
+    if ((request.query as Record<string, unknown> | undefined)?.part === 'holder') return { holder: await reset().isHolder(adminId) };
     const state = await reset().state(adminId);
     if (!state.holder) return { holder: false };
     return { ...state, preview: state.launched ? null : await reset().preview(adminId) };

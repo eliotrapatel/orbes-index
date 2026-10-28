@@ -268,6 +268,8 @@ import type {
   TestRunInput,
   TestPurgeAllPreview,
   TestPurgePreview,
+  PlatformResetPage,
+  PlatformResetPress,
   TestRunSummary,
   TestRunView,
   AdminVault,
@@ -2467,6 +2469,28 @@ export class AdminApi {
   /** Every ended test of every release, the newest ended first (AUDITOR); `background` for the refresh made by a timer. */
   endedTestRuns(opts: { background?: boolean } = {}): Promise<{ runs: EndedTestRun[] }> {
     return this.request('GET', '/api/admin/test-runs/ended', { background: opts.background === true });
+  }
+
+  // ── PLATFORM RESET (lot PURGE) ────────────────────────────────────────────
+
+  /** The reset holder's page: his state and the preview (ADMIN, read only); anyone else `{ holder: false }`. */
+  platformReset(): Promise<PlatformResetPage> {
+    return this.get('/api/admin/platform-reset');
+  }
+
+  /** Whether this ADMIN is the reset holder, and nothing else (the Settings page's link; read only, nothing counted). */
+  platformResetHolder(): Promise<{ holder: boolean }> {
+    return this.get('/api/admin/platform-reset', { part: 'holder' });
+  }
+
+  /** RESET PLATFORM (the holder): phrase, current password, a fresh code, and what the page showed; 202, then the platform restarts. */
+  resetPlatform(press: PlatformResetPress): Promise<{ restartsIn: string }> {
+    return this.post('/api/admin/platform-reset', press);
+  }
+
+  /** LOCK RESET (the holder): phrase LOCK RESET, current password and a fresh code; for good. */
+  lockPlatformReset(phrase: string, password: string, totp: string): Promise<{ launched: { at: string; by: string | null } }> {
+    return this.post('/api/admin/platform-reset/lock', { phrase, password, totp });
   }
 
   /** The server's status: its latest sample and the last 10 minutes. */

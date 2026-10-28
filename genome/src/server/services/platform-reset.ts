@@ -13,6 +13,7 @@
  *    active category, the next INV-, CN-, P- and PC- numbers and the next test, `test-0001`), each line OK or failing;
  *    the last refused reset (the newest `platform.reset.failed` since the last reset); and why a reset would be refused
  *    now (the database's precheck, in words).
+ *  - `isHolder(adminId)`: whether he is the holder, nothing else (the Settings page's link, one read of the gate).
  *  - `preview(adminId)` (holder only): one REPEATABLE READ, READ ONLY transaction, counts and names only, no lock
  *    beyond reads and no rehearsal (D19): every table's rows that go and stay by its class, the collectors neither test
  *    nor team (`countedCollector`, population.ts) with their 20 newest sign-up dates in Paris and `collectorsSeenUntil`
@@ -491,6 +492,16 @@ export class PlatformResetService {
       lastFailure: await this.lastFailure(on, gate.last_reset_at),
       refusal: await this.refusalNow(on, admin, now),
     };
+  }
+
+  /**
+   * Whether `adminId` is the reset holder, and nothing else (the console's Settings page shows its link to the holder
+   * only): one read of the gate, none of the state's or the preview's work.
+   */
+  async isHolder(adminId: string): Promise<boolean> {
+    const admin = typeof adminId === 'string' && UUID_RE.test(adminId) ? adminId.toLowerCase() : null;
+    const gate = await this.gate(this.db);
+    return !!admin && !!gate && gate.holder_admin_id === admin;
   }
 
   /** What a reset would delete and keep (see the header): the holder only; read only, nothing locked or stored. */

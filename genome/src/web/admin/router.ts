@@ -114,6 +114,8 @@ export const ROUTES = [
   { name: 'emailSettings', path: '/settings/emails' },
   /** The Ended tests page (lot PURGE, plan §A.6): every ended test, PURGE and PURGE ALL; from the Settings page, no link of its own in the sidebar. */
   { name: 'endedTests', path: '/settings/tests' },
+  /** The Platform reset page (lot PURGE, plan §B.5): the reset holder only; from the Settings page, no link of its own in the sidebar. */
+  { name: 'platformReset', path: '/settings/platform-reset' },
   { name: 'document', path: '/documents/:docId' },
 ] as const;
 

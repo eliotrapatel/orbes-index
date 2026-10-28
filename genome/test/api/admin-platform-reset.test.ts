@@ -4,7 +4,7 @@
  * /api/admin/platform-reset and POST /api/admin/platform-reset/lock (routes/admin/platform-reset.ts).
  *
  *  - GET: the holder reads his state and the preview; another ADMIN `{ holder: false }` and nothing else; an OPERATOR
- *    and an AUDITOR 403; read only.
+ *    and an AUDITOR 403; read only. `?part=holder` (the Settings page's link, PURGE.12): `{ holder }` and nothing else.
  *  - Every refusal of both presses, each with its code and its words, through the route: the body and the phrase (400),
  *    an OPERATOR and an AUDITOR (403), CSRF (403), another ADMIN (403 RESET_NOT_HOLDER), every answer of the step-up
  *    (STEP_UP_PASSWORD_INVALID, STEP_UP_CODE_INVALID, STEP_UP_CODE_USED, STEP_UP_TOTP_NOT_ENABLED, INSUFFICIENT_ROLE,
@@ -310,6 +310,16 @@ describe('admin: PLATFORM RESET and LOCK RESET over HTTP', () => {
     expect({ status: others.statusCode, body: safeJson(others) }).toEqual({ status: 200, body: { holder: false } });
     for (const c of [operator, auditor]) {
       const res = await c.get(RESET_URL);
+      expect({ status: res.statusCode, code: errorOf(res).code }).toEqual({ status: 403, code: 'FORBIDDEN' });
+    }
+    // The Settings page's link (?part=holder): whether he is the holder, and nothing else; an OPERATOR and an AUDITOR 403.
+    for (const [c, holds] of [[admin, true], [other, false]] as const) {
+      const res = await c.get(`${RESET_URL}?part=holder`);
+      answers.push({ url: `GET ${RESET_URL}?part=holder`, status: res.statusCode, code: null });
+      expect({ status: res.statusCode, body: safeJson(res) }).toEqual({ status: 200, body: { holder: holds } });
+    }
+    for (const c of [operator, auditor]) {
+      const res = await c.get(`${RESET_URL}?part=holder`);
       expect({ status: res.statusCode, code: errorOf(res).code }).toEqual({ status: 403, code: 'FORBIDDEN' });
     }
     expect((await sql<{ n: string | number }>`SELECT count(*) AS n FROM audit_logs`.execute(db)).rows).toEqual(audits.rows);

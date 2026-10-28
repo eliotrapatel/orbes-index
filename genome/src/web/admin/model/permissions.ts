@@ -80,6 +80,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
    * fresh code of the authenticator app): ADMIN. An AUDITOR and an OPERATOR read the Ended tests page.
    */
   purgeTests: 'ADMIN',
+  /**
+   * PLATFORM RESET (lot PURGE, D12): an ADMIN asks whether he is the reset holder; the holder alone reads the Platform
+   * reset page and presses RESET PLATFORM or LOCK RESET (the server says who the holder is, never the console).
+   */
+  resetPlatform: 'ADMIN',
   /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
   manageCircle: 'OPERATOR',
   /**

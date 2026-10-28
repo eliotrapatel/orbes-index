@@ -5255,6 +5255,123 @@ export interface TestPurgeAllPreview {
   drawn: number;
 }
 
+// ── PLATFORM RESET (lot PURGE: services/platform-reset.ts, routes/admin/platform-reset.ts) ───────────────────────
+
+/**
+ * What a reset captured before the wipe (entry 1's `capture`), and what the preview lists now (its `lists`): what
+ * stays that a test may have made, the segments that go and the signing keys.
+ */
+export interface ResetCapture {
+  skus: {
+    code: string;
+    model: string | null;
+    addon: string | null;
+    size: string;
+    sizeType: string | null;
+    status: string;
+    createdAt: Iso;
+    pieces: number;
+    orders: number;
+    releaseSizes: number;
+    stockMoves: number;
+    /** How it came: 'with the add-on', 'declared', 'with the model', 'before the type' or 'by a flow'. */
+    how: string;
+    /** Made by a flow and still offered: the 9 Oct "check" flag. */
+    check: boolean;
+  }[];
+  logins: { email: string; role: string; totp: boolean; status: string; createdAt: Iso }[];
+  suppliers: { name: string; status: string; createdAt: Iso }[];
+  pointsOfSale: { name: string; city: string | null; country: string | null; status: string; createdAt: Iso }[];
+  carriers: { name: string; status: string; createdAt: Iso }[];
+  stockLocations: { name: string; default: boolean; address: boolean; createdAt: Iso }[];
+  boxes: { name: string; status: string; createdAt: Iso }[];
+  addons: { name: string; kind: string; status: string; createdAt: Iso }[];
+  sets: { name: string; code: string; status: string; createdAt: Iso }[];
+  vaultRewardsGiven: { id: string; kind: string; given: number; quantity: number | null; active: boolean }[];
+  adsEventsFrom: Iso | null;
+  pieceRanges: { year: number; category: string; pieces: number; first: string; last: string }[];
+  segmentsGone: string[];
+  keys: { keyId: number; kid: string; status: string }[];
+}
+
+/** Every number after a reset, computed by the server for the date (numbersAfterReset, H2). */
+export interface ResetNumbers {
+  year: number;
+  pieceReferences: { category: string; name: string; reference: string }[];
+  invoice: string;
+  creditNote: string;
+  partnerInvoice: string;
+  partnerCreditNote: string;
+  test: string;
+}
+
+/** One line of the post-check after a reset: OK or failing, with what was found. */
+export interface ResetPostCheckLine {
+  key: 'chain' | 'key' | 'documents' | 'pieces' | 'numbers' | 'test';
+  label: string;
+  ok: boolean;
+  value: string;
+}
+
+/** The last reset, as entry 1 of the new audit log records it. */
+export interface LastPlatformReset {
+  at: Iso;
+  by: string | null;
+  counts: { wiped: Record<string, number>; kept: Record<string, number>; partly: Record<string, { before: number; after: number }>; collectors: number } | null;
+  rowsDeleted: number | null;
+  /** Entry 1 of the new log: its hash is the new anchor. */
+  anchor: { id: number; hash: string } | null;
+  /** The old log's last entry, as the reset read it. */
+  oldHead: { id: number; hash: string } | null;
+  capture: ResetCapture | null;
+  postCheck: ResetPostCheckLine[];
+}
+
+/** GET /api/admin/platform-reset: what a reset would delete and keep now (the holder only; read only). */
+export interface PlatformResetPreview {
+  at: Iso;
+  numbers: ResetNumbers;
+  tables: { table: string; kind: 'KEEP' | 'PARTLY' | 'WIPE'; rows: number; goes: number; stays: number }[];
+  rowsToGo: number;
+  /** The accounts neither test nor team: how many, and their newest sign-ups (Paris; never an email). */
+  collectors: { count: number; signUps: { at: Iso; paris: string }[] };
+  /** What the press sends back (D7, G18). */
+  collectorsSeen: number;
+  collectorsSeenUntil: string | null;
+  testEntrants: number;
+  foundingList: number;
+  links: { kept: number; wiped: number };
+  acquisitionSources: { kept: number };
+  partners: { partners: number; experiences: number; invoices: number };
+  releases: { id: string; title: string; mode: string; opensAt: Iso; closesAt: Iso }[];
+  liveOpen: { until: Iso; message: string } | null;
+  lists: ResetCapture;
+}
+
+/** GET /api/admin/platform-reset: `{ holder: false }` for anyone but the reset holder (nothing else). */
+export type PlatformResetPage =
+  | { holder: false }
+  | {
+      holder: true;
+      email: string;
+      launched: { at: Iso; by: string | null } | null;
+      lastReset: LastPlatformReset | null;
+      lastFailure: { at: Iso; reason: string; message: string } | null;
+      /** Why a reset would be refused now (its code and words, Paris time first), or null. */
+      refusal: { code: string; message: string } | null;
+      /** Null once LOCK RESET was pressed. */
+      preview: PlatformResetPreview | null;
+    };
+
+/** POST /api/admin/platform-reset: RESET PLATFORM, with what the page showed. */
+export interface PlatformResetPress {
+  phrase: string;
+  password: string;
+  totp: string;
+  collectorsSeen: number;
+  collectorsSeenUntil: string | null;
+}
+
 /** GET /api/admin/test-runs/active: the RUNNING test, whatever its release (the Drops tab). */
 export interface ActiveTestRun {
   id: string;

@@ -3860,6 +3860,110 @@ fieldset.cfield--checks > .cfield__label {
   color: var(--ink-soft);
 }
 
+/* PLATFORM RESET (lot PURGE): the state's line under its mark. */
+.reset__state-line {
+  display: block;
+  margin-top: 4px;
+}
+
+/* Its dialogs' paragraphs (what goes and the numbers after it, the accounts, what holds it now): set a little apart. */
+.reset__text + .reset__text {
+  margin-top: 8px;
+}
+
+/* What holds a reset now, inside its dialog: in the danger tone. */
+.reset__text.critical-text {
+  color: var(--critical);
+}
+
+/* The last reset's line: a sentence, its hashes in mono. */
+.reset__last {
+  max-width: 72ch;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  line-height: 1.7;
+}
+
+/* The checklist after a reset, and the lists of sign-ups and releases: hairline rows. */
+.reset__checklist,
+.reset__lines {
+  margin: 6px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.reset__checklist {
+  counter-reset: reset-check;
+}
+
+.reset__checklist li,
+.reset__lines li {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+}
+
+.reset__checklist li {
+  counter-increment: reset-check;
+  display: grid;
+  grid-template-columns: 2.2em minmax(0, 1fr);
+  max-width: 88ch;
+}
+
+.reset__checklist li::before {
+  content: counter(reset-check) ".";
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.reset__lines li {
+  color: var(--ink-soft);
+}
+
+/* After the 202: the notice over the whole console, sidebar included, until the platform answers again. */
+.reset-restart {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--white);
+  outline: none;
+}
+
+.reset-restart__box {
+  max-width: 460px;
+  text-align: center;
+}
+
+.reset-restart__box .loading__orbit {
+  display: inline-block;
+  margin-bottom: 26px;
+}
+
+.reset-restart__title {
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+}
+
+.reset-restart__text {
+  margin-top: 12px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.reset-restart__note {
+  margin-top: 18px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
