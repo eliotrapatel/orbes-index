@@ -3940,7 +3940,7 @@ export interface TestRunsTable {
   purge_step_up_id: ColumnType<number | null, number | null | undefined, number | null>;
   /** `{fromId, toId, from, to, accounts}`, written once by the purge function at its step 9; never by the app. */
   purge_windows: JsonbNullable<JsonObject>;
-  /** Why it is PAUSED, exactly while PAUSED (`PURGE_WINDOW`, `PURGE_TEST_RUNNING`, `PURGE_STUCK`, …). */
+  /** Why it is PAUSED, exactly while PAUSED: an upper-case code `^[A-Z0-9_]{1,64}$` (`PURGE_WINDOW`, `PURGE_TEST_RUNNING`, `PURGE_STUCK`, …; a database error as `SQLSTATE_<code>`, e.g. `SQLSTATE_55P03`, never its name). */
   purge_reason: ColumnType<string | null, string | null | undefined, string | null>;
   /** `{deleted, kept}`, exactly when DONE. */
   purge_result: JsonbNullable<JsonObject>;

@@ -489,8 +489,8 @@ export const UP: readonly string[] = [
   // Of the accounts p_ids, those step 10 may delete now (§A.3 step 10): no row of a table referencing accounts outside
   // purge_delete_tables names it (BLOCK, the BLOCK-by-name columns included, H11), no row names one of its rows of
   // those tables from outside them (a grant used, a test still holding it), at least one stored range names it (G13),
-  // and every audit row naming it inside its stored ranges is one the purge may delete (below p_cap, inside the
-  // range's times), as is every row targeting it.
+  // and every audit row naming it inside its stored ranges is one the purge may delete through at least one of them
+  // (below p_cap, inside that range's ids and times: the DELETE's union), as is every row targeting it.
   `CREATE FUNCTION orbes_purge_free(p_ids uuid[], p_cap bigint) RETURNS uuid[] LANGUAGE plpgsql STABLE ${HELPER} AS $$
    DECLARE
      v_ids uuid[] := coalesce(p_ids, '{}');
@@ -558,12 +558,16 @@ export const UP: readonly string[] = [
           ok AS (SELECT * FROM g WHERE f IS NOT NULL AND t IS NOT NULL AND f < t AND tf IS NOT NULL AND tt IS NOT NULL),
           ranged AS (SELECT DISTINCT unnest(accs) AS v FROM ok),
           stuck AS (
-            -- a row of its ranges the purge may not delete: at or above the cap, or outside the range's times
-            SELECT l.actor_id AS v FROM ok JOIN audit_logs l ON l.id >= ok.f AND l.id < ok.t
-             WHERE l.actor_type = 'account' AND l.actor_id = ANY (ok.accs) AND (l.id >= p_cap OR l.occurred_at < ok.tf OR l.occurred_at > ok.tt)
-            UNION
-            SELECT l.target_id FROM ok JOIN audit_logs l ON l.id >= ok.f AND l.id < ok.t
-             WHERE l.target_type = 'account' AND l.target_id = ANY (ok.accs) AND (l.id >= p_cap OR l.occurred_at < ok.tf OR l.occurred_at > ok.tt)),
+            -- a row naming it inside one of its ranges that the purge may delete through none of them (the DELETE's
+            -- union): no stored range of it holds the row by id, below the cap, AND by the range's own times
+            SELECT x.v FROM unnest(v_txt) AS x (v)
+             WHERE EXISTS (
+                     SELECT 1 FROM ok JOIN audit_logs l ON l.id >= ok.f AND l.id < ok.t
+                      WHERE x.v = ANY (ok.accs)
+                        AND ((l.actor_type = 'account' AND l.actor_id = x.v) OR (l.target_type = 'account' AND l.target_id = x.v))
+                        AND NOT EXISTS (SELECT 1 FROM ok k
+                                         WHERE x.v = ANY (k.accs) AND l.id >= k.f AND l.id < k.t AND l.id < p_cap
+                                           AND l.occurred_at >= k.tf AND l.occurred_at <= k.tt))),
           outside AS (
             -- a row targeting it outside every stored range of it
             SELECT x.v FROM unnest(v_txt) AS x (v)
@@ -661,6 +665,9 @@ export const UP: readonly string[] = [
      v_rt text[];
      v_cands uuid[];
      v_a uuid[];
+     v_others uuid[];
+     v_test uuid[];
+     v_out int;
      v_from bigint;
      v_to bigint;
      v_pstart bigint;
@@ -750,10 +757,27 @@ export const UP: readonly string[] = [
      ELSE
        v_a := orbes_purge_scope(v_cands);
      END IF;
+     -- The candidates still there that the scope leaves out (no test_run.start, a real account, a row before the
+     -- test), the stored ones and those still tied to the run: kept, and said so in the result.
+     SELECT count(*) INTO v_out FROM accounts a
+      WHERE (a.id = ANY (v_cands) OR EXISTS (SELECT 1 FROM test_run_entrants e WHERE e.run_id = p_run AND e.account_id = a.id))
+        AND NOT (a.id = ANY (v_a));
 
-     -- Test releases only (D15, G1): a drawn draw holding an entry of anyone outside the scope is never purged.
+     -- Test releases only (D15, G1): a drawn draw holding an entry of anyone outside the test is never purged. The
+     -- test is every test of the release and its after-room (several ENDED ones may share it, each with its own
+     -- accounts): this run's scope and each other run's, from its test_run_entrants until its windows are written,
+     -- then from the accounts stored there, put through the same scope rules.
+     v_others := array(
+       SELECT DISTINCT q.c FROM test_runs x
+        CROSS JOIN LATERAL (
+          SELECT e.account_id AS c FROM test_run_entrants e WHERE x.purge_windows IS NULL AND e.run_id = x.id
+          UNION ALL
+          SELECT s.v::uuid FROM jsonb_array_elements_text(x.purge_windows -> 'accounts') AS s (v) WHERE x.purge_windows IS NOT NULL) q
+        WHERE x.drop_id = ANY (v_r) AND x.id <> p_run
+        ORDER BY 1);
+     v_test := v_a || orbes_purge_scope(v_others);
      IF EXISTS (SELECT 1 FROM drops d JOIN drop_entries e ON e.drop_id = d.id
-                 WHERE d.id = ANY (v_r) AND d.drawn_at IS NOT NULL AND NOT (e.account_id = ANY (v_a))) THEN
+                 WHERE d.id = ANY (v_r) AND d.drawn_at IS NOT NULL AND NOT (e.account_id = ANY (v_test))) THEN
        ${refuse('PURGE_NOT_TEST', `'a drawn draw of the release holds an entry outside the test'`)};
      END IF;
 
@@ -819,7 +843,7 @@ export const UP: readonly string[] = [
      v_kept := jsonb_build_object(
        'orders', (SELECT count(DISTINCT x) FROM unnest(v_bad) x),
        'entries', (SELECT count(DISTINCT x) FROM unnest(v_keptd || v_keptl) x),
-       'accounts', cardinality(v_a) - cardinality(v_afull));
+       'accounts', v_out + cardinality(v_a) - cardinality(v_afull));
 
      -- One phase per call, the first that is not empty (§A.3).
      -- 1. after-room places of the entries going
@@ -1016,7 +1040,7 @@ export const UP: readonly string[] = [
        v_accounts := v_res -> 'deletedAccounts';
        v_deleted := v_res -> 'deleted';
        v_left := (v_res ->> 'left')::bigint;
-       v_kept := v_kept || jsonb_build_object('accounts', (v_res ->> 'kept')::int);
+       v_kept := v_kept || jsonb_build_object('accounts', v_out + (v_res ->> 'kept')::int);
        v_phase := CASE WHEN jsonb_array_length(v_accounts) > 0 OR v_left > 0 THEN 'ACCOUNTS' ELSE 'ACCOUNTS_DONE' END;
      END IF;
 

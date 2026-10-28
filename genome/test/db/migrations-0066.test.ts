@@ -739,6 +739,173 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
       expect((await one<{ su: boolean }>(`SELECT r.rolsuper AS su FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner WHERE p.proname = 'orbes_purge_test_run_batch'`)).su).toBe(true);
     });
 
+    describe('tests sharing pool accounts or a release', () => {
+      let testNo = 660000;
+      /** A pool account as takePool makes it: its address, the hash nothing matches, its pool row. */
+      const poolAccount = async () => {
+        const n = ++testNo;
+        const id = (
+          await one<{ id: string }>(
+            `INSERT INTO accounts (email, email_normalized, password_hash, display_name) VALUES ('test-${n}@orbes.test', 'test-${n}@orbes.test', '!test-entrant: never signs in', 'TEST ${n}') RETURNING id`,
+          )
+        ).id;
+        await run(`INSERT INTO test_entrants (account_id) VALUES ('${id}')`);
+        return id;
+      };
+      /** A release over: cancelled, or drawn (its seed revealed, published, drawn an hour ago). */
+      const releaseOf = async (title: string, o: { drawn?: boolean } = {}) =>
+        (
+          await one<{ id: string }>(
+            o.drawn
+              ? `INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash, seed, published_at, drawn_at)
+                 VALUES ('${model}', '${title}', 1, now() - interval '2 days', now() - interval '1 day', 'v1.${'E'.repeat(16)}.${'F'.repeat(64)}',
+                         sha256(decode(md5('${title}') || md5('${title}'), 'hex')), decode(md5('${title}') || md5('${title}'), 'hex'), now() - interval '3 days', now() - interval '1 hour') RETURNING id`
+              : `INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash, cancelled_at)
+                 VALUES ('${model}', '${title}', 1, now() - interval '2 days', now() - interval '1 day', 'v1.${'E'.repeat(16)}.${'F'.repeat(64)}', '${ZERO}', now()) RETURNING id`,
+          )
+        ).id;
+      /** An ENDED test on a release, run from `fromH` to `toH` hours ago, its start audited, its accounts its entrants. */
+      const endedRun = async (dropId: string, fromH: number, toH: number, accounts: string[]) => {
+        const id = (
+          await one<{ id: string }>(
+            `INSERT INTO test_runs (drop_id, mode, settings, entrants, created_by, created_at) VALUES ('${dropId}', 'DRAW', '[]', ${accounts.length}, '${admin}', now() - interval '${fromH} hours') RETURNING id`,
+          )
+        ).id;
+        await audit({ action: 'test_run.start', actorType: 'admin', actorId: admin, targetType: 'test_run', targetId: id, at: `now() - interval '${fromH} hours'` });
+        for (const a of accounts) {
+          await run(`INSERT INTO test_run_entrants (run_id, account_id, network, plan) VALUES ('${id}', '${a}', '100.64.1.0/24', '{}')`);
+        }
+        await run(`UPDATE test_runs SET status = 'ENDED', ended_at = now() - interval '${toH} hours', ended_by = '${admin}' WHERE id = '${id}'`);
+        return id;
+      };
+      /** PURGE ALL's request: one step-up, every run named set PURGING in its transaction. */
+      const requestAll = (ids: string[]) =>
+        db().transaction().execute(async (tx) => {
+          await run(`UPDATE admin_users SET failed_logins = 0 WHERE id = '${admin}'`, tx);
+          const su = await audit({ action: 'admin.step_up', actorType: 'admin', actorId: admin, targetType: 'admin', targetId: admin, details: { purpose: 'test_run.purge_all' } }, tx);
+          await run(
+            `UPDATE test_runs SET purge_state = 'PURGING', purge_requested_at = now(), purge_requested_by = '${admin}', purge_summary = '{"all": true}' WHERE id IN (${ids.map((i) => `'${i}'`).join(', ')})`,
+            tx,
+          );
+          return su;
+        });
+      type Batch = { phase: string; left: number; deletedAccounts: string[]; kept: Record<string, number> };
+      /** The batches until ACCOUNTS_DONE, then DONE as the service sets it (PURGE.5): the last result, every account deleted. */
+      const drain = async (runId: string) => {
+        let last: Batch | undefined;
+        const deletedAccounts: string[] = [];
+        for (let i = 0; i < 50 && last?.phase !== 'ACCOUNTS_DONE'; i++) {
+          last = (await one<{ r: Batch }>(`SELECT orbes_purge_test_run_batch('${runId}', 500) AS r`)).r;
+          deletedAccounts.push(...last.deletedAccounts);
+        }
+        expect(last?.phase, runId).toBe('ACCOUNTS_DONE');
+        await run(`UPDATE test_runs SET purge_state = 'DONE', purged_at = now(), purge_result = '{"deleted": {}, "kept": {}}' WHERE id = '${runId}'`);
+        return { ...last!, deletedAccounts };
+      };
+      const exists = async (account: string) => (await count(`accounts WHERE id = '${account}'`)) === 1;
+      const naming = (account: string) => count(`audit_logs WHERE (actor_type = 'account' AND actor_id = '${account}') OR (target_type = 'account' AND target_id = '${account}')`);
+      /**
+       * Two tests on two releases sharing the pool account S (takePool reuses an ENDED test's accounts): the first ten
+       * to nine hours ago, the second five to four hours ago, S granted a tier during the second. The first test's
+       * range [its start, its step-up) holds that row by id, not by time; the second's holds it by both.
+       */
+      const sharedPair = async (label: string) => {
+        const s = await poolAccount();
+        const r1 = await endedRun(await releaseOf(`T66 ${label} 1`), 10, 9, [s]);
+        const r2Drop = await releaseOf(`T66 ${label} 2`);
+        const r2 = (
+          await one<{ id: string }>(
+            `INSERT INTO test_runs (drop_id, mode, settings, entrants, created_by, created_at) VALUES ('${r2Drop}', 'DRAW', '[]', 1, '${admin}', now() - interval '5 hours') RETURNING id`,
+          )
+        ).id;
+        await audit({ action: 'test_run.start', actorType: 'admin', actorId: admin, targetType: 'test_run', targetId: r2, at: `now() - interval '5 hours'` });
+        await run(`INSERT INTO test_run_entrants (run_id, account_id, network, plan) VALUES ('${r2}', '${s}', '100.64.2.0/24', '{}')`);
+        const grant = await audit({ action: 'club.grant', actorType: 'admin', actorId: admin, targetType: 'account', targetId: s, details: { tier: 2 }, at: `now() - interval '4 hours 30 minutes'` });
+        await run(`UPDATE test_runs SET status = 'ENDED', ended_at = now() - interval '4 hours', ended_by = '${admin}' WHERE id = '${r2}'`);
+        return { s, r1, r2, grant };
+      };
+      /** The second purge deletes S: its row gone with its tombstone (the second test's), nothing names it. */
+      const sharedDeleted = async (p: { s: string; r2: string; grant: number }, last: Batch) => {
+        expect(last.deletedAccounts).toEqual([p.s]);
+        expect(last.kept.accounts).toBe(0);
+        expect(await exists(p.s)).toBe(false);
+        expect(await count(`test_entrants WHERE account_id = '${p.s}'`)).toBe(0);
+        expect(await naming(p.s)).toBe(0);
+        expect(await one<{ run_id: string }>(`SELECT run_id FROM audit_purge_gaps WHERE id = ${p.grant}`)).toEqual({ run_id: p.r2 });
+      };
+
+      it('an account shared by two tests on two releases is deleted by the second purge, its rows of either test gone: PURGE ALL, and one purge after the other', async () => {
+        // PURGE ALL: both asked together after both ended, one step-up (every range up to it).
+        const all = await sharedPair('ALL');
+        await requestAll([all.r1, all.r2]);
+        const first = await drain(all.r1);
+        // The second test still holds S: kept by the first purge, and said so.
+        expect(first.deletedAccounts).toEqual([]);
+        expect(first.kept.accounts).toBe(1);
+        expect(await exists(all.s)).toBe(true);
+        await sharedDeleted(all, await drain(all.r2));
+        // One after the other: the first asked and purged, the second asked later.
+        const each = await sharedPair('EACH');
+        await request(each.r1);
+        expect((await drain(each.r1)).kept.accounts).toBe(1);
+        expect(await exists(each.s)).toBe(true);
+        await request(each.r2);
+        await sharedDeleted(each, await drain(each.r2));
+      });
+
+      it('a drawn draw tested by two runs: both purge, each its own entries; an entry of a real account in it refuses PURGE_NOT_TEST to both', async () => {
+        const drawn = await releaseOf('T66 DRAWN TWICE', { drawn: true });
+        const a = await poolAccount();
+        const b = await poolAccount();
+        const ra = await endedRun(drawn, 8, 7, [a]);
+        const rb = await endedRun(drawn, 6, 5, [b]);
+        const entry = (account: string, status = 'WITHDRAWN') =>
+          one<{ id: string }>(`INSERT INTO drop_entries (drop_id, account_id, status, created_at) VALUES ('${drawn}', '${account}', '${status}', now() - interval '6 hours') RETURNING id`);
+        const ea = (await entry(a)).id;
+        const eb = (await entry(b)).id;
+        // A real collector's entry in the same draw: neither test is purged.
+        const real = (await one<{ id: string }>(`INSERT INTO accounts (email, email_normalized, password_hash, display_name) VALUES ('real-0066@example.com', 'real-0066@example.com', 'scrypt$x', 'REAL') RETURNING id`)).id;
+        const er = (await entry(real)).id;
+        await request(ra);
+        await request(rb);
+        await refused(run(`SELECT orbes_purge_test_run_batch('${ra}', 500)`), 'PURGE_NOT_TEST', 'a real entry, the first test');
+        await refused(run(`SELECT orbes_purge_test_run_batch('${rb}', 500)`), 'PURGE_NOT_TEST', 'a real entry, the second test');
+        // A test-looking account that registered itself is real too.
+        const looks = await poolAccount();
+        await audit({ action: 'account.register', actorType: 'account', actorId: looks, targetType: 'account', targetId: looks });
+        await run(`DELETE FROM drop_entries WHERE id = '${er}'`);
+        const el = (await entry(looks)).id;
+        await refused(run(`SELECT orbes_purge_test_run_batch('${ra}', 500)`), 'PURGE_NOT_TEST', 'a registered account');
+        await run(`DELETE FROM drop_entries WHERE id = '${el}'`);
+        // Test entries only: each test purges its own, whatever the other's state (not started, then done).
+        const firstA = await drain(ra);
+        expect(firstA.deletedAccounts).toEqual([a]);
+        expect(await count(`drop_entries WHERE id = '${ea}'`)).toBe(0);
+        expect(await count(`drop_entries WHERE id = '${eb}'`)).toBe(1);
+        const lastB = await drain(rb);
+        expect(lastB.deletedAccounts).toEqual([b]);
+        expect(await count(`drop_entries WHERE drop_id = '${drawn}'`)).toBe(0);
+        expect(await count(`drops WHERE id = '${drawn}'`)).toBe(1);
+        expect(await exists(real)).toBe(true);
+      });
+
+      it('a test with no start row deletes nothing and says every candidate was kept', async () => {
+        const c = await poolAccount();
+        const id = (
+          await one<{ id: string }>(
+            `INSERT INTO test_runs (drop_id, mode, settings, entrants, created_by, created_at) VALUES ('${await releaseOf('T66 NO START')}', 'DRAW', '[]', 1, '${admin}', now() - interval '3 hours') RETURNING id`,
+          )
+        ).id;
+        await run(`INSERT INTO test_run_entrants (run_id, account_id, network, plan) VALUES ('${id}', '${c}', '100.64.3.0/24', '{}')`);
+        await run(`UPDATE test_runs SET status = 'ENDED', ended_at = now() - interval '2 hours', ended_by = '${admin}' WHERE id = '${id}'`);
+        await request(id);
+        const last = await drain(id);
+        expect(last).toMatchObject({ deletedAccounts: [], kept: { accounts: 1 } });
+        expect(await exists(c)).toBe(true);
+        expect(await count(`test_run_entrants WHERE run_id = '${id}'`)).toBe(1);
+      });
+    });
+
     it('refuses to roll back while a tombstone or a purge exists, naming the counts; without them it goes down, and up again', async () => {
       const counts = [await count('audit_purge_gaps'), await count('test_runs WHERE purge_state IS NOT NULL')];
       expect(counts[0]).toBeGreaterThan(0);
