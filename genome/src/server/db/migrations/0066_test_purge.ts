@@ -556,24 +556,28 @@ export const UP: readonly string[] = [
              WHERE r.purge_windows IS NOT NULL AND s.v = ANY (v_txt)
              GROUP BY r.id, r.purge_windows),
           ok AS (SELECT * FROM g WHERE f IS NOT NULL AND t IS NOT NULL AND f < t AND tf IS NOT NULL AND tt IS NOT NULL),
-          ranged AS (SELECT DISTINCT unnest(accs) AS v FROM ok),
+          -- one row per (stored range, account of it): every test below joins on the account by equality, never
+          -- account by account (a correlated scan grows as accounts x rows in range x accounts)
+          oa AS MATERIALIZED (SELECT ok.f, ok.t, ok.tf, ok.tt, a.v FROM ok CROSS JOIN LATERAL unnest(ok.accs) AS a (v)),
+          ranged AS (SELECT DISTINCT v FROM oa),
+          named AS (
+            -- the rows naming one of them inside one of its ranges, read once (one scan of the ranges' span)
+            SELECT l.id, l.occurred_at, l.actor_id AS v FROM oa JOIN audit_logs l ON l.actor_type = 'account' AND l.actor_id = oa.v AND l.id >= oa.f AND l.id < oa.t
+             WHERE l.id >= (SELECT min(f) FROM ok) AND l.id < (SELECT max(t) FROM ok)
+            UNION
+            SELECT l.id, l.occurred_at, l.target_id FROM oa JOIN audit_logs l ON l.target_type = 'account' AND l.target_id = oa.v AND l.id >= oa.f AND l.id < oa.t
+             WHERE l.id >= (SELECT min(f) FROM ok) AND l.id < (SELECT max(t) FROM ok)),
           stuck AS (
             -- a row naming it inside one of its ranges that the purge may delete through none of them (the DELETE's
             -- union): no stored range of it holds the row by id, below the cap, AND by the range's own times
-            SELECT x.v FROM unnest(v_txt) AS x (v)
-             WHERE EXISTS (
-                     SELECT 1 FROM ok JOIN audit_logs l ON l.id >= ok.f AND l.id < ok.t
-                      WHERE x.v = ANY (ok.accs)
-                        AND ((l.actor_type = 'account' AND l.actor_id = x.v) OR (l.target_type = 'account' AND l.target_id = x.v))
-                        AND NOT EXISTS (SELECT 1 FROM ok k
-                                         WHERE x.v = ANY (k.accs) AND l.id >= k.f AND l.id < k.t AND l.id < p_cap
-                                           AND l.occurred_at >= k.tf AND l.occurred_at <= k.tt))),
+            SELECT DISTINCT n.v FROM named n
+             WHERE NOT EXISTS (SELECT 1 FROM oa k
+                                WHERE k.v = n.v AND n.id >= k.f AND n.id < k.t AND n.id < p_cap
+                                  AND n.occurred_at >= k.tf AND n.occurred_at <= k.tt)),
           outside AS (
             -- a row targeting it outside every stored range of it
-            SELECT x.v FROM unnest(v_txt) AS x (v)
-             WHERE EXISTS (SELECT 1 FROM audit_logs l
-                            WHERE l.target_type = 'account' AND l.target_id = x.v
-                              AND NOT EXISTS (SELECT 1 FROM ok WHERE x.v = ANY (ok.accs) AND l.id >= ok.f AND l.id < ok.t)))
+            SELECT DISTINCT l.target_id AS v FROM ranged r JOIN audit_logs l ON l.target_type = 'account' AND l.target_id = r.v
+             WHERE NOT EXISTS (SELECT 1 FROM oa WHERE oa.v = l.target_id AND l.id >= oa.f AND l.id < oa.t))
      SELECT coalesce(array_agg(x::uuid ORDER BY x::uuid), '{}') INTO v_ids
        FROM (SELECT v AS x FROM ranged WHERE v = ANY (v_txt)
              EXCEPT SELECT v FROM stuck

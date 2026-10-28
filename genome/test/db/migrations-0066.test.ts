@@ -904,6 +904,59 @@ function cases(state: { db: () => Db; schemaAt0065: () => Promise<string[] | nul
         expect(await exists(c)).toBe(true);
         expect(await count(`test_run_entrants WHERE run_id = '${id}'`)).toBe(1);
       });
+
+      it('step 10 in bounded time: 2,000 stored accounts, 20,000 collectors\' own rows in their range; orbes_purge_free and a batch of 100 well under the 30 s statement timeout, the stuck and the outside ones kept', async () => {
+        const N = 2000;
+        const hash = `sha256(convert_to(gen_random_uuid()::text, 'UTF8'))`;
+        const ids = (
+          await all<{ id: string }>(
+            `INSERT INTO accounts (email, email_normalized, password_hash, display_name)
+             SELECT 'test-' || (700000 + g) || '@orbes.test', 'test-' || (700000 + g) || '@orbes.test', '!test-entrant: never signs in', 'TEST B' || g FROM generate_series(1, ${N}) g
+             RETURNING id`,
+          )
+        ).map((r) => r.id).sort();
+        await run(`INSERT INTO test_entrants (account_id) SELECT unnest('{${ids.join(',')}}'::uuid[])`);
+        const id = await endedRun(await releaseOf('T66 BULK'), 3, 1, []);
+        await request(id);
+        const fromId = Number((await one<{ id: string }>(`SELECT id FROM audit_logs WHERE action = 'test_run.start' AND target_id = '${id}'`)).id);
+        // Inside the range: each account's own row, 20,000 rows of other collectors, and one row of the first account
+        // outside the range's times (stuck: the purge may not delete it).
+        await run(
+          `INSERT INTO audit_logs (occurred_at, actor_type, actor_id, action, target_type, target_id, prev_hash, hash)
+           SELECT now() - interval '2 hours', 'account', a, 'drop.enter', 'drop', 'd', ${hash}, ${hash} FROM unnest('{${ids.join(',')}}'::text[]) a`,
+        );
+        await run(
+          `INSERT INTO audit_logs (occurred_at, actor_type, actor_id, action, target_type, target_id, prev_hash, hash)
+           SELECT now() - interval '2 hours' + g * interval '1 ms', 'account', gen_random_uuid()::text, 'drop.enter', 'drop', 'd', ${hash}, ${hash} FROM generate_series(1, 20000) g`,
+        );
+        await audit({ action: 'drop.enter', actorType: 'account', actorId: ids[0], targetType: 'drop', targetId: 'd', at: `now() - interval '5 hours'` });
+        const toId = Number((await one<{ id: string }>(`SELECT max(id) + 1 AS id FROM audit_logs`)).id);
+        await run(
+          `UPDATE test_runs SET purge_windows = jsonb_build_object('fromId', ${fromId}, 'toId', ${toId}, 'from', now() - interval '3 hours', 'to', now() - interval '1 hour',
+                                                                   'accounts', to_jsonb('{${ids.join(',')}}'::uuid[])) WHERE id = '${id}'`,
+        );
+        // After the range: a row targeting the second account (outside every range of it).
+        await audit({ action: 'club.grant', actorType: 'admin', actorId: admin, targetType: 'account', targetId: ids[1], at: `now() - interval '2 hours'` });
+        const cap = Number((await one<{ id: string }>(`SELECT max(id) + 1 AS id FROM audit_logs`)).id);
+        let t = Date.now();
+        const free = (await one<{ f: string[] }>(`SELECT orbes_purge_free('{${ids.join(',')}}'::uuid[], ${cap}) AS f`)).f;
+        const freeMs = Date.now() - t;
+        expect(free).toEqual(ids.slice(2));
+        t = Date.now();
+        // As the batch function calls it (its definer setting: the guards' way through for the purge).
+        const batch = await db().transaction().execute(async (tx) => {
+          await run(`SET LOCAL orbes.guard_bypass = 'purge'`, tx);
+          return (await one<{ r: { deletedAccounts: string[]; left: number } }>(`SELECT orbes_purge_accounts('{${ids.join(',')}}'::uuid[], 100, ${cap}, '${id}') AS r`, tx)).r;
+        });
+        const batchMs = Date.now() - t;
+        expect(batch.deletedAccounts).toEqual(ids.slice(2, 102));
+        expect(await count(`audit_logs WHERE id >= ${fromId} AND id < ${toId} AND actor_type = 'account' AND actor_id = ANY ('{${ids.slice(2, 102).join(',')}}'::text[])`)).toBe(0);
+        expect(await count(`audit_logs WHERE id >= ${fromId} AND id < ${toId} AND actor_type = 'account'`)).toBe(20000 + N - 100 + 1);
+        expect(await exists(ids[0]!)).toBe(true);
+        expect(await exists(ids[1]!)).toBe(true);
+        // The correlated body of r0 ran over 5 minutes here on PGlite (85 ms and 192 ms now); the bound keeps the 30 s timeout far away.
+        expect({ freeMs: freeMs < 5000, batchMs: batchMs < 10000 }, `orbes_purge_free ${freeMs} ms, a batch ${batchMs} ms`).toEqual({ freeMs: true, batchMs: true });
+      }, 120_000);
     });
 
     it('refuses to roll back while a tombstone or a purge exists, naming the counts; without them it goes down, and up again', async () => {
