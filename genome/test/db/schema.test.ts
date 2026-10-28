@@ -175,6 +175,7 @@ describe('schema', () => {
       ['ad_events', 'kind', S.AD_EVENT_KINDS],
       ['ad_events', 'status', S.AD_EVENT_STATUSES],
       ['ad_events', 'skip_reason', S.AD_SKIP_REASONS],
+      ['test_runs', 'purge_state', S.TEST_RUN_PURGE_STATES],
       ['account_profiles', 'birth_date_by', S.PROFILE_SOURCES],
       ['account_profiles', 'updated_by', S.PROFILE_SOURCES],
       ['account_tastes', 'kind', S.TASTE_KINDS],

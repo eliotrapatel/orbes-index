@@ -81,9 +81,9 @@ describe('the NOCTURNE runbook (docs/launch/DEPLOY-NOCTURNE.md)', () => {
     // next lot (plan of 2026-10-07, 0033 to 0039), which ships as deployments H1 and H2 after G, or to the customer
     // intelligence lot (plan of 2026-10-08, 0040 to 0047), which ships as deployments I1 and I2 after H2, or to ORBES CARE
     // (plan of 2026-10-15, 0048), which ships after I2, or to the macro scope of 2026-10-20 (lot M1, 0049 to 0051, then lot M2, 0052 and 0053, then lot M3, 0054 to 0057), after it, or to ONE QUEUE
-    // (lot Q1, 0058, then lot Q2, 0059 and 0060), after M3, then THE VAULT (lot Q3, 0061 and 0062), then lot M4's margin settings (0063), partners (0064) and ad conversions (0065), after Q3.
+    // (lot Q1, 0058, then lot Q2, 0059 and 0060), after M3, then THE VAULT (lot Q3, 0061 and 0062), then lot M4's margin settings (0063), partners (0064) and ad conversions (0065), after Q3, then lot PURGE's test purge (0066), after M4.
     expect(NAMES.filter((n) => n > '0024_model_variants')[0]).toBe('0024_z_test_entrants');
-    expect(NAMES.filter((n) => n > '0024_z_test_entrants').every((n) => numberOf(n) >= 25 && numberOf(n) <= 65)).toBe(true);
+    expect(NAMES.filter((n) => n > '0024_z_test_entrants').every((n) => numberOf(n) >= 25 && numberOf(n) <= 66)).toBe(true);
     expect(runbook).toContain('[le runbook précédent](DEPLOY-LIVE-RELEASE-PLUS.md)');
     expect(outputs.join('\n')).toContain(AFTER_E.slice(-2).join('\n'));
     expect(runbook).toContain(`schema: ${AFTER_E.length} migration(s) applied, all known to orbes-genome:<TAG_F>`);

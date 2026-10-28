@@ -626,6 +626,14 @@ export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
 export const TEST_RUN_STATUSES = ['RUNNING', 'DONE', 'STOPPED', 'INTERRUPTED', 'ENDED'] as const;
 export type TestRunStatus = (typeof TEST_RUN_STATUSES)[number];
 
+/**
+ * An ended test's purge (test_runs.purge_state, migration 0066, lot PURGE): PURGING (its batches under way) ⇄ PAUSED (a
+ * window, a running test, or a refusal, its reason in purge_reason), PURGING → DONE (purged_at, purge_result). One way:
+ * never back to NULL, nothing after DONE.
+ */
+export const TEST_RUN_PURGE_STATES = ['PURGING', 'PAUSED', 'DONE'] as const;
+export type TestRunPurgeState = (typeof TEST_RUN_PURGE_STATES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -3919,6 +3927,43 @@ export interface TestRunsTable {
   report: JsonbNullable<JsonObject>;
   /** The test's running maxima while it ran (services/system-status.ts). */
   peaks: JsonbNullable<JsonObject>;
+  /** Its purge (migration 0066): NULL, PURGING, PAUSED or DONE, one way (test_runs_purge_guard). */
+  purge_state: ColumnType<TestRunPurgeState | null, TestRunPurgeState | null | undefined, TestRunPurgeState | null>;
+  /** When and by whom (admin_users.id) the purge was asked, written once with it. */
+  purge_requested_at: TimestampNullable;
+  purge_requested_by: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Exactly when DONE. */
+  purged_at: TimestampNullable;
+  /** The run's view and the planned deletions as the console showed them, written once by the request (`all: true`: PURGE ALL, display only). */
+  purge_summary: JsonbNullable<JsonObject>;
+  /** The request's `admin.step_up` audit row, set by the database at NULL → PURGING whatever is sent: the run's upper chain bound. */
+  purge_step_up_id: ColumnType<number | null, number | null | undefined, number | null>;
+  /** `{fromId, toId, from, to, accounts}`, written once by the purge function at its step 9; never by the app. */
+  purge_windows: JsonbNullable<JsonObject>;
+  /** Why it is PAUSED, exactly while PAUSED (`PURGE_WINDOW`, `PURGE_TEST_RUNNING`, `PURGE_STUCK`, …). */
+  purge_reason: ColumnType<string | null, string | null | undefined, string | null>;
+  /** `{deleted, kept}`, exactly when DONE. */
+  purge_result: JsonbNullable<JsonObject>;
+}
+
+/**
+ * A tombstone of an audit row the purge deleted (migration 0066): its id, prev_hash and hash as they were, so the chain
+ * check steps over the gap and still proves nothing else was removed; the run (NULL: PURGE ALL's sweep of the pool).
+ * Written by the purge only, append-only.
+ */
+export interface AuditPurgeGapsTable {
+  id: number;
+  prev_hash: Uint8Array;               // 32 bytes
+  hash: Uint8Array;                    // 32 bytes
+  run_id: string | null;
+  purged_at: TimestampDefault;
+}
+
+/** Step 10's DELETE-class tables referencing accounts, children first (migration 0066; db/purge-plan.ts PURGE_DELETE_TABLES). */
+export interface PurgeDeleteTablesTable {
+  tbl: string;
+  col: string;
+  ord: number;
 }
 
 /** A bot of a run (migration 0024_z): its network, what it was drawn to do, what it did; a draw's confirmation due. */
@@ -4174,6 +4219,8 @@ export interface Database {
   test_entrants: TestEntrantsTable;
   test_runs: TestRunsTable;
   test_run_entrants: TestRunEntrantsTable;
+  audit_purge_gaps: AuditPurgeGapsTable;
+  purge_delete_tables: PurgeDeleteTablesTable;
   claim_code_renewals: ClaimCodeRenewalsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
@@ -4320,6 +4367,7 @@ export type GuaranteeSettingsRow = Selectable<GuaranteeSettingsTable>;
 export type TestEntrantRow = Selectable<TestEntrantsTable>;
 export type TestRunRow = Selectable<TestRunsTable>;
 export type TestRunEntrantRow = Selectable<TestRunEntrantsTable>;
+export type AuditPurgeGapRow = Selectable<AuditPurgeGapsTable>;
 export type SupplierRow = Selectable<SuppliersTable>;
 export type SupplierOrderRow = Selectable<SupplierOrdersTable>;
 export type SupplierOrderLineRow = Selectable<SupplierOrderLinesTable>;

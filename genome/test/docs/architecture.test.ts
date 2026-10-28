@@ -679,7 +679,10 @@ describe('ARCHITECTURE B.22: lot M4 and its Shopify fit (plan §4, §5)', () => 
       expect(M4).toContain(`\`${name}\``);
       expect(Object.keys(MIGRATIONS)).toContain(name);
     }
-    expect(Object.keys(MIGRATIONS).slice(-3)).toEqual(['0063_margin', '0064_partners', '0065_ad_conversions']);
+    // Lot M4's three, in a row, after Q3's 0062 (lot PURGE's 0066 follows them).
+    const names = Object.keys(MIGRATIONS);
+    expect(names.slice(names.indexOf('0063_margin'), names.indexOf('0065_ad_conversions') + 1)).toEqual(['0063_margin', '0064_partners', '0065_ad_conversions']);
+    expect(names[names.indexOf('0063_margin') - 1]).toBe('0062_vault_rewards');
     for (const file of ['server/routes/admin/margin.ts', 'server/routes/admin/partners.ts', 'server/routes/admin/ads.ts', 'server/routes/consent.ts', 'server/ads/http.ts', 'server/ads/event.ts', 'web/verify/views/consent-banner.ts', 'web/legal/content/privacy-ads.ts', 'web/admin/views/partners.ts', 'web/admin/views/ad-platforms.ts', 'web/admin/views/margin-settings.ts']) {
       expect(existsSync(join(REPO, 'genome/src', file)), file).toBe(true);
     }
