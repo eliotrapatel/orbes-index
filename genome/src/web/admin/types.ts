@@ -2251,6 +2251,8 @@ export interface ChainVerification {
   ok: boolean;
   checked: number;
   firstBadId?: number;
+  /** Entries the test purge deleted, each one's link kept (a tombstone): only when there is at least one. */
+  purged?: number;
   head: { id: number; hash: string } | null;
 }
 

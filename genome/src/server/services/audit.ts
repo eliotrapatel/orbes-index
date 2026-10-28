@@ -12,11 +12,25 @@
  * Appends are serialised by a transaction-scoped advisory lock, so ids and
  * prev_hash links follow commit order even across server instances; a
  * UNIQUE index on prev_hash makes a forked chain impossible to insert.
- * UPDATE/DELETE/TRUNCATE are rejected by a database trigger.
+ * UPDATE/DELETE/TRUNCATE are rejected by a database trigger (the test purge
+ * alone deletes a test's own rows, leaving a tombstone for each: below).
  *
  * Limitation: the chain detects edits and deletions inside the log, not
  * removal of the newest entries. Anchor `head()` externally (e.g. in an
  * off-site log) to cover truncation of the tail.
+ *
+ * Tombstones (migration 0066, the test purge): when the purge deletes a test's
+ * audit rows it writes, in the same statement, each one's id, prev_hash and
+ * hash into `audit_purge_gaps`. The chain is then both tables merged in id
+ * order. A live row is re-hashed as above; a tombstone cannot be (its content
+ * is gone), but its prev_hash must equal the running hash and its stored hash
+ * becomes the running hash, which the next entry must link to. An auditor's
+ * plain export is therefore `audit_logs` plus `audit_purge_gaps` (id, prev_hash,
+ * hash), walked in id order with that one rule for tombstones. The chain is
+ * broken by a missing id with no tombstone (the next entry does not link), by
+ * an id present in both tables, and by a tombstone nothing links to after it
+ * (the newest entry deleted: the purge never deletes the chain's tail). With
+ * no tombstone the walk and its verdict are exactly those of the log alone.
  */
 import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
@@ -68,7 +82,17 @@ export interface ChainVerification {
   checked: number;
   /** First entry whose stored hash or link does not match. */
   firstBadId?: number;
+  /**
+   * Tombstones stepped over (entries the test purge deleted, each one's link checked), up to the verdict. Present
+   * only when there is at least one, so a chain without tombstones answers exactly as it always has.
+   */
+  purged?: number;
 }
+
+/** One entry of the chain as `verifyChain` reads it: a live row of `audit_logs` or a tombstone of `audit_purge_gaps`. */
+type ChainItem =
+  | (AuditLogRow & { gap: false; shadowed: boolean })
+  | { gap: true; shadowed: boolean; id: number | string; prev_hash: Uint8Array; hash: Uint8Array };
 
 const ACTION_RE = /^[A-Za-z][A-Za-z0-9_]*(?:[.:][A-Za-z0-9_-]+)*$/;
 const MAX_ACTION = 200;
@@ -304,31 +328,68 @@ export class AuditService {
    * Recompute every hash and link, oldest first, in batches. Reports the
    * first entry that does not match (edited, inserted out of chain, or
    * following a deleted entry).
+   *
+   * The entries are `audit_logs` and the purge's tombstones (`audit_purge_gaps`) merged in id order (header). Each
+   * batch is read in ONE statement, so it sees one snapshot of both tables: a purge batch committing between two
+   * batches only turns ids above the cursor into tombstones, which the next statement sees consistently (never two
+   * cursors, one per table, that could each see a different moment). Ordered by id alone, both primary keys are read
+   * in order and merged. Each entry also says whether its id is in the other table too, so an id present in both is
+   * BROKEN whichever of the two comes first and wherever a batch ends. `betweenBatches` (tests only) runs after each
+   * full batch, before the next is read.
    */
-  async verifyChain(opts: { batchSize?: number } = {}): Promise<ChainVerification> {
+  async verifyChain(opts: { batchSize?: number; betweenBatches?: (afterId: number) => Promise<void> } = {}): Promise<ChainVerification> {
     const batchSize = Math.max(1, Math.min(opts.batchSize ?? 1000, 10_000));
     let prev = AUDIT_GENESIS_HASH;
     let checked = 0;
+    let purged = 0;
     let afterId = 0;
+    let lastWasGap = false;
+    let lastId = 0;
+    const verdict = (firstBadId?: number): ChainVerification => ({
+      ok: firstBadId === undefined,
+      checked,
+      ...(firstBadId === undefined ? {} : { firstBadId }),
+      ...(purged > 0 ? { purged } : {}),
+    });
     for (;;) {
-      const rows = await this.db
-        .selectFrom('audit_logs')
-        .selectAll()
-        .where('id', '>', afterId)
-        .orderBy('id', 'asc')
-        .limit(batchSize)
-        .execute();
+      const { rows } = await sql<ChainItem>`
+        SELECT false AS gap, l.id, l.occurred_at, l.actor_type, l.actor_id, l.action, l.target_type, l.target_id,
+               l.details, l.ip_hash, l.prev_hash, l.hash,
+               EXISTS (SELECT 1 FROM audit_purge_gaps s WHERE s.id = l.id) AS shadowed
+          FROM audit_logs l
+         WHERE l.id > ${afterId}
+        UNION ALL
+        SELECT true AS gap, g.id, NULL::timestamptz, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text,
+               NULL::jsonb, NULL::text, g.prev_hash, g.hash,
+               EXISTS (SELECT 1 FROM audit_logs s WHERE s.id = g.id) AS shadowed
+          FROM audit_purge_gaps g
+         WHERE g.id > ${afterId}
+         ORDER BY id
+         LIMIT ${batchSize}`.execute(this.db);
       for (const r of rows) {
+        const id = Number(r.id);
+        if (r.shadowed) return verdict(id);
         const storedPrev = toBytes(r.prev_hash);
-        if (!bytesEqual(storedPrev, prev)) return { ok: false, checked, firstBadId: Number(r.id) };
-        const expected = computeAuditHash(prev, fromRow(r));
+        if (!bytesEqual(storedPrev, prev)) return verdict(id);
         const stored = toBytes(r.hash);
-        if (!bytesEqual(expected, stored)) return { ok: false, checked, firstBadId: Number(r.id) };
+        if (r.gap) {
+          // A tombstone: its content is gone, so only its link is checked; its hash carries the chain on.
+          purged++;
+        } else {
+          const expected = computeAuditHash(prev, fromRow(r));
+          if (!bytesEqual(expected, stored)) return verdict(id);
+          checked++;
+        }
         prev = stored;
-        checked++;
+        lastWasGap = r.gap;
+        lastId = id;
       }
-      if (rows.length < batchSize) return { ok: true, checked };
-      afterId = Number(rows[rows.length - 1].id);
+      if (rows.length < batchSize) {
+        // A tombstone after the newest live entry: the chain's tail was deleted, which the purge never does.
+        return lastWasGap ? verdict(lastId) : verdict();
+      }
+      afterId = Number(rows[rows.length - 1]!.id);
+      if (opts.betweenBatches) await opts.betweenBatches(afterId);
     }
   }
 

@@ -363,6 +363,7 @@ import {
 } from '../../src/web/admin/model/product.js';
 import { RETURN_CLAIM_TEXT } from '../../src/web/admin/views/order.js';
 import {
+  chainPurgedLine,
   chainVerdict,
   channelLabel,
   compromiseTime,
@@ -2490,6 +2491,21 @@ describe('registry view rules', () => {
     const bad = chainVerdict({ ok: false, checked: 41, firstBadId: 42, head: null });
     expect(bad).toMatchObject({ title: 'Chain broken', tone: 'critical' });
     expect(bad.detail).toContain('#42');
+  });
+
+  it('says how many entries were purged with their tests, only when any were (plan PURGE §A.5)', () => {
+    const head = { id: 1204, hash: 'f'.repeat(64) };
+    // A chain without tombstones: the verdict exactly as before, no purged line.
+    expect(chainVerdict({ ok: true, checked: 1204, head })).not.toHaveProperty('purged');
+    expect(chainVerdict({ ok: true, checked: 1204, purged: 0, head })).not.toHaveProperty('purged');
+    expect(chainPurgedLine(undefined)).toBeNull();
+    expect(chainPurgedLine(0)).toBeNull();
+    const ok = chainVerdict({ ok: true, checked: 1167, purged: 1037, head });
+    expect(ok).toMatchObject({ title: 'Chain intact', tone: 'solid', purged: `${formatCount(1037)} entries purged with their tests (each one's link kept)` });
+    expect(ok.detail).toBe(chainVerdict({ ok: true, checked: 1167, head }).detail);
+    expect(chainVerdict({ ok: true, checked: 3, purged: 1, head }).purged).toBe('1 entry purged with its test (its link kept)');
+    const bad = chainVerdict({ ok: false, checked: 41, firstBadId: 42, purged: 2, head: null });
+    expect(bad).toMatchObject({ title: 'Chain broken', tone: 'critical', purged: "2 entries purged with their tests (each one's link kept)" });
   });
 });
 
