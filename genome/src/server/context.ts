@@ -94,6 +94,7 @@ import { deriveEmailUnsubscribeKey, EmailService } from './services/email.js';
 import { EmailTriggers } from './services/email-triggers.js';
 import { TrackingService } from './services/tracking.js';
 import { TestPurgeService } from './services/test-purge.js';
+import { PlatformResetService } from './services/platform-reset.js';
 import { TestEntrantAccounts } from './services/population.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -290,6 +291,17 @@ export interface AppServices {
   vault: VaultService;
   /** TEST PURGE (lot PURGE, plan §A.4): an ended test's purge asked with a step-up, and its loop of bounded batches. */
   testPurge: TestPurgeService;
+  /** PLATFORM RESET and LOCK RESET (lot PURGE, plan §B.4): the holder's page, its press, and the reset run by the shutdown path. */
+  platformReset: PlatformResetService;
+}
+
+/**
+ * What the running process does on request (lot PURGE, plan §B.4). `requestPlatformReset` is called by the reset's route
+ * once its 202 is sent: it only SCHEDULES the platform reset's shutdown and returns at once (H4). By default a logged
+ * no-op, so tests and the demo never exit; index.ts installs the real one (platform-reset-shutdown.ts).
+ */
+export interface AppLifecycle {
+  requestPlatformReset(adminId: string, collectorsSeen: number, collectorsSeenUntil: string | null): void;
 }
 
 export interface AppContext {
@@ -305,6 +317,8 @@ export interface AppContext {
   /** Session tokens (used by AuthService and the HTTP layer's cookie guard). */
   sessions: SessionService;
   services: AppServices;
+  /** What the process does on request (the platform reset's shutdown): a logged no-op unless index.ts installs its own. */
+  lifecycle: AppLifecycle;
   /** Release what the context owns (the database, unless it was injected). Idempotent. */
   close(): Promise<void>;
 }
@@ -572,6 +586,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       vault,
       // The test purge (lot PURGE): its requests' step-up, the views written before accounts go, the rooms built again.
       testPurge: new TestPurgeService({ db, audit, auth, clock, log, testEntrantAccounts, tracking, liveFrames }),
+      // PLATFORM RESET (lot PURGE): the holder's page and press; its run is the shutdown path's (index.ts).
+      platformReset: new PlatformResetService({ db, audit, auth, clock, log }),
       ...overrides.services,
     };
 
@@ -587,6 +603,11 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       geo,
       sessions,
       services,
+      lifecycle: {
+        requestPlatformReset(adminId) {
+          log.warn({ adminId }, 'platform reset requested, but this process has no shutdown path for it (tests, demo): nothing is reset');
+        },
+      },
       async close() {
         if (closed) return;
         closed = true;
