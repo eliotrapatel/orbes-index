@@ -267,23 +267,98 @@ function cases(state: { db: () => Db; schemaAt0066: () => Promise<string[] | nul
     expect((await one<{ v: string | null }>(`SELECT current_setting('orbes.guard_bypass', true) AS v`)).v ?? '').toBe('');
   });
 
-  it('every guard use of orbes_reject_mutation outside the reset\'s tables refuses as before, with its own words, the setting reset set as the superuser', async () => {
-    const uses = await all<{ tbl: string; tgname: string; tgtype: number; kind: string }>(`
-      SELECT c.relname AS tbl, t.tgname, t.tgtype, coalesce(p.kind, 'NONE') AS kind
+  it('every guard use of orbes_reject_mutation, fired in public as the superuser, refuses as before with its own words; the setting reset lets through a DELETE on a wiped or partly kept table and a TRUNCATE of a wiped one, nothing else', async () => {
+    const uses = await all<{ tbl: string; tgname: string; tgtype: number; nargs: number; words: string | null; cols: string | null; def: string; qual: boolean; kind: string }>(`
+      SELECT c.relname AS tbl, t.tgname, t.tgtype, t.tgnargs AS nargs,
+             CASE WHEN t.tgnargs = 0 THEN NULL ELSE convert_from(substring(t.tgargs FROM 1 FOR position('\\x00'::bytea IN t.tgargs) - 1), 'UTF8') END AS words,
+             (SELECT string_agg(a.attname, ',') FROM unnest(t.tgattr) AS k (n) JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = k.n) AS cols,
+             pg_get_triggerdef(t.oid) AS def, t.tgqual IS NOT NULL AS qual, coalesce(p.kind, 'NONE') AS kind
         FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
         LEFT JOIN platform_reset_plan p ON p.tbl = c.relname
        WHERE NOT t.tgisinternal AND t.tgfoid = 'orbes_reject_mutation'::regproc AND n.nspname = 'public'
        ORDER BY 1, 2`);
-    // 0065's 57, 0066's two and the gate's one.
+    // 0065's 57, 0066's two and the gate's one; every one of them on a table of the plan.
     expect(uses).toHaveLength(60);
-    expect(uses.every((u) => u.kind !== 'NONE')).toBe(true);
-    // A guard on a kept table refuses its DELETE and TRUNCATE whatever the setting; every UPDATE guard refuses too.
-    for (const u of uses) {
-      const update = (u.tgtype & 16) === 16;
-      const remove = (u.tgtype & 8) === 8;
-      const truncate = (u.tgtype & 32) === 32;
-      if (u.kind === 'KEEP') expect(remove || truncate || update, u.tgname).toBe(true);
+    expect(uses.filter((u) => u.kind === 'NONE').map((u) => u.tbl)).toEqual([]);
+    // The guard reads the plan itself: it is never one of the tables fired on below (each is put aside while fired on).
+    expect(uses.some((u) => u.tbl === 'platform_reset_plan')).toBe(false);
+    // Each use fired in schema public, under its own table's name, alone, for each of its events, as the superuser, in a
+    // transaction rolled back: its table put aside (renamed) for a copy of its columns holding one row, without
+    // constraints, the trigger made again on it from its own definition. A WHEN qualifier only says when the guard is
+    // asked; the guard's answer is what is proven here, so it is left out (each such use named below).
+    const qualified = uses.filter((u) => u.qual).map((u) => u.tgname);
+    expect(qualified).toEqual([
+      'accounts_invited_once', 'ads_settings_events_from', 'house_messages_no_delete', 'house_messages_sent_audience',
+      'vault_gifts_accepted_once', 'vault_rewards_kept', 'vaults_segment', 'worn_photos_forward', 'worn_photos_photo_kept',
+    ]);
+    const tally: Record<string, number> = {};
+    let fired = 0;
+    for (const [i, u] of uses.entries()) {
+      expect(u.nargs, u.tgname).toBeLessThanOrEqual(1);
+      const words = u.words ?? 'immutable';
+      const events = [
+        ...((u.tgtype & 4) ? ['INSERT'] : []),
+        ...((u.tgtype & 8) ? ['DELETE'] : []),
+        ...((u.tgtype & 16) ? ['UPDATE'] : []),
+        ...((u.tgtype & 32) ? ['TRUNCATE'] : []),
+      ];
+      expect(events.length, u.tgname).toBeGreaterThan(0);
+      const def = u.qual ? u.def.replace(/ WHEN \(.*?\) EXECUTE FUNCTION /, ' EXECUTE FUNCTION ') : u.def;
+      expect(def, u.tgname).not.toMatch(/ WHEN /);
+      await rolledBack(async (tx) => {
+        const exec = (q: string) => sql.raw(q).execute(tx);
+        await exec(`ALTER TABLE public.${u.tbl} RENAME TO t67_aside_${i}`);
+        await exec(`CREATE TABLE public.${u.tbl} AS SELECT * FROM public.t67_aside_${i} WITH NO DATA`);
+        await exec(`INSERT INTO public.${u.tbl} DEFAULT VALUES`);
+        await exec(def);
+        expect(
+          Number((await sql<{ n: string | number }>`SELECT count(*) AS n FROM pg_trigger WHERE tgrelid = ${`public.${u.tbl}`}::regclass AND tgfoid = 'orbes_reject_mutation'::regproc`.execute(tx)).rows[0]!.n),
+          u.tgname,
+        ).toBe(1);
+        const first = (await sql<{ c: string }>`SELECT attname AS c FROM pg_attribute WHERE attrelid = ${`public.${u.tbl}`}::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum LIMIT 1`.execute(tx)).rows[0]!.c;
+        const col = u.cols?.split(',')[0] ?? first;
+        for (const event of events) {
+          const statement = event === 'INSERT' ? `INSERT INTO public.${u.tbl} DEFAULT VALUES` : event === 'DELETE' ? `DELETE FROM public.${u.tbl}` : event === 'UPDATE' ? `UPDATE public.${u.tbl} SET "${col}" = "${col}"` : `TRUNCATE public.${u.tbl}`;
+          const message = `${event} on ${u.tbl} is not allowed (${words})`;
+          // The reset's way through: a DELETE on a wiped or partly kept table, a TRUNCATE of a wiped one; nothing else.
+          const through = (event === 'DELETE' && (u.kind === 'WIPE' || u.kind === 'PARTLY')) || (event === 'TRUNCATE' && u.kind === 'WIPE');
+          for (const setting of ['', 'purge', 'reset']) {
+            const label = `${u.tgname} ${event} (${u.kind}) with '${setting}'`;
+            await sql`SAVEPOINT t67_use`.execute(tx);
+            await sql`SELECT set_config('orbes.guard_bypass', ${setting}, true)`.execute(tx);
+            let error: unknown = null;
+            try {
+              await exec(statement);
+            } catch (e) {
+              error = e;
+            }
+            await sql`ROLLBACK TO SAVEPOINT t67_use`.execute(tx);
+            // The purge's own five are not among the copies' answers: its way is a DELETE on audit_logs and four others,
+            // proven by migrations-0066; here, without 'reset', every use refuses unless it is one of them.
+            const purgeWay = setting === 'purge' && event === 'DELETE' && ['audit_logs', 'order_events', 'event_journal', 'credit_uses', 'tier_grants'].includes(u.tbl);
+            if ((setting === 'reset' && through) || purgeWay) {
+              expect(error, `${label}: through, got ${pgError(error)?.code} « ${(error as Error | null)?.message} »`).toBeNull();
+              if (setting === 'reset') tally[`${event} ${u.kind} through`] = (tally[`${event} ${u.kind} through`] ?? 0) + 1;
+            } else {
+              if (!isGuardViolation(error) || (error as Error).message !== message) {
+                throw new Error(`${label}: expected OR001 « ${message} », got ${pgError(error)?.code} « ${(error as Error | null)?.message} »`);
+              }
+              if (setting === 'reset') tally[`${event} ${u.kind} refused`] = (tally[`${event} ${u.kind} refused`] ?? 0) + 1;
+            }
+          }
+          fired++;
+        }
+      });
+      // Put back: the table, its rows and its guards as they were.
+      expect(Number((await one<{ n: string | number }>(`SELECT count(*) AS n FROM pg_trigger WHERE tgrelid = 'public.${u.tbl}'::regclass AND tgname = '${u.tgname}'`)).n), u.tgname).toBe(1);
     }
+    expect(fired).toBeGreaterThanOrEqual(60);
+    // Every answer the reset can get was asked: an UPDATE and a kept table's DELETE and TRUNCATE refused, a partly kept
+    // table's TRUNCATE refused, a wiped table's DELETE and TRUNCATE and a partly kept table's DELETE through.
+    for (const k of ['UPDATE KEEP refused', 'UPDATE WIPE refused', 'DELETE KEEP refused', 'TRUNCATE KEEP refused', 'TRUNCATE PARTLY refused', 'DELETE WIPE through', 'DELETE PARTLY through', 'TRUNCATE WIPE through']) {
+      expect(tally[k] ?? 0, `${k} in ${JSON.stringify(tally)}`).toBeGreaterThan(0);
+    }
+    expect(Object.keys(tally).filter((k) => /^(UPDATE|INSERT) .* through$|KEEP through$|TRUNCATE PARTLY through$/.test(k))).toEqual([]);
     const src = (await one<{ src: string }>(`SELECT prosrc AS src FROM pg_proc WHERE proname = 'orbes_reject_mutation'`)).src;
     expect(src).toContain(`p.kind = 'WIPE' OR (TG_OP = 'DELETE' AND p.kind = 'PARTLY')`);
     expect(src).toContain(`TG_OP IN ('DELETE', 'TRUNCATE')`);
@@ -618,6 +693,9 @@ describe('migration 0067_platform_reset: the reset end to end (PGlite)', () => {
     await q(`UPDATE drops SET opens_at = now() + interval '6 minutes', closes_at = now() + interval '2 hours' WHERE id = '${live.id}'`);
     expect(await precheck()).toBeNull();
     await q(`UPDATE drops SET opens_at = now() + interval '1 minute' WHERE id = '${live.id}'`);
+    expect(await precheck()).toBe('LIVE_OPEN');
+    // Past its close but not yet ended by the engine (drops.ended_at): still refused, on the safe side, until its end.
+    await q(`UPDATE drops SET opens_at = now() - interval '2 hours', closes_at = now() - interval '1 minute' WHERE id = '${live.id}'`);
     expect(await precheck()).toBe('LIVE_OPEN');
     await q(`UPDATE drops SET cancelled_at = now() WHERE id = '${live.id}'`);
     expect(await precheck()).toBeNull();
