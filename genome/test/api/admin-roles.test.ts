@@ -183,6 +183,10 @@ const PROBES: Probe[] = [
   { group: 'test-entrants', method: 'GET', url: `/api/admin/drops/${UUID}/test-runs/current`, min: 'AUDITOR' },
   { group: 'test-entrants', method: 'GET', url: `/api/admin/drops/${UUID}/test-runs`, min: 'AUDITOR' },
   { group: 'test-entrants', method: 'GET', url: '/api/admin/test-runs/active', min: 'AUDITOR' },
+  // TEST PURGE (lot PURGE, PURGE.6): a test's purge and PURGE ALL ENDED TESTS by an ADMIN (with a fresh code), the ended tests read by an AUDITOR.
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/purge`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'POST', url: '/api/admin/test-runs/purge-all', body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'GET', url: '/api/admin/test-runs/ended', min: 'AUDITOR' },
   // The LIVE RELEASES (plan of 2026-10-04): read by an AUDITOR; created, edited, published, cancelled, their silhouette and
   // board link and their live controls by an OPERATOR; END NOW and REMOVE by an ADMIN.
   { group: 'live', method: 'GET', url: '/api/admin/live', min: 'AUDITOR' },

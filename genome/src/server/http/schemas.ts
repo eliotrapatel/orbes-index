@@ -1225,6 +1225,22 @@ export const testRunBody = body({
 /** POST /api/admin/test-runs/:id/end: END TEST, the typed phrase (`END TEST <8>`). */
 export const testRunEndBody = body({ phrase: testPhrase });
 
+/**
+ * A fresh code of the admin's authenticator app (lot PURGE, plan §A.4): six to eight digits, the spaces the console's
+ * `000 000` placeholder invites taken out. Whether it is right is the step-up's to say (AuthService.verifyAdminStepUp).
+ */
+const stepUpCode = z
+  .string()
+  .max(16, 'Six digits from your authenticator app')
+  .transform((s) => s.replace(/\s+/g, ''))
+  .pipe(z.string().regex(/^\d{6,8}$/, 'Six digits from your authenticator app'));
+
+/** POST /api/admin/test-runs/:id/purge: PURGE (or its resume), the typed phrase (`PURGE TEST <8>`, the service checks it) and a code. */
+export const testRunPurgeBody = body({ phrase: testPhrase, totp: stepUpCode });
+
+/** POST /api/admin/test-runs/purge-all: PURGE ALL ENDED TESTS, the typed phrase (`PURGE ALL TESTS`) and a code. */
+export const testRunPurgeAllBody = body({ phrase: testPhrase, totp: stepUpCode });
+
 // ── Admin: the circle (P-X01) ──────────────────────────────────────────────
 
 export const circlePostParams = z.object({ id: uuid });

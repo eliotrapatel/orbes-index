@@ -71,7 +71,8 @@
  *
  * Once an ended test's purge is asked (lot PURGE, services/test-purge.ts), its view reads the figures the request stored
  * (`purge_summary`), as the rows they are counted from are being deleted; every view and list says where its purge
- * stands (`purge`) and whether PURGE can be pressed on it (`purgeable`).
+ * stands (`purge`) and whether PURGE can be pressed on it (`purgeable`); `ended()` lists every ended test of every release
+ * for the console's Ended tests page.
  *
  * Audited `test_run.start`, `.add`, `.stop`, `.confirm`, `.release`, `.end` (the ADMIN as actor); each bot's own actions
  * are audited by the routes as any account's; END TEST's clean-up `drop.withdraw`, `drop.entry.lapse` and
@@ -275,6 +276,13 @@ export interface TestRunSummary {
   purge: TestPurgeView | null;
   /** Whether PURGE can be pressed on it now: true, or why not (its reason and the console's words). */
   purgeable: Purgeable;
+}
+
+/** GET /api/admin/test-runs/ended: an ended test, whatever its release, with its release's name (lot PURGE). */
+export interface EndedTestRun extends TestRunSummary {
+  dropId: string;
+  dropName: string;
+  mode: DropMode;
 }
 
 /** GET /api/admin/test-runs/active: the RUNNING test, whatever its release. */
@@ -905,16 +913,42 @@ export class TestEntrantService {
   async list(dropId: string): Promise<TestRunSummary[]> {
     const id = knownId(dropId, dropNotFound);
     if (!(await this.db.selectFrom('drops').select('id').where('id', '=', id).executeTakeFirst())) throw dropNotFound();
-    const rows = await this.db
-      .selectFrom('test_runs as r')
-      .innerJoin('admin_users as a', 'a.id', 'r.created_by')
-      .leftJoin('admin_users as p', 'p.id', 'r.purge_requested_by')
-      .select(['r.id', 'r.status', 'r.created_at', 'r.ended_at', 'a.email', 'r.entrants', 'r.report', 'r.peaks'])
-      .select(['r.purge_state', 'r.purge_reason', 'r.purge_requested_at', 'p.email as purge_requested_email', 'r.purged_at', 'r.purge_summary', 'r.purge_result'])
+    const rows = await this.summaryRows()
       .where('r.drop_id', '=', id)
       .orderBy('r.created_at', 'desc')
       .orderBy('r.id')
       .execute();
+    return this.summaries(rows);
+  }
+
+  /**
+   * Every ENDED test of every release, the newest ended first, each with its release's name, its purge and whether
+   * PURGE can be pressed on it (lot PURGE: the console's Ended tests page).
+   */
+  async ended(): Promise<EndedTestRun[]> {
+    const rows = await this.summaryRows()
+      .innerJoin('drops as d', 'd.id', 'r.drop_id')
+      .select(['r.drop_id', 'd.title', 'r.mode'])
+      .where('r.status', '=', 'ENDED')
+      .orderBy('r.ended_at', 'desc')
+      .orderBy('r.created_at', 'desc')
+      .orderBy('r.id')
+      .execute();
+    const summaries = await this.summaries(rows);
+    return rows.map((r, i) => ({ ...summaries[i]!, dropId: r.drop_id, dropName: r.title, mode: r.mode }));
+  }
+
+  /** The columns a test's summary reads (list and ended). */
+  private summaryRows() {
+    return this.db
+      .selectFrom('test_runs as r')
+      .innerJoin('admin_users as a', 'a.id', 'r.created_by')
+      .leftJoin('admin_users as p', 'p.id', 'r.purge_requested_by')
+      .select(['r.id', 'r.status', 'r.created_at', 'r.ended_at', 'a.email', 'r.entrants', 'r.report', 'r.peaks'])
+      .select(['r.purge_state', 'r.purge_reason', 'r.purge_requested_at', 'p.email as purge_requested_email', 'r.purged_at', 'r.purge_summary', 'r.purge_result']);
+  }
+
+  private async summaries(rows: Awaited<ReturnType<ReturnType<TestEntrantService['summaryRows']>['execute']>>): Promise<TestRunSummary[]> {
     const purgeable = await this.ctx.services.testPurge.purgeability(rows.map((r) => r.id));
     return rows.map((r) => {
       const report = r.report as unknown as TestReport | null;
