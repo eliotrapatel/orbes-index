@@ -917,7 +917,7 @@ Full guidance: [DATABASE §11](DATABASE.md#11-backup-restore-and-point-in-time-r
 | Database | Continuous WAL archiving plus base backups (managed PostgreSQL PITR, pgBackRest, WAL-G), and nightly logical dumps | Holds the registry, codes, public keys, accounts, sealed TOTP secrets, pseudonymous scans and the audit log; since plan NEXT LOT §3.5, the packing photos too (`shipments.photo`, at most 1 MiB a parcel, erased 14 days after delivery or once a return opened in that time is closed, so a backup keeps them for as long as it is kept) and a reception's claim codes, sealed, until its cards are attached. Encrypt backups and restrict access: they contain personal data. |
 | Key files | `keys` volume archive after every rotation (§7.3) | Encrypted under `KEY_ENCRYPTION_KEY`. |
 | `KEY_ENCRYPTION_KEY`, `COOKIE_SECRET`, `IP_HASH_PEPPER` | Secret manager plus offline escrow | Never in the same backup set as the database or the key files. A database backup plus `KEY_ENCRYPTION_KEY` opens the stored TOTP secrets. |
-| Audit chain anchor | Export `head.id` / `head.hash` from `GET /api/admin/audit/verify` to write-once storage, daily | Compare after any restore. |
+| Audit chain anchor | Export `head.id` / `head.hash` from `GET /api/admin/audit/verify` to write-once storage, daily | Compare after any restore. Since lot PURGE, an auditor's plain export takes `audit_logs` **and** `audit_purge_gaps`, the test purge's tombstones, walked in id order ([DATABASE §11](DATABASE.md#11-backup-restore-and-point-in-time-recovery)); after a platform reset the log starts again at entry 1, which names the old log's head: write the reset's date next to every anchor kept. |
 
 Logical dump and restore with the compose stack:
 
@@ -930,12 +930,16 @@ docker compose stop app
 docker compose rm -sf db && docker volume rm orbes-genome_pgdata
 docker compose up -d db
 docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < orbes-YYYY-MM-DD.dump
+# Lot PURGE, on a server meant to stay: read the reset's gate BEFORE the app starts (read only; below)
+docker compose exec -T db sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select launched_at from platform_reset_gate"'
 docker compose up -d app
 ```
 
+**The reset's gate before the app starts** (lot PURGE, API §16.55; until the first lot after the launch removes the reset). A dump from before LOCK RESET brings back a working, unlocked PLATFORM RESET, and a dump from before lot PURGE has no gate until the image's migrations make one, unlocked. On any server meant to stay (never the drill's disposable one), the read above must print a time: `launched_at` set, the reset refused for good. An empty line (NULL) means it is open, and no such table means it will be once the migrations run: do not open the app to anyone; either the holder alone presses LOCK RESET first (API §16.55), or stop. The read changes nothing.
+
 After any restore:
 
-1. Run `npm run db:status`: no migration may be PENDING, unless the restore predates an upgrade.
+1. Run `npm run db:status`: no migration may be PENDING, unless the restore predates an upgrade. On a server meant to stay, `SELECT launched_at FROM platform_reset_gate` read before the app starts (above): never NULL.
 2. Run `GET /api/admin/audit/verify` and compare its head with the last exported anchor. A point-in-time restore legitimately drops the newest entries; the anchor tells how many.
 3. Scan a known product end to end (§13).
 4. Check the keys. Any key created after the backup is missing from `cryptographic_keys`, but its file may still be in `KEY_DIR`. Rotate if `keys:list` shows no usable ACTIVE key.
@@ -1425,6 +1429,8 @@ The server holds only the public key: it **cannot decrypt its own backups**, and
 3. takes a safety backup of the current state when PostgreSQL is running;
 4. stops the app; **recreates the `pgdata` volume**, creates the app role, and restores into the empty database as the owner (`--exit-on-error --single-transaction --no-privileges`; the append-only audit log makes restoring over existing data impossible by design), then grants the app role its DML rights; **empties the `keys` volume** and extracts the key files (owner 1000, `0700`/`0600`);
 5. starts the stack if the image exists (otherwise run `scripts/deploy.sh`): migrations of that image first (an older archive), then waits for health, checks `/api/v1/health` through Caddy and lists the signing keys.
+
+**The reset's gate (lot PURGE).** `restore.sh` starts the stack itself (step 5). On a server meant to stay (a move to another server; never the drill's disposable one), read at once, read only, before the server is put to any use: `docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select launched_at from platform_reset_gate"'`. An empty line means PLATFORM RESET is open again (a dump from before LOCK RESET, or from before lot PURGE, whose gate the migrations made unlocked): `docker compose stop app` at once, or have the holder press LOCK RESET before anything else (§10). The first lot after the launch sets `launched_at` itself when it is NULL.
 
 The restored stack needs the **same `KEY_ENCRYPTION_KEY`** as the backup (from escrow); with another one the key files cannot be decrypted (verification still works, issuance does not, §7.3).
 
