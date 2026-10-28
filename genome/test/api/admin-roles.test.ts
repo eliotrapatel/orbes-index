@@ -187,6 +187,8 @@ const PROBES: Probe[] = [
   { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/purge`, body: INVALID, min: 'ADMIN' },
   { group: 'test-entrants', method: 'POST', url: '/api/admin/test-runs/purge-all', body: INVALID, min: 'ADMIN' },
   { group: 'test-entrants', method: 'GET', url: '/api/admin/test-runs/ended', min: 'AUDITOR' },
+  { group: 'test-entrants', method: 'GET', url: `/api/admin/test-runs/${UUID}/purge`, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'GET', url: '/api/admin/test-runs/purge-all', min: 'ADMIN' },
   // The LIVE RELEASES (plan of 2026-10-04): read by an AUDITOR; created, edited, published, cancelled, their silhouette and
   // board link and their live controls by an OPERATOR; END NOW and REMOVE by an ADMIN.
   { group: 'live', method: 'GET', url: '/api/admin/live', min: 'AUDITOR' },

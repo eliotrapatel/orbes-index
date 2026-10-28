@@ -112,6 +112,8 @@ export const ROUTES = [
   { name: 'settings', path: '/settings' },
   /** The Emails page (plan MACRO M1 §4.3, E0): from the Settings page and the Founding list, no link of its own in the sidebar. */
   { name: 'emailSettings', path: '/settings/emails' },
+  /** The Ended tests page (lot PURGE, plan §A.6): every ended test, PURGE and PURGE ALL; from the Settings page, no link of its own in the sidebar. */
+  { name: 'endedTests', path: '/settings/tests' },
   { name: 'document', path: '/documents/:docId' },
 ] as const;
 

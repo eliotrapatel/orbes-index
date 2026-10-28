@@ -88,7 +88,17 @@ const BENCH: Record<string, Tone> = { TO_MAKE: 'outline', IN_PROGRESS: 'solid', 
  * A test of test entrants (plan TEST ENTRANTS): running, in force; done, pending its staff draw or END TEST; stopped or
  * interrupted, needing END TEST's clean-up; ended, historical.
  */
-const TEST_RUN: Record<string, Tone> = { RUNNING: 'solid', DONE: 'outline', STOPPED: 'alert', INTERRUPTED: 'alert', ENDED: 'muted' };
+const TEST_RUN: Record<string, Tone> = {
+  RUNNING: 'solid',
+  DONE: 'outline',
+  STOPPED: 'alert',
+  INTERRUPTED: 'alert',
+  ENDED: 'muted',
+  // Its purge (lot PURGE): under way, pending; paused, to look at; purged, historical.
+  PURGING: 'outline',
+  PAUSED: 'alert',
+  PURGED: 'muted',
+};
 /** A post of the circle (P-X01): in force once published; pending while it is not. */
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
 /** A partner (lot M4, K49 P1): ACTIVE, in force; SET ASIDE, offered for no new experience. */

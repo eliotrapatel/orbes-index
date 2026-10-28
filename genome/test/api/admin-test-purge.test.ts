@@ -539,6 +539,52 @@ describe('admin: TEST PURGE over HTTP', () => {
     twoTests.push({ id: first.id, drop }, { id: second.id, drop });
   });
 
+  it('the dialogs\' previews (step PURGE.7), read only and ADMIN only: one test\'s phrase, purgeable, drawn draw and blocking orders, a window\'s words; PURGE ALL\'s tests, paused, skipped with their words and the pool\'s accounts it may delete', async () => {
+    const sealed = await sealedOf(purger.id);
+    const rows = (await stepUps(purger.id)).length;
+    const audits = (await db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n;
+    for (const c of [operator, auditor]) {
+      expect(errorOf(await c.get(`/api/admin/test-runs/${a.id}/purge`)).code).toBe('FORBIDDEN');
+      expect(errorOf(await c.get('/api/admin/test-runs/purge-all')).code).toBe('FORBIDDEN');
+    }
+    const unknown = await admin.get(`/api/admin/test-runs/${randomUUID()}/purge`);
+    expect({ status: unknown.statusCode, code: errorOf(unknown).code }).toEqual({ status: 404, code: 'TEST_RUN_NOT_FOUND' });
+
+    const one = await admin.get(`/api/admin/test-runs/${a.id}/purge`);
+    expect(one.statusCode, one.body).toBe(200);
+    expect((safeJson(one) as { preview: unknown }).preview).toEqual({
+      runId: a.id,
+      phrase: purgePhrase(a.id),
+      purgeable: true,
+      hold: null,
+      drawn: true,
+      planned: { accounts: 3, entries: 3, orders: 3 },
+      blockingOrders: 0,
+      blocking: [],
+    });
+    // A window now: its words, Paris time first (the request would refuse them); the clock put back after.
+    const back = h.clock.now();
+    h.clock.set(intoTheNight(back));
+    expect((await h.ctx.services.testPurge.preview(a.id)).hold).toEqual({ reason: 'PURGE_WINDOW', message: windowWords(h.clock.now(), MAINTENANCE_MARGIN_MS.purgeBatch) });
+    h.clock.set(back);
+
+    const all = (safeJson(await admin.get('/api/admin/test-runs/purge-all')) as { preview: { runs: string[]; resumed: string[]; skipped: { runId: string; reason: string; message: string }[]; hold: unknown; accounts: number } }).preview;
+    expect(all.runs).toEqual(expect.arrayContaining([a.id, ...twoTests.map((r) => r.id)]));
+    expect(all.resumed).toEqual([]);
+    expect(all.hold).toBeNull();
+    expect(new Set(all.skipped.map((x) => x.reason))).toEqual(new Set(['PURGE_NOT_TEST', 'PURGE_RELEASE_NOT_OVER']));
+    expect(all.skipped.find((x) => x.reason === 'PURGE_NOT_TEST')!.message).toBe('This draw was drawn with real collectors’ entries: its public ranked list stays as drawn, so this test cannot be purged.');
+    // The pool's accounts that no skipped test holds (every other test is purged by it).
+    const pool = (await db.selectFrom('test_entrants').select('account_id').execute()).map((r) => r.account_id);
+    const held = new Set((await db.selectFrom('test_run_entrants').select('account_id').where('run_id', 'in', all.skipped.map((x) => x.runId)).execute()).map((r) => r.account_id));
+    expect(all.accounts).toBe(pool.filter((x) => !held.has(x)).length);
+    expect(all.accounts).toBeGreaterThan(0);
+
+    // Read only: nothing written, no code used.
+    expect((await db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n).toBe(audits);
+    await nothingWritten(a.id, purger, sealed, rows);
+  });
+
   it('PURGE: 202 { run } PURGING, the code (spelt 000 000) consumed once, test_run.purge.start; a second POST 409 PURGE_IN_PROGRESS; OFFER NEXT 409 RELEASE_BEING_PURGED meanwhile; ended reads its progress; DONE; then 409 PURGE_DONE and OFFER NEXT as today', async () => {
     const today = await offerNext(a.drop);
     expect({ status: today.statusCode, code: errorOf(today).code }).toEqual({ status: 409, code: 'DROP_WAITLIST_EMPTY' });

@@ -84,6 +84,7 @@ import { orderReturnsView } from './views/order-returns.js';
 import { invoicesView } from './views/invoices.js';
 import { foundingView } from './views/founding.js';
 import { emailsView } from './views/emails.js';
+import { endedTestsView } from './views/ended-tests.js';
 import { houseMessagesView } from './views/house-messages.js';
 import { wornView } from './views/worn.js';
 import { segmentsView, segmentView } from './views/segments.js';
@@ -236,6 +237,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   settings: { view: settingsView, title: 'Settings', nav: 'orders' },
   // Plan MACRO M1 §4.3: the Emails page, from Settings and the Founding list; the sidebar marks the Founding list.
   emailSettings: { view: emailsView, title: 'Emails', nav: 'founding' },
+  // Lot PURGE (plan §A.6): the Ended tests page, from Settings; the sidebar marks Orders, as for Settings.
+  endedTests: { view: endedTestsView, title: 'Ended tests', nav: 'orders' },
   orders: { view: ordersView, title: 'Orders', nav: 'orders' },
   orderReturns: { view: orderReturnsView, title: 'Returns', nav: 'orders' },
   order: { view: orderView, title: 'Order', nav: 'orders' },

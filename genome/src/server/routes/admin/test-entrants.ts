@@ -14,6 +14,8 @@
  *   POST /api/admin/test-runs/:id/purge                          ADMIN    PURGE (phrase PURGE TEST <8> + code): 202
  *   POST /api/admin/test-runs/purge-all                          ADMIN    PURGE ALL ENDED TESTS (PURGE ALL TESTS + code): 202
  *   GET  /api/admin/test-runs/ended                              AUDITOR  every ended test of every release, newest first
+ *   GET  /api/admin/test-runs/:id/purge                          ADMIN    what the PURGE dialog says first (read only)
+ *   GET  /api/admin/test-runs/purge-all                          ADMIN    what the PURGE ALL dialog says first (read only)
  *
  * Each change answers `{ run }`, the test as the current one reads it. An AUDITOR reads the test entrants' emails
  * masked, as every customer's (serialize.ts `clientEmail`). The service validates, locks and audits.
@@ -138,4 +140,12 @@ export const adminTestEntrantRoutes: FastifyPluginAsync<AdminRouteDeps> = async 
   });
 
   app.get('/api/admin/test-runs/ended', async () => ({ runs: await tests().ended() }));
+
+  // What the console's dialogs say before PURGE is pressed (lot PURGE, step PURGE.7): read only, nothing stored.
+  app.get('/api/admin/test-runs/:id/purge', { config: ADMIN }, async (request) => {
+    const { id } = parse(testRunParams, request.params);
+    return { preview: await ctx.services.testPurge.preview(id) };
+  });
+
+  app.get('/api/admin/test-runs/purge-all', { config: ADMIN }, async () => ({ preview: await ctx.services.testPurge.previewAll() }));
 };

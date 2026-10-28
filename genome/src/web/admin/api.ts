@@ -262,9 +262,12 @@ import type {
   SegmentName,
   SegmentOptions,
   ActiveTestRun,
+  EndedTestRun,
   SystemStatus,
   TestRunAddInput,
   TestRunInput,
+  TestPurgeAllPreview,
+  TestPurgePreview,
   TestRunSummary,
   TestRunView,
   AdminVault,
@@ -2437,6 +2440,33 @@ export class AdminApi {
   /** The RUNNING test, whatever its release, or null (the Drops tab). */
   activeTestRun(opts: { background?: boolean } = {}): Promise<{ run: ActiveTestRun | null }> {
     return this.request('GET', '/api/admin/test-runs/active', { background: opts.background === true });
+  }
+
+  // ── TEST PURGE (lot PURGE) ────────────────────────────────────────────────
+
+  /** What the PURGE dialog says before it is pressed (ADMIN, read only): purgeable, a window now, a drawn draw, the orders kept. */
+  testRunPurgePreview(runId: string): Promise<{ preview: TestPurgePreview }> {
+    return this.get(`/api/admin/test-runs/${encodeURIComponent(runId)}/purge`);
+  }
+
+  /** PURGE an ended test, or resume its paused purge (ADMIN): phrase PURGE TEST <8> and a fresh code of the authenticator app; 202. */
+  purgeTestRun(runId: string, phrase: string, totp: string): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/test-runs/${encodeURIComponent(runId)}/purge`, { phrase, totp });
+  }
+
+  /** What the PURGE ALL dialog says before it is pressed (ADMIN, read only): the tests, the skipped, the pool's accounts. */
+  testRunPurgeAllPreview(): Promise<{ preview: TestPurgeAllPreview }> {
+    return this.get('/api/admin/test-runs/purge-all');
+  }
+
+  /** PURGE ALL ENDED TESTS (ADMIN): phrase PURGE ALL TESTS and a fresh code; 202 with the tests purged, resumed and skipped. */
+  purgeAllTestRuns(phrase: string, totp: string): Promise<{ runs: string[]; resumed: string[]; skipped: { runId: string; reason: string; message: string }[] }> {
+    return this.post('/api/admin/test-runs/purge-all', { phrase, totp });
+  }
+
+  /** Every ended test of every release, the newest ended first (AUDITOR); `background` for the refresh made by a timer. */
+  endedTestRuns(opts: { background?: boolean } = {}): Promise<{ runs: EndedTestRun[] }> {
+    return this.request('GET', '/api/admin/test-runs/ended', { background: opts.background === true });
   }
 
   /** The server's status: its latest sample and the last 10 minutes. */

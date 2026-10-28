@@ -5163,6 +5163,10 @@ export interface TestRunView {
   errors: { at: Iso; message: string }[];
   report: TestReport | null;
   peaks: TestRunPeaks | null;
+  /** Its purge (lot PURGE) once asked; null before. Absent from a server before the lot. */
+  purge?: TestRunPurge | null;
+  /** Whether PURGE can be pressed on it now: true, or why not. */
+  purgeable?: TestRunPurgeable;
 }
 
 /** GET /api/admin/drops/:id/test-runs: the release's tests, newest first. */
@@ -5177,6 +5181,76 @@ export interface TestRunSummary {
   checksTotal: number | null;
   report: TestReport | null;
   peaks?: TestRunPeaks | null;
+  /** Its purge (lot PURGE) once asked; null before. Absent from a server before the lot. */
+  purge?: TestRunPurge | null;
+  /** Whether PURGE can be pressed on it now: true, or why not. */
+  purgeable?: TestRunPurgeable;
+}
+
+// ── TEST PURGE (lot PURGE: services/test-purge.ts, routes/admin/test-entrants.ts) ──────────────────────────────────
+
+/** Where a test's purge stands: being purged, paused (with its reason), done (PURGED in the console's words). */
+export const TEST_RUN_PURGE_STATES = ['PURGING', 'PAUSED', 'DONE'] as const;
+export type TestRunPurgeState = (typeof TEST_RUN_PURGE_STATES)[number];
+
+/** A test's purge once asked. */
+export interface TestRunPurge {
+  state: TestRunPurgeState;
+  /** Why it is PAUSED (PURGE_WINDOW, PURGE_TEST_RUNNING, PURGE_NOT_TEST, PURGE_STUCK_<SQLSTATE>, ...), else null. */
+  reason: string | null;
+  /** That reason in the console's words, Paris time first (the night's end computed for the date); null unless PAUSED. */
+  message: string | null;
+  requestedAt: Iso | null;
+  /** The ADMIN who asked (email). */
+  requestedBy: string | null;
+  purgedAt: Iso | null;
+  /** Asked by PURGE ALL ENDED TESTS. */
+  all: boolean;
+  /** Once DONE: the rows deleted by table, and what was kept. */
+  deleted: Record<string, number> | null;
+  kept: Record<string, unknown> | null;
+  /** While under way: the phase of the server's last step and the rows deleted so far; null otherwise. */
+  progress: { phase: string | null; rows: number } | null;
+}
+
+/** Whether PURGE can be pressed: true, or why not (its reason and the console's words). */
+export type TestRunPurgeable = true | { reason: string; message: string };
+
+/** GET /api/admin/test-runs/ended: an ended test, whatever its release, with its release's name. */
+export interface EndedTestRun extends TestRunSummary {
+  dropId: string;
+  dropName: string;
+  mode: TestRunMode;
+}
+
+/** A window or a test running that would refuse a purge now, with its words (Paris time first). */
+export interface TestPurgeHold {
+  reason: string;
+  message: string;
+}
+
+/** GET /api/admin/test-runs/:id/purge: what the PURGE dialog says before it is pressed (read only). */
+export interface TestPurgePreview {
+  runId: string;
+  phrase: string;
+  purgeable: TestRunPurgeable;
+  hold: TestPurgeHold | null;
+  /** A draw of the release was drawn: once purged, its public ranked list no longer matches its seed. */
+  drawn: boolean;
+  planned: { accounts: number; entries: number; orders: number };
+  /** The test's orders that keep their accounts (an invoice, a parcel, a return, or not cancelled). */
+  blockingOrders: number;
+  blocking: { orderRef: string; status: string }[];
+}
+
+/** GET /api/admin/test-runs/purge-all: what PURGE ALL ENDED TESTS would do now (read only). */
+export interface TestPurgeAllPreview {
+  runs: string[];
+  resumed: string[];
+  skipped: { runId: string; reason: string; message: string }[];
+  hold: TestPurgeHold | null;
+  /** At most this many of the pool's test accounts deleted by its sweep. */
+  accounts: number;
 }
 
 /** GET /api/admin/test-runs/active: the RUNNING test, whatever its release (the Drops tab). */

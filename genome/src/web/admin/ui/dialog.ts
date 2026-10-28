@@ -12,6 +12,10 @@
  * disabled whatever is typed, and a second submission is ignored. With
  * `live`, a preview drawn from the values follows the fields and is drawn
  * again at every input (the catalogue's care block, as the client reads it).
+ * A `code` field (lot PURGE: the step-up of TEST PURGE) is the authenticator
+ * code as the sign-in and Security pages ask it (one-time-code, numeric, in
+ * mono, `000 000`); refused by the server, it is emptied and focused again,
+ * as a code is good once and the next one is typed.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
@@ -27,9 +31,10 @@ export interface DialogField {
    * fields are masked and take `autocomplete` ('current-password' or 'new-password'). `color`: the browser's colour
    * picker, its value `#rrggbb`. `checklist`: a tick box per option under the field's label, its value the ticked
    * options' values joined by commas (`checkedOf`), `value` the ones ticked at first, comma-joined; a `disabled` option
-   * is shown unticked and never sent.
+   * is shown unticked and never sent. `code`: an authenticator code (CODE_INPUT), its hint saying to wait for the next
+   * code after a sign-in.
    */
-  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color' | 'checklist';
+  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color' | 'checklist' | 'code';
   autocomplete?: string;
   /** A select's options (a `disabled` one greyed out, never chosen), or a checklist's tick boxes. */
   options?: { value: string; label: string; disabled?: boolean }[];
@@ -57,6 +62,12 @@ export function checkedOf(values: DialogValues, name: string): string[] {
 }
 
 export type DialogValues = Record<string, string>;
+
+/** A `code` field's input, as the sign-in's and the Security page's: up to 8 digits, `000 000` or `0000 0000` typed with a space. */
+export const CODE_INPUT = Object.freeze({ autocomplete: 'one-time-code', inputmode: 'numeric', maxlength: 9, mono: true, placeholder: '000 000' });
+
+/** A `code` field's hint when it gives none. */
+export const CODE_HINT = 'Six digits from your authenticator app. Just signed in? Wait for the next code.';
 
 export interface DialogOptions {
   title: string;
@@ -147,6 +158,12 @@ function controlFor(f: DialogField): HTMLInputElement | HTMLSelectElement | HTML
     // A colour (a variant's dot, NOCTURNE N1): the browser's picker, its value `#rrggbb`.
     case 'color':
       return input(f.name, { type: 'color', value: f.value });
+    // An authenticator code (lot PURGE): never pre-filled.
+    case 'code': {
+      const c = input(f.name, { ...CODE_INPUT });
+      c.setAttribute('data-testid', `dialog-code-${f.name}`);
+      return c;
+    }
     default:
       return input(f.name, { value: f.value, maxlength: f.maxlength ?? 500 });
   }
@@ -168,7 +185,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
       if (f.kind === 'checklist') return checklistField(f);
       const c = controlFor(f);
       if (f.required) c.required = true;
-      return field(f.label, c, { hint: f.hint, required: f.required, wide: true });
+      return field(f.label, c, { hint: f.hint ?? (f.kind === 'code' ? CODE_HINT : undefined), required: f.required, wide: true });
     });
 
     // The phrase the fields ask for now (null: none).
@@ -292,6 +309,10 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
         cancel.disabled = false;
         confirm.removeAttribute('aria-busy');
         confirm.textContent = label;
+        // A code is good once: emptied, and focused for the next one.
+        const codes = (o.fields ?? []).filter((f) => f.kind === 'code').map((f) => form.querySelector<HTMLInputElement>(`input[name="${f.name}"]`));
+        for (const c of codes) if (c) c.value = '';
+        codes[0]?.focus();
         sync();
       }
     });

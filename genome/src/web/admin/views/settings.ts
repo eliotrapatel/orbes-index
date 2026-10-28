@@ -27,7 +27,8 @@
  *    Add-ons, ENGRAVING, where its prices and its YOUR ORDERS switch are set.
  *  - House guarantee (plan NEXT-NINE, IN-01): the Grant dialog's defaults, valid for 90 days (1 to 730), 1 piece (1 to
  *    5), shown to the client; who set them and when. Changed by an ADMIN, audited `guarantee.settings`.
- * Its header leads to the Orders board, Logistics and the Emails page (plan MACRO M1 §4.3, views/emails.ts).
+ * Its header leads to the Orders board, Logistics, the Emails page (plan MACRO M1 §4.3, views/emails.ts) and the Ended
+ * tests page (lot PURGE, views/ended-tests.ts).
  */
 import { countryName } from '../../../shared/countries.js';
 import { h, mount } from '../../shared/dom.js';
@@ -72,7 +73,13 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Clients · Orders',
       title: 'Settings',
       lead: 'How the orders are followed: when one stands out as late, where pieces are kept, which carriers ship them and in which boxes. Everyone reads these settings; an ADMIN changes them.',
-      actions: [linkButton('Orders', href('orders'), 'ghost'), linkButton('Logistics', href('logistics'), 'ghost'), linkButton('Emails', href('emailSettings'), 'ghost')],
+      actions: [
+        linkButton('Orders', href('orders'), 'ghost'),
+        linkButton('Logistics', href('logistics'), 'ghost'),
+        linkButton('Emails', href('emailSettings'), 'ghost'),
+        // Lot PURGE (plan §A.6): every ended test, PURGE and PURGE ALL.
+        linkButton('Ended tests', href('endedTests'), 'ghost'),
+      ],
     }),
     alertsSection(ctx, alerts, admin, done),
     locationsSection(ctx, locations.items, admin, done),

@@ -75,6 +75,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
    * test entrant by hand, END TEST (a phrase to type): ADMIN. An AUDITOR and an OPERATOR read the tests and the server.
    */
   runTestEntrants: 'ADMIN',
+  /**
+   * TEST PURGE (lot PURGE): PURGE an ended test, or resume its paused purge, and PURGE ALL ENDED TESTS (a phrase and a
+   * fresh code of the authenticator app): ADMIN. An AUDITOR and an OPERATOR read the Ended tests page.
+   */
+  purgeTests: 'ADMIN',
   /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
   manageCircle: 'OPERATOR',
   /**

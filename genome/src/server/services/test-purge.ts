@@ -151,6 +151,36 @@ export interface TestPurgeSummary extends Pick<TestRunView, 'byTier' | 'release'
   drawn: boolean;
 }
 
+/** What a purge plans (part of the summary, and of the console's preview). */
+export type PurgePlanFigures = Pick<TestPurgeSummary, 'planned' | 'blockingOrders' | 'blocking' | 'drawn'>;
+
+/**
+ * GET /api/admin/test-runs/:id/purge (lot PURGE, step PURGE.7): what the PURGE dialog says before it is pressed, read
+ * only: whether it can be pressed (or why not), a window or a running test that would refuse it now (Paris words),
+ * and what the purge plans (a drawn draw, the orders that keep their accounts). The request decides again under its
+ * locks; nothing here is stored.
+ */
+export interface TestPurgePreview extends PurgePlanFigures {
+  runId: string;
+  phrase: string;
+  purgeable: Purgeable;
+  hold: { reason: string; message: string } | null;
+}
+
+/**
+ * GET /api/admin/test-runs/purge-all (lot PURGE, step PURGE.7): what PURGE ALL ENDED TESTS would do now, read only:
+ * the tests it would purge, the paused purges it would resume, the others skipped with their words, a window or a
+ * running test that would refuse it now, and at most how many of the pool's test accounts its sweep deletes (those no
+ * test outside it still uses; an order, a founding-list row or an invitation may keep some).
+ */
+export interface TestPurgeAllPreview {
+  runs: string[];
+  resumed: string[];
+  skipped: { runId: string; reason: string; message: string }[];
+  hold: { reason: string; message: string } | null;
+  accounts: number;
+}
+
 /** A run's purge as the console reads it (TestEntrantService.view and list). */
 export interface TestPurgeView {
   state: TestRunPurgeState;
@@ -539,6 +569,11 @@ export class TestPurgeService {
   /** The run's figures as the view shows them, with what the purge plans (stored once by the request, on `tx`). */
   private async summaryOf(tx: Db, r: RunRow, all: boolean): Promise<TestPurgeSummary> {
     const figures = await testRunFigures(tx, r);
+    return { all, ...figures, ...(await this.planOf(tx, r)) };
+  }
+
+  /** What a purge of `r` plans now (read only): its accounts, entries and orders, the blocking orders, a drawn draw. */
+  private async planOf(tx: Db, r: Pick<RunRow, 'id' | 'drop_id'>): Promise<PurgePlanFigures> {
     const drops = await tx.selectFrom('drops').select(['id', 'drawn_at']).where((eb) => eb.or([eb('id', '=', r.drop_id), eb('parent_drop_id', '=', r.drop_id)])).execute();
     const ids = sql.join(drops.map((d) => sql`${d.id}::uuid`));
     const blockedBy = PURGE_REFERENCES.filter((x) => x.references === 'orders' && x.kind === 'BLOCK' && x.table !== 'orders');
@@ -564,8 +599,6 @@ export class TestPurgeService {
     const blocking = orders.rows.filter((o) => o.blocking);
     const c = counts.rows[0]!;
     return {
-      all,
-      ...figures,
       planned: { accounts: Number(c.accounts), entries: Number(c.entries), orders: orders.rows.length - blocking.length },
       blockingOrders: blocking.length,
       blocking: blocking.slice(0, BLOCKING_LISTED_MAX).map((o) => ({ orderRef: orderReference(o.id), status: o.status })),
@@ -589,6 +622,68 @@ export class TestPurgeService {
       out.set(r.id, why ? { reason: why, message: REFUSAL_WORDS[why] ?? why } : true);
     }
     return out;
+  }
+
+  /** What the PURGE dialog says before it is pressed (see TestPurgePreview; 404 TEST_RUN_NOT_FOUND). Read only. */
+  async preview(runId: string): Promise<TestPurgePreview> {
+    if (typeof runId !== 'string' || !UUID_RE.test(runId)) throw runNotFound();
+    const id = runId.toLowerCase();
+    const r = await this.runRow(this.db, id);
+    if (!r) throw runNotFound();
+    const now = this.clock();
+    const why = await this.check(this.db, r, now, { global: false });
+    return {
+      runId: id,
+      phrase: purgePhrase(id),
+      purgeable: why ? { reason: why, message: REFUSAL_WORDS[why] ?? why } : true,
+      hold: await this.holdWords(now),
+      ...(await this.planOf(this.db, r)),
+    };
+  }
+
+  /** What PURGE ALL ENDED TESTS would do now (see TestPurgeAllPreview). Read only: the request decides again under its locks. */
+  async previewAll(): Promise<TestPurgeAllPreview> {
+    const now = this.clock();
+    const rows = await this.db
+      .selectFrom('test_runs')
+      .select(['id', 'drop_id', 'mode', 'status', 'purge_state', 'purge_reason', 'purge_windows'])
+      .where('status', '=', 'ENDED')
+      .where((eb) => eb.or([eb('purge_state', 'is', null), eb('purge_state', '=', 'PAUSED')]))
+      .orderBy('id')
+      .execute();
+    const runs: string[] = [];
+    const resumed: string[] = [];
+    const skipped: TestPurgeAllPreview['skipped'] = [];
+    for (const r of rows) {
+      const why = await this.check(this.db, r, now, { global: false });
+      if (why) skipped.push({ runId: r.id, reason: why, message: REFUSAL_WORDS[why] ?? why });
+      else (r.purge_state === 'PAUSED' ? resumed : runs).push(r.id);
+    }
+    const purging = (await this.db.selectFrom('test_runs').select('id').where('purge_state', '=', 'PURGING').execute()).map((r) => r.id);
+    const going = [...runs, ...resumed, ...purging];
+    // The pool's accounts no test outside this purge still uses: the sweep's candidates once these tests are purged.
+    const accounts = await this.db
+      .selectFrom('test_entrants as t')
+      .select((eb) => eb.fn.countAll<number>().as('n'))
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('test_run_entrants as e')
+              .select('e.run_id')
+              .whereRef('e.account_id', '=', 't.account_id')
+              .$if(going.length > 0, (q) => q.where('e.run_id', 'not in', going)),
+          ),
+        ),
+      )
+      .executeTakeFirstOrThrow();
+    return { runs, resumed, skipped, hold: await this.holdWords(now), accounts: Number(accounts.n) };
+  }
+
+  /** A window or a running test that would refuse a request now, with its words (Paris time first), or null. */
+  private async holdWords(now: Date): Promise<{ reason: string; message: string } | null> {
+    const hold = await this.globalHold(this.db, now);
+    return hold ? { reason: hold, message: refusal(hold, now).publicMessage } : null;
   }
 
   /** A run's purge as the console reads it, from its row (with the requester's email), or null before any request. */

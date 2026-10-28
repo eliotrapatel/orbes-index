@@ -3827,6 +3827,39 @@ fieldset.cfield--checks > .cfield__label {
   grid-column: 2;
 }
 
+/* TEST PURGE (lot PURGE): the line under a test's status (its purge, or why it cannot be purged), wrapping in its column. */
+.tests__purge-line {
+  white-space: normal;
+  min-width: 14em;
+  max-width: 28em;
+}
+
+/* A purge dialog's paragraphs (what goes, a drawn draw, the orders kept, a window now): set a little apart. */
+.tests__purge-text + .tests__purge-text {
+  margin-top: 8px;
+}
+
+/* The Ended tests page: when a test ended, on two lines rather than past a laptop's width. */
+.tests__when {
+  display: inline-block;
+  min-width: 7em;
+}
+
+/* PURGE ALL's tests skipped, each with its release and why. */
+.tests__skipped {
+  list-style: none;
+  margin-top: 10px;
+}
+
+.tests__skipped li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
