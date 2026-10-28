@@ -20,7 +20,9 @@
  *    over (PURGING, each with its summary, `all: true` for the console only), the PAUSED ones resumed, the others listed
  *    as skipped with their reason; audited `test_run.purge_all.start`. Once none of them is still being purged, the
  *    pool's accounts no test holds any more are swept (`orbes_purge_test_pool_batch`, which reads its authorization from
- *    the audit chain's own step-up row, never from anything the app wrote); audited `test_run.purge_all.done`.
+ *    the audit chain's own step-up row, never from anything the app wrote); audited `test_run.purge_all.done`. The sweep
+ *    waits while any test of any release is not ENDED (or a window, or a test running); still held when its step-up is
+ *    24 h old (PURGE_ALL_SWEEP_MS), it stops, audited `test_run.purge_all.pause` with what held it.
  *
  * The loop (`start`, every second, single-flight; `pass` is one step, the tests drive it on a manual clock): the oldest
  * test PURGING, or PAUSED for a window or a running test. Inside a forbidden window (1-minute margin) or while a test is
@@ -81,6 +83,11 @@ export const PURGE_STATEMENT_TIMEOUT = '20s';
 /** The waits before a call is tried again after a timeout, a serialization failure or a deadlock; paused at the 5th in a row. */
 export const PURGE_RETRY_MS: readonly number[] = Object.freeze([1000, 2000, 4000, 8000, 16000]);
 export const PURGE_RETRY_MAX = 5;
+/**
+ * How long a PURGE ALL's sweep waits for its tests (each ENDED, none being purged) before it stops: its step-up's 24 h,
+ * after which the pool function refuses it anyway (PURGE_ALL_NOT_REQUESTED).
+ */
+export const PURGE_ALL_SWEEP_MS = 24 * 3_600_000;
 /** The pauses that clear by themselves: the loop resumes them; the staff's guard holds while they last. */
 export const PURGE_SELF_CLEARING: readonly string[] = Object.freeze(['PURGE_WINDOW', 'PURGE_TEST_RUNNING']);
 /** The SQLSTATEs tried again (plan §A.4): lock timeout, statement timeout, serialization failure, deadlock. */
@@ -264,8 +271,11 @@ export class TestPurgeService {
   private readonly counted = new Map<string, { phase: string | null; deleted: Record<string, number> }>();
   /** The runs this process took over at boot (their counts start there). */
   private readonly takenOver = new Set<string>();
-  /** The pool sweep of a PURGE ALL under way: who asked (its audit rows target them), and whether the buffer was written. */
-  private sweep: { adminId: string; flushed: boolean; deleted: Record<string, number> } | null = null;
+  /**
+   * The pool sweep of a PURGE ALL under way: who asked (its audit rows target them), when (ms; it stops waiting
+   * PURGE_ALL_SWEEP_MS later), and whether the buffer was written.
+   */
+  private sweep: { adminId: string; startedAt: number; flushed: boolean; deleted: Record<string, number> } | null = null;
   /** Rows per call (PURGE_BATCH_ROWS; tests lower it to see step 10 span several calls). */
   batchRows = PURGE_BATCH_ROWS;
   /** How the loop waits between two calls (tests on a manual clock replace it). */
@@ -384,7 +394,7 @@ export class TestPurgeService {
       return { runs: started, resumed, skipped };
     });
     for (const id of out.runs) this.counted.delete(id);
-    this.sweep = { adminId: admin, flushed: false, deleted: {} };
+    this.sweep = { adminId: admin, startedAt: now.getTime(), flushed: false, deleted: {} };
     return out;
   }
 
@@ -643,7 +653,7 @@ export class TestPurgeService {
            ORDER BY x.id DESC LIMIT 1) l
        ORDER BY l.occurred_at DESC`.execute(this.db);
     const open = last.rows.find((r) => r.action === 'test_run.purge_all.start' && new Date(r.occurred_at).getTime() > since.getTime());
-    if (open) this.sweep = { adminId: open.admin_id, flushed: false, deleted: {} };
+    if (open) this.sweep = { adminId: open.admin_id, startedAt: new Date(open.occurred_at).getTime(), flushed: false, deleted: {} };
     if (runs.length > 0 || open) this.log.info({ runs, sweep: !!open }, 'test purge: goes on after a restart');
     return { runs, sweep: !!open };
   }
@@ -709,7 +719,8 @@ export class TestPurgeService {
   private async step(run: RunRow, now: Date): Promise<PurgePass> {
     const hold = await this.globalHold(this.db, now);
     if (hold) {
-      if (run.purge_state === 'PURGING') await this.pause(run.id, hold, now);
+      // PAUSED for the other hold (a window ended while a test runs, or the other way round): its reason follows.
+      if (run.purge_state === 'PURGING' || run.purge_reason !== hold) await this.pause(run.id, hold, now);
       return 'paused';
     }
     if (run.purge_windows !== null && !this.flushed.has(run.id)) {
@@ -764,7 +775,7 @@ export class TestPurgeService {
       this.failures = 0;
       if (reason === 'PURGE_DONE') return 'done';
       if (PURGE_SELF_CLEARING.includes(reason)) {
-        if (run.purge_state === 'PURGING') await this.pause(run.id, reason, now);
+        if (run.purge_state === 'PURGING' || run.purge_reason !== reason) await this.pause(run.id, reason, now);
         return 'paused';
       }
       await this.pause(run.id, reason, now);
@@ -818,7 +829,10 @@ export class TestPurgeService {
   /** PURGE ALL's sweep of the pool (after every run it set PURGING is done or paused for good). */
   private async sweepStep(now: Date): Promise<PurgePass> {
     const sweep = this.sweep!;
-    if (await this.globalHold(this.db, now)) return 'paused';
+    // Past its step-up's 24 h, a sweep still held stops (audited with what held it) instead of asking for ever.
+    const expired = now.getTime() - sweep.startedAt >= PURGE_ALL_SWEEP_MS;
+    const hold = await this.globalHold(this.db, now);
+    if (hold) return expired ? this.stopSweep(sweep, hold) : 'paused';
     if (!sweep.flushed) {
       if (!(await this.flushViews(now))) return 'waiting';
       sweep.flushed = true;
@@ -838,8 +852,10 @@ export class TestPurgeService {
       });
     } catch (e) {
       const reason = purgeRefusal(e);
-      // Not yet: a run of it still under way, a window, a test running or not ended. The function decides again next time.
+      // Not yet: a run of it still under way, a window, a test running or not ended. The function decides again next
+      // time, until the step-up's 24 h are over: then the sweep stops with that reason.
       if (reason === 'PURGE_ALL_NOT_DONE' || reason === 'PURGE_WINDOW' || reason === 'PURGE_TEST_RUNNING' || reason === 'PURGE_RUNS_NOT_ENDED') {
+        if (expired) return this.stopSweep(sweep, reason, e);
         this.retryAt = now.getTime() + PURGE_TICK_MS;
         return 'waiting';
       }
@@ -852,15 +868,7 @@ export class TestPurgeService {
         }
       }
       this.failures = 0;
-      const why = reason ?? (code === undefined || RETRYABLE.has(code) ? `PURGE_STUCK_${code ?? 'ERROR'}` : `SQLSTATE_${code}`);
-      this.sweep = null;
-      this.log.error({ reason: why, err: { message: (e as Error)?.message } }, 'test purge: the pool sweep stopped');
-      try {
-        await this.audit.record({ actor: PURGE_ACTOR, action: 'test_run.purge_all.pause', targetType: 'admin', targetId: sweep.adminId, details: { reason: why } });
-      } catch (err) {
-        this.log.error({ err: { message: (err as Error)?.message } }, 'test purge: the sweep’s stop could not be audited');
-      }
-      return 'paused';
+      return this.stopSweep(sweep, reason ?? (code === undefined || RETRYABLE.has(code) ? `PURGE_STUCK_${code ?? 'ERROR'}` : `SQLSTATE_${code}`), e);
     }
     this.failures = 0;
     sweep.deleted = add(sweep.deleted, batch.deleted);
@@ -869,6 +877,18 @@ export class TestPurgeService {
     this.sweep = null;
     this.log.info({ deleted: sweep.deleted }, 'test purge: the pool sweep is done');
     return 'done';
+  }
+
+  /** The pool sweep stopped with `why`, audited `test_run.purge_all.pause` (a new PURGE ALL starts it again). */
+  private async stopSweep(sweep: NonNullable<TestPurgeService['sweep']>, why: string, e?: unknown): Promise<PurgePass> {
+    this.sweep = null;
+    this.log.error({ reason: why, ...(e === undefined ? {} : { err: { message: (e as Error)?.message } }) }, 'test purge: the pool sweep stopped');
+    try {
+      await this.audit.record({ actor: PURGE_ACTOR, action: 'test_run.purge_all.pause', targetType: 'admin', targetId: sweep.adminId, details: { reason: why } });
+    } catch (err) {
+      this.log.error({ err: { message: (err as Error)?.message } }, 'test purge: the sweep’s stop could not be audited');
+    }
+    return 'paused';
   }
 
   /** The views' buffer written before accounts go; false (and a wait) when it could not be. */

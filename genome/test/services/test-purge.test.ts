@@ -388,6 +388,44 @@ describe('one test\'s purge: the request, the batches, DONE; the staff\'s guard;
     await w.tests.end(running.id, testPhrase(other, true), w.f.admin);
   });
 
+  it('a PAUSED purge\'s reason follows the hold: the window over while a test runs, then a window while it still runs (each change audited once, its own words)', async () => {
+    const run = await drawRun(w, { titane: 2, drawn: true });
+    await purgeRun(w, run.id);
+    const now = w.h.clock.now().getTime();
+    const other = (
+      await poolDraw(w.h.ctx.services.drops, w.db, { modelId: w.f.modelId, title: 'HELD', quantity: 1, opensAt: new Date(now - HOUR), closesAt: new Date(now + 3 * 24 * HOUR), earlyAccessHours: 0 }, w.f.admin)
+    ).id;
+    const running = await w.tests.start(other, press(other, { titane: 1 }), w.f.admin);
+    const reasons = async () => (await auditOf(w, 'test_run.purge.pause', run.id)).map((p) => (p.details as { reason: string }).reason);
+    // The night, the test running too: the window holds first.
+    w.h.clock.set(intoTheNight(w.h.clock.now()));
+    expect(await w.purge.pass()).toBe('paused');
+    expect((await runRow(w, run.id)).purge_reason).toBe('PURGE_WINDOW');
+    // The night over, the test still running: PURGE_TEST_RUNNING, its words, a second pause row; a second pass adds none.
+    w.h.clock.set(new Date(maintenanceWindow(w.h.clock.now())!.endsAt.getTime() + 2 * MINUTE));
+    expect(await w.purge.pass()).toBe('paused');
+    expect(await w.purge.pass()).toBe('paused');
+    let row = await runRow(w, run.id);
+    expect({ state: row.purge_state, reason: row.purge_reason }).toEqual({ state: 'PAUSED', reason: 'PURGE_TEST_RUNNING' });
+    expect((await w.tests.view(run.id)).purge?.message).toBe(pauseWords('PURGE_TEST_RUNNING', w.h.clock.now()));
+    expect(await reasons()).toEqual(['PURGE_WINDOW', 'PURGE_TEST_RUNNING']);
+    // The next night, the test still running: PURGE_WINDOW again with the night's words; the test stopped inside it changes nothing.
+    w.h.clock.set(intoTheNight(w.h.clock.now()));
+    expect(await w.purge.pass()).toBe('paused');
+    row = await runRow(w, run.id);
+    expect({ state: row.purge_state, reason: row.purge_reason }).toEqual({ state: 'PAUSED', reason: 'PURGE_WINDOW' });
+    expect((await w.tests.view(run.id)).purge?.message).toMatch(/^Paused for the night maintenance until \d\d:\d\d Paris\.$/);
+    await w.tests.stop(running.id, w.f.admin);
+    expect(await w.purge.pass()).toBe('paused');
+    expect(await reasons()).toEqual(['PURGE_WINDOW', 'PURGE_TEST_RUNNING', 'PURGE_WINDOW']);
+    // The night over: the purge goes on to DONE.
+    w.h.clock.set(new Date(maintenanceWindow(w.h.clock.now())!.endsAt.getTime() + 2 * MINUTE));
+    await passes(w);
+    expect((await runRow(w, run.id)).purge_state).toBe('DONE');
+    await w.tests.end(running.id, testPhrase(other, true), w.f.admin);
+    w.h.clock.set(tenInParis(w.h.clock.now()));
+  });
+
   it('a statement timeout (57014) is tried again with its waits and pauses PURGE_STUCK at the 5th; the staff\'s actions answer as today; a new request resumes it to DONE, its summary and step-up unchanged, one test_run.purge.resume', async () => {
     const run = await drawRun(w, { titane: 2, drawn: true });
     const lapsed = (await w.db.selectFrom('drop_entries').select('id').where('drop_id', '=', run.drop).executeTakeFirstOrThrow()).id;
@@ -693,6 +731,32 @@ describe('PURGE ALL: a test paused for good does not stop it; its sweep is autho
     await passes(w);
     expect(await auditOf(w, 'test_run.purge_all.done', w.purger.id)).toHaveLength(2);
   });
+
+  it('a PURGE ALL\'s sweep waits while a test is not ENDED, without a row; at its step-up\'s 24 h it stops, audited with that reason', async () => {
+    const now = w.h.clock.now().getTime();
+    const drop = (
+      await poolDraw(w.h.ctx.services.drops, w.db, { modelId: w.f.modelId, title: 'STOPPED', quantity: 1, opensAt: new Date(now - HOUR), closesAt: new Date(now + HOUR), earlyAccessHours: 0 }, w.f.admin)
+    ).id;
+    const stopped = await w.tests.start(drop, press(drop, { titane: 1 }), w.f.admin);
+    await w.tests.stop(stopped.id, w.f.admin);
+    const pausesBefore = (await auditOf(w, 'test_run.purge_all.pause', w.purger.id)).length;
+    const doneBefore = (await auditOf(w, 'test_run.purge_all.done', w.purger.id)).length;
+    const asking = await asker(w);
+    await w.purge.requestAll({ phrase: PURGE_ALL_PHRASE, totp: code(w) }, asking);
+    expect(await w.purge.pass()).toBe('waiting');
+    w.h.clock.advance(2 * SECOND);
+    expect(await w.purge.pass()).toBe('waiting');
+    expect(await auditOf(w, 'test_run.purge_all.pause', w.purger.id)).toHaveLength(pausesBefore);
+    // 24 h later (at 10:00 Paris, out of every window): stopped, one row with what held it; then nothing more to do.
+    w.h.clock.set(tenInParis(new Date(w.h.clock.now().getTime() + 24 * HOUR)));
+    expect(await w.purge.pass()).toBe('paused');
+    const stops = await auditOf(w, 'test_run.purge_all.pause', w.purger.id);
+    expect(stops).toHaveLength(pausesBefore + 1);
+    expect(stops.at(-1)).toMatchObject({ actor_type: 'system', actor_id: 'test-purge', details: { reason: 'PURGE_RUNS_NOT_ENDED' } });
+    expect(await w.purge.pass()).toBe('idle');
+    expect(await auditOf(w, 'test_run.purge_all.done', w.purger.id)).toHaveLength(doneBefore);
+    await w.tests.end(stopped.id, testPhrase(drop, true), w.f.admin);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -704,7 +768,7 @@ describe('a LIVE RELEASE\'s test purged: its room built again from the database'
   }, 120_000);
   afterAll(() => w?.h.close());
 
-  it('after DONE the release\'s frame is asked again (the hub drops what it cached), its readings dropped, and the public room names no deleted entry', async () => {
+  it('after DONE the release\'s frame is asked again (the hub drops what it cached), its readings dropped, and the public sheet and room read as END TEST left them', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + HOUR);
     const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 2 }], perAccount: 1 });
     w.h.clock.set(new Date(t0.getTime() - 4 * MINUTE));
@@ -726,7 +790,11 @@ describe('a LIVE RELEASE\'s test purged: its room built again from the database'
     w.h.clock.advance(MINUTE);
     const frames = w.h.ctx.services.live.frames;
     for (const e of testEntries) frames.read(release.id, e, true);
+    // The public sheet and room never name an entry or an account (LiveRoom: no personal data): what the purge must
+    // leave of them is what END TEST left, the same figures, built again from the database.
     const sheetBefore = JSON.stringify((await w.h.client().request('GET', `/api/v1/live/${release.id}`)).json());
+    const roomBefore = (await w.h.ctx.services.liveRoom.frame(release.id))!.room;
+    expect(roomBefore).toMatchObject({ phase: 'ENDED', over: true, endedReason: 'SOLD_OUT', quantity: 2 });
 
     const asked: string[] = [];
     const hub = w.h.app.liveHub;
@@ -744,11 +812,10 @@ describe('a LIVE RELEASE\'s test purged: its room built again from the database'
     expect((await runRow(w, run.id)).purge_state).toBe('DONE');
     expect(asked).toContain(release.id);
     for (const e of testEntries) expect(frames.hasReadNext(release.id, e)).toBe(false);
-    const sheet = JSON.stringify((await w.h.client().request('GET', `/api/v1/live/${release.id}`)).json());
-    for (const e of [...testEntries, ...accounts]) expect(sheet).not.toContain(e);
-    const frame = JSON.stringify(await w.h.ctx.services.liveRoom.frame(release.id));
-    for (const e of [...testEntries, ...accounts]) expect(frame).not.toContain(e);
-    expect(sheetBefore.length).toBeGreaterThan(0);
+    expect(JSON.stringify((await w.h.client().request('GET', `/api/v1/live/${release.id}`)).json())).toBe(sheetBefore);
+    const frame = (await w.h.ctx.services.liveRoom.frame(release.id))!;
+    expect(frame.room).toEqual(roomBefore);
+    expect(frame.queue?.entries.size ?? 0).toBe(0);
     expect(await existing(w, accounts)).toEqual([]);
   });
 });
