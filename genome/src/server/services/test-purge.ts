@@ -10,15 +10,19 @@
  *    1-minute margin, a test RUNNING, the test not ENDED, already purged or being purged, its release not over, another
  *    test of the release not ended, a DRAWN draw holding an entry of anyone outside the test: PURGE_NOT_TEST). Then the
  *    step-up verified BEFORE the transaction (AuthService.verifyAdminStepUp: a wrong code is counted in its own commit),
- *    then ONE transaction: the step-up consumed first (its `admin.step_up` row is what the database's guard of
- *    `test_runs` looks for), the run and the release's rows FOR UPDATE (the release and its after-room: the row lock the
- *    staff's draw actions take) and every pre-check again under that lock, the run's figures stored as the console
- *    showed them (`purge_summary`, once), PURGING, audited `test_run.purge.start`. On a PAUSED test the same request is
+ *    then ONE transaction: the run and the release's rows FOR UPDATE (the release and its after-room: the row lock the
+ *    staff's draw actions take), every pre-check again under that lock and the run's figures read; only then the step-up
+ *    consumed (its `admin.step_up` row is what the database's guard of `test_runs` looks for), then the writes alone:
+ *    the figures stored as the console showed them (`purge_summary`, once), PURGING, audited `test_run.purge.start`.
+ *    A refusal found under the lock leaves the code unconsumed. On a PAUSED test the same request is
  *    a RESUME (H12): the same step-up and checks, PAUSED → PURGING, its reason cleared, audited `test_run.purge.resume`;
  *    the summary and the step-up the database stored at the first request stay as they are;
  *  - PURGE ALL ENDED TESTS: the phrase `PURGE ALL TESTS` and a code, one step-up for every ended test whose release is
  *    over (PURGING, each with its summary, `all: true` for the console only), the PAUSED ones resumed, the others listed
- *    as skipped with their reason; audited `test_run.purge_all.start`. Once none of them is still being purged, the
+ *    as skipped with their reason; audited `test_run.purge_all.start`. Every ended test is checked first without a
+ *    lock: one refused there (its release not over, such as a LIVE room still open) is skipped and its rows are never
+ *    locked, so a room's engine and presses never wait for the request; the others are locked and checked again under
+ *    the lock, as one test's request does. Once none of them is still being purged, the
  *    pool's accounts no test holds any more are swept (`orbes_purge_test_pool_batch`, which reads its authorization from
  *    the audit chain's own step-up row, never from anything the app wrote); audited `test_run.purge_all.done`. The sweep
  *    waits while any test of any release is not ENDED (or a window, or a test running); still held when its step-up is
@@ -49,9 +53,12 @@
  * admin's row and the audit chain's lock (an audit row holds it until the commit): the batch function locks the run
  * then its release; the staff's draw actions lock the release then write their audit row; so a request locks the run
  * and its release BEFORE it consumes the step-up (which writes `admin.step_up`), and the loop writes its pause and
- * DONE rows after the run's row. The step-up is still consumed before anything else is written, inside the action's
- * transaction, so it is used only by a request that commits (plan §S.1); taken in the other order, a request and an
- * OFFER NEXT pressed at the same moment on the same release could deadlock.
+ * DONE rows after the run's row. Under those row locks a request does every read first (the windows and a running
+ * test, each run's checks, each started run's figures), and only then consumes the step-up, followed by its writes
+ * alone: the platform-wide audit chain lock is held for the writes only, never for the reads, as live.ts writes its
+ * audit entries last. The step-up is still consumed before anything is written, inside the action's transaction, so it
+ * is used only by a request that commits (plan §S.1), and a refusal found under the lock leaves it unconsumed; taken in
+ * the other order, a request and an OFFER NEXT pressed at the same moment on the same release could deadlock.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -349,20 +356,22 @@ export class TestPurgeService {
       meta,
     );
     const resumed = await inTransaction(this.db, async (tx) => {
-      // The run's and the release's rows first, then the step-up consumed before anything is written (see LOCK ORDER).
+      // The run's and the release's rows first, every read under them, then the step-up consumed, then the writes alone
+      // (see LOCK ORDER): a refusal found here leaves the code unconsumed.
       const run = await this.lockRuns(tx, [id]);
       const r = run.get(id);
       if (!r) throw runNotFound();
       await this.lockReleases(tx, [r.drop_id]);
-      await this.auth.consumeAdminStepUp(verified, tx, meta);
       const at = this.clock();
       const why = await this.check(tx, r, at, { global: true });
       if (why) throw refusal(why, at);
-      if (r.purge_state === 'PAUSED') {
+      const summary = r.purge_state === 'PAUSED' ? null : await this.summaryOf(tx, r, false);
+      await this.auth.consumeAdminStepUp(verified, tx, meta);
+      if (summary === null) {
         await this.resume(tx, r, asker.actor, verified);
         return true;
       }
-      await this.begin(tx, r, admin, at, false, asker.actor);
+      await this.begin(tx, r, summary, admin, at, asker.actor);
       return false;
     });
     if (!resumed) this.counted.delete(id);
@@ -381,38 +390,54 @@ export class TestPurgeService {
     const global = await this.globalHold(this.db, now);
     if (global) throw refusal(global, now);
     const verified = await this.auth.verifyAdminStepUp({ adminId: admin, token: asker.token, totp: input.totp, purpose: 'test_run.purge_all', requirePassword: false }, meta);
+    // Every ended test checked first without a lock: one refused here (its release not over, such as a LIVE room still
+    // open) is skipped with its reason, and its rows are never locked (see the header).
+    const candidates = await this.db
+      .selectFrom('test_runs')
+      .select(['id', 'drop_id', 'mode', 'status', 'purge_state', 'purge_reason', 'purge_windows'])
+      .where('status', '=', 'ENDED')
+      .where((eb) => eb.or([eb('purge_state', 'is', null), eb('purge_state', '=', 'PAUSED')]))
+      .orderBy('id')
+      .execute();
+    const refusedFirst = new Map<string, string>();
+    for (const r of candidates) {
+      const why = await this.check(this.db, r, now, { global: false });
+      if (why) refusedFirst.set(r.id, why);
+    }
     const out = await inTransaction(this.db, async (tx) => {
-      const ids = (
-        await tx
-          .selectFrom('test_runs')
-          .select('id')
-          .where('status', '=', 'ENDED')
-          .where((eb) => eb.or([eb('purge_state', 'is', null), eb('purge_state', '=', 'PAUSED')]))
-          .orderBy('id')
-          .execute()
-      ).map((r) => r.id);
-      const runs = await this.lockRuns(tx, ids);
+      // The rows of the tests that passed, then their releases', every read under them, then the step-up consumed, then
+      // the writes alone (see LOCK ORDER).
+      const runs = await this.lockRuns(tx, candidates.filter((r) => !refusedFirst.has(r.id)).map((r) => r.id));
       await this.lockReleases(tx, [...new Set([...runs.values()].map((r) => r.drop_id))]);
-      await this.auth.consumeAdminStepUp(verified, tx, meta);
       const at = this.clock();
       const hold = await this.globalHold(tx, at);
       if (hold) throw refusal(hold, at);
-      const started: string[] = [];
-      const resumed: string[] = [];
+      const toStart: { r: RunRow; summary: TestPurgeSummary }[] = [];
+      const toResume: RunRow[] = [];
       const skipped: { runId: string; reason: string; message: string }[] = [];
-      for (const id of ids) {
+      for (const { id } of candidates) {
+        const first = refusedFirst.get(id);
+        if (first) {
+          skipped.push({ runId: id, reason: first, message: REFUSAL_WORDS[first] ?? first });
+          continue;
+        }
         const r = runs.get(id);
         if (!r || r.status !== 'ENDED' || (r.purge_state !== null && r.purge_state !== 'PAUSED')) continue;
         const why = await this.check(tx, r, at, { global: false });
-        if (why) {
-          skipped.push({ runId: id, reason: why, message: REFUSAL_WORDS[why] ?? why });
-        } else if (r.purge_state === 'PAUSED') {
-          await this.resume(tx, r, asker.actor, verified, true);
-          resumed.push(id);
-        } else {
-          await this.begin(tx, r, admin, at, true, null);
-          started.push(id);
-        }
+        if (why) skipped.push({ runId: id, reason: why, message: REFUSAL_WORDS[why] ?? why });
+        else if (r.purge_state === 'PAUSED') toResume.push(r);
+        else toStart.push({ r, summary: await this.summaryOf(tx, r, true) });
+      }
+      await this.auth.consumeAdminStepUp(verified, tx, meta);
+      const resumed: string[] = [];
+      for (const r of toResume) {
+        await this.resume(tx, r, asker.actor, verified, true);
+        resumed.push(r.id);
+      }
+      const started: string[] = [];
+      for (const { r, summary } of toStart) {
+        await this.begin(tx, r, summary, admin, at, null);
+        started.push(r.id);
       }
       await this.audit.record(
         {
@@ -431,9 +456,11 @@ export class TestPurgeService {
     return out;
   }
 
-  /** NULL → PURGING: the run's figures stored once, the request's admin, audited `test_run.purge.start` (one test's request only). */
-  private async begin(tx: Db, r: RunRow, admin: string, at: Date, all: boolean, actor: Actor | null): Promise<void> {
-    const summary = await this.summaryOf(tx, r, all);
+  /**
+   * NULL → PURGING: the run's figures (summaryOf, read before the step-up was consumed) stored once, the request's
+   * admin, audited `test_run.purge.start` (one test's request only).
+   */
+  private async begin(tx: Db, r: RunRow, summary: TestPurgeSummary, admin: string, at: Date, actor: Actor | null): Promise<void> {
     const updated = await tx
       .updateTable('test_runs')
       .set({ purge_state: 'PURGING', purge_requested_at: at, purge_requested_by: admin, purge_summary: jsonText(summary as unknown as JsonObject) })

@@ -318,8 +318,14 @@ describe('the Platform reset page', () => {
   });
 
   it('after a reset: the post-check lines OK, or the failing one in the danger tone (F17)', () => {
-    expect(postCheckRow(check('chain', true, 'Entry 1, hash a3f09c1e5b7d; 14 entries checked.'))).toEqual({ label: 'The chain line', mark: 'OK', tone: 'solid', value: 'Entry 1, hash a3f09c1e5b7d; 14 entries checked.', failing: false });
-    expect(postCheckRow(check('key', false, '2 ACTIVE signing keys, expected 1.'))).toEqual({ label: 'The key line', mark: 'FAILING', tone: 'critical', value: '2 ACTIVE signing keys, expected 1.', failing: true });
+    expect(postCheckRow(check('chain', true, 'Entry 1, hash a3f09c1e5b7d; 14 entries checked.'))).toEqual({ label: 'The chain line', mark: 'OK', tone: 'solid', value: 'Entry 1, hash a3f09c1e5b7d; 14 entries checked.', failing: false, mono: false });
+    expect(postCheckRow(check('key', false, '2 ACTIVE signing keys, expected 1.'))).toEqual({ label: 'The key line', mark: 'FAILING', tone: 'critical', value: '2 ACTIVE signing keys, expected 1.', failing: true, mono: false });
+    // The identifiers found, in mono as everywhere on the page; a sentence, or a failing line, in the body face.
+    expect(postCheckRow(check('pieces', true, 'O26-J-00001, O26-W-00001')).mono).toBe(true);
+    expect(postCheckRow(check('numbers', true, 'INV-2026-000001, CN-2026-000001, P-2026-000001, PC-2026-000001')).mono).toBe(true);
+    expect(postCheckRow(check('test', true, 'test-0001')).mono).toBe(true);
+    expect(postCheckRow(check('pieces', true, 'No active category.')).mono).toBe(false);
+    expect(postCheckRow(check('numbers', false, 'INV-2026-000004, CN-2026-000001, P-2026-000001, PC-2026-000001')).mono).toBe(false);
     expect(postCheckVerdict(lastReset().postCheck)).toBe('Every check after the reset is OK.');
     expect(postCheckVerdict([check('chain'), check('key', false)])).toBe('1 check after the reset is failing: see the line in red.');
     expect(postCheckVerdict([check('chain', false), check('key', false)])).toBe('2 checks after the reset are failing: see the lines in red.');

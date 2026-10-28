@@ -11,14 +11,15 @@
  *    tests, the paused purges it resumes, the tests skipped and why, at most how many of the pool's test accounts go,
  *    a window or a running test now), then a danger dialog with the phrase PURGE ALL TESTS and a fresh authenticator
  *    code; a refusal is said inside it.
- *  - Read again every 2 s while a purge is under way (ui/refresh.ts, in the background: a 401 never signs out here).
+ *  - Read again every 2 s while a purge is under way, and after a read that failed (ui/refresh.ts, in the background: a
+ *    401 never signs out here).
  * Everyone who reads the console reads the page; an AUDITOR and an OPERATOR without a button. Empty: "No ended test."
  */
 import { h, mount } from '../../shared/dom.js';
 import { formatCount } from '../format.js';
 import { parisDateTime } from '../model/links.js';
 import { STATUS_REFRESH_MS } from '../model/system-status.js';
-import { canPurgeAll, codeProblem, ENDED_TESTS_TEXT, PURGE_ALL_PHRASE, purgeAction, purgeAllDialogText, purgeCodeField, purgeUnderWay, typedCode } from '../model/test-purge.js';
+import { canPurgeAll, codeProblem, ENDED_TESTS_TEXT, keepReading, PURGE_ALL_PHRASE, purgeAction, purgeAllDialogText, purgeCodeField, typedCode } from '../model/test-purge.js';
 import { checksLine } from '../model/test-entrants.js';
 import { href } from '../router.js';
 import type { EndedTestRun, TestPurgeAllPreview } from '../types.js';
@@ -55,9 +56,9 @@ export async function endedTestsView(ctx: ViewContext): Promise<HTMLElement> {
     draw();
     follow();
   };
-  /** Read again every 2 s while a purge is under way; stopped once none is. */
-  const follow = () => {
-    if (!purgeUnderWay(runs)) {
+  /** Read again every 2 s while a purge is under way, or after a read that failed; stopped once a good read shows none. */
+  const follow = (readFailed = false) => {
+    if (!keepReading(runs, readFailed)) {
       watch?.stop();
       watch = null;
       return;
@@ -78,7 +79,7 @@ export async function endedTestsView(ctx: ViewContext): Promise<HTMLElement> {
       apply((await ctx.api.endedTestRuns({ background: true })).runs);
     } catch {
       notice.hidden = false;
-      follow();
+      follow(true);
     }
   };
 

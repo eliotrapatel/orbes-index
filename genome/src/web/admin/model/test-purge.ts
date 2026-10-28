@@ -133,6 +133,15 @@ export function purgeUnderWay(rows: readonly PurgeRow[]): boolean {
   return rows.some((r) => r.purge?.state === 'PURGING' || (r.purge?.state === 'PAUSED' && SELF_CLEARING.has(r.purge.reason ?? '')));
 }
 
+/**
+ * Whether the Ended tests page reads its tests again every 2 s (views/ended-tests.ts): while a purge is under way, and
+ * after a read that failed whatever the list last read says (right after a PURGE it still shows the test ENDED), so
+ * the notice's "asked again every 2 seconds" holds; the next good read decides again.
+ */
+export function keepReading(rows: readonly PurgeRow[], readFailed: boolean): boolean {
+  return readFailed || purgeUnderWay(rows);
+}
+
 /** PURGE ALL ENDED TESTS on the Ended tests page: for an ADMIN, while one ended test at least can be purged. */
 export function canPurgeAll(rows: readonly PurgeRow[], role: AdminRole | null | undefined): boolean {
   return can(role, 'purgeTests') && rows.some((r) => r.purgeable === true);

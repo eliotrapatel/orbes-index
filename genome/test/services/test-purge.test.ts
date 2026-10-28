@@ -340,6 +340,48 @@ describe('one test\'s purge: the request, the batches, DONE; the staff\'s guard;
     expect(await w.purge.pass()).toBe('idle');
   });
 
+  it('a refusal found under the lock leaves the code unconsumed: the step-up never consumed, no admin.step_up row, the same code then passes', async () => {
+    const run = await drawRun(w, { titane: 1, drawn: true, title: 'UNDER THE LOCK' });
+    const a = await asker(w);
+    const c = code(w);
+    const at = w.h.clock.now();
+    const auth = w.h.ctx.services.auth;
+    expect((w.purge as unknown as { auth: unknown }).auth).toBe(auth);
+    const consumed: string[] = [];
+    const consume = auth.consumeAdminStepUp.bind(auth);
+    const verify = auth.verifyAdminStepUp.bind(auth);
+    auth.consumeAdminStepUp = async (v, tx, meta) => {
+      consumed.push(v.purpose);
+      return consume(v, tx, meta);
+    };
+    // The pre-check and the code pass at 10:00 Paris; the clock is in the night by the time the transaction checks again.
+    auth.verifyAdminStepUp = async (input, meta) => {
+      const v = await verify(input, meta);
+      w.h.clock.set(intoTheNight(at));
+      return v;
+    };
+    const stepUpsBefore = (await auditOf(w, 'admin.step_up', w.purger.id)).length;
+    try {
+      await refused(w.purge.request(run.id, { phrase: purgePhrase(run.id), totp: c }, a), 'PURGE_WINDOW', 409);
+    } finally {
+      auth.verifyAdminStepUp = verify;
+    }
+    try {
+      expect(consumed).toEqual([]);
+      expect(await auditOf(w, 'admin.step_up', w.purger.id)).toHaveLength(stepUpsBefore);
+      expect((await runRow(w, run.id)).purge_state).toBeNull();
+      // Back at 10:00: the same code, never consumed, passes.
+      w.h.clock.set(at);
+      expect(await w.purge.request(run.id, { phrase: purgePhrase(run.id), totp: c }, a)).toEqual({ runId: run.id, resumed: false });
+      expect(consumed).toEqual([`test_run.purge:${run.id}`]);
+      expect(await auditOf(w, 'admin.step_up', w.purger.id)).toHaveLength(stepUpsBefore + 1);
+    } finally {
+      auth.consumeAdminStepUp = consume;
+    }
+    await passes(w);
+    expect((await runRow(w, run.id)).purge_state).toBe('DONE');
+  });
+
   it('pauses in a forbidden window and while a test runs (audited once per pause, the guard held), resumes by itself after each', async () => {
     const run = await drawRun(w, { titane: 2, drawn: true });
     await purgeRun(w, run.id);
@@ -756,6 +798,51 @@ describe('PURGE ALL: a test paused for good does not stop it; its sweep is autho
     expect(await w.purge.pass()).toBe('idle');
     expect(await auditOf(w, 'test_run.purge_all.done', w.purger.id)).toHaveLength(doneBefore);
     await w.tests.end(stopped.id, testPhrase(drop, true), w.f.admin);
+  });
+
+  it('PURGE ALL skips, before any lock, an ended test whose release is not over (a LIVE room open, a closed draw not drawn): their releases never locked, the room\'s engine and its collector go on', async () => {
+    const closedDraw = (await w.db.selectFrom('drops').select('id').where('title', '=', 'STOPPED').executeTakeFirstOrThrow()).id;
+    const closedRun = (await w.db.selectFrom('test_runs').select('id').where('drop_id', '=', closedDraw).executeTakeFirstOrThrow()).id;
+    const t0 = new Date(w.h.clock.now().getTime() + HOUR);
+    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 2 }], perAccount: 1 });
+    w.h.clock.set(new Date(t0.getTime() - 4 * MINUTE));
+    const run = await w.tests.start(release.id, press(release.id, { titane: 1 }, { choices: { size: '52', quantity: 1, addOnsPct: 0 } }), w.f.admin);
+    await drive(w, 0, 500, release.id);
+    expect((await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin)).status).toBe('ENDED');
+    const real = await createAccount(w.db);
+    await w.h.ctx.services.live.enter(real.id, release.id, { sizeId: release.sizes[0]!.id }, real.actor);
+    w.h.clock.set(t0);
+    await w.h.ctx.services.live.advance(release.id);
+    expect((await w.db.selectFrom('drops').select(['ended_at', 'cancelled_at']).where('id', '=', release.id).executeTakeFirstOrThrow())).toEqual({ ended_at: null, cancelled_at: null });
+
+    const locked: string[][] = [];
+    const svc = w.purge as unknown as { lockReleases(tx: Db, dropIds: readonly string[]): Promise<void> };
+    const lockReleases = svc.lockReleases;
+    svc.lockReleases = async function (tx, dropIds) {
+      locked.push([...dropIds]);
+      return lockReleases.call(this, tx, dropIds);
+    };
+    let all: Awaited<ReturnType<TestPurgeService['requestAll']>>;
+    try {
+      const asking = await asker(w);
+      all = await w.purge.requestAll({ phrase: PURGE_ALL_PHRASE, totp: code(w) }, asking);
+    } finally {
+      svc.lockReleases = lockReleases;
+    }
+    expect(all.runs).toEqual([]);
+    expect(all.skipped).toEqual(
+      expect.arrayContaining([
+        { runId: run.id, reason: 'PURGE_RELEASE_NOT_OVER', message: expect.any(String) },
+        { runId: closedRun, reason: 'PURGE_RELEASE_NOT_OVER', message: expect.any(String) },
+      ]),
+    );
+    expect(locked.flat()).not.toContain(release.id);
+    expect(locked.flat()).not.toContain(closedDraw);
+    expect((await runRow(w, run.id)).purge_state).toBeNull();
+    // The room goes on as before: its engine passes, the real collector still in its line.
+    await w.h.ctx.services.live.advance(release.id);
+    expect(await w.db.selectFrom('live_entries').select('id').where('drop_id', '=', release.id).where('account_id', '=', real.id).executeTakeFirst()).toBeDefined();
+    await passes(w);
   });
 });
 

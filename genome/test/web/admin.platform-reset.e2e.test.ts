@@ -166,6 +166,10 @@ describe.skipIf(!HAS_CHROMIUM)('the Platform reset page in the console (E2E, Chr
     await other.evaluate(() => (location.hash = '#/settings/platform-reset'));
     await expect.poll(async () => ((await other.locator('.failure__text').textContent()) ?? '').trim(), POLL).toBe('This page does not exist.');
     expect(await other.locator('[data-testid=reset-holder]').count()).toBe(0);
+    // The page never names itself to them: the crumb and the tab's title are the not-found state's, no sidebar mark.
+    expect((await other.locator('.topbar__crumb').textContent())?.trim()).toBe('Not found');
+    expect(await other.evaluate(() => document.title)).toMatch(/^(\(\S+\) )?Not found — ORBES Genome Console$/);
+    expect(await other.locator('.side__link.is-active').count()).toBe(0);
     await other.context().close();
 
     // The holder: the link from Settings, the page.

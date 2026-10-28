@@ -61,7 +61,7 @@ import { circlePostView } from './views/circle.js';
 import { partnerExperienceView, partnersView, partnerView } from './views/partners.js';
 import { clubView } from './views/club.js';
 import { codesView, resetCodesViewState } from './views/codes.js';
-import type { View, ViewContext } from './views/context.js';
+import { NotFoundPage, type View, type ViewContext } from './views/context.js';
 import { dashboardView } from './views/dashboard.js';
 import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
@@ -193,7 +193,12 @@ const LOGISTICS_ROUTES: ReadonlySet<string> = new Set(['logistics', 'logisticsOr
 /** The sidebar of a LOGISTICS login (plan NEXT LOT §3.5.3): one item, Logistics. */
 const LOGISTICS_NAV: { group: string; items: NavItem[] }[] = [{ group: 'Registry', items: [{ route: 'logistics', label: 'Logistics', cap: 'readLogistics' }] }];
 
-const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteName }>> = {
+/**
+ * Each address's view, its tab title and the sidebar link it marks. `hidden`: a page that does not exist for most of
+ * the people who may open its address (its view throws NotFoundPage for them); it is named (the mark, the crumb, the
+ * title) only once its view has answered, so it never names itself to them, even while it loads.
+ */
+const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteName; hidden?: true }>> = {
   dashboard: { view: dashboardView, title: 'Dashboard', nav: 'dashboard' },
   generator: { view: generatorView, title: 'Generator', nav: 'generator' },
   products: { view: productsView, title: 'Products', nav: 'products' },
@@ -241,7 +246,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   // Lot PURGE (plan §A.6): the Ended tests page, from Settings; the sidebar marks Orders, as for Settings.
   endedTests: { view: endedTestsView, title: 'Ended tests', nav: 'orders' },
   // Lot PURGE (plan §B.5): the Platform reset page, from Settings, for the reset holder; the sidebar marks Orders, as for Settings.
-  platformReset: { view: platformResetView, title: 'Platform reset', nav: 'orders' },
+  platformReset: { view: platformResetView, title: 'Platform reset', nav: 'orders', hidden: true },
   orders: { view: ordersView, title: 'Orders', nav: 'orders' },
   orderReturns: { view: orderReturnsView, title: 'Returns', nav: 'orders' },
   order: { view: orderView, title: 'Order', nav: 'orders' },
@@ -768,23 +773,30 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     return;
   }
 
-  const entry = r.name === 'not-found' ? undefined : VIEWS[r.name];
-  if (!entry) {
+  const notFound = () => {
     markNav(null);
     setCrumb(sh, 'Not found');
     setTitle('Not found');
     mount(sh.view, failure('This page does not exist.'));
-    return;
-  }
-  markNav(entry.nav);
-  const group = [...NAV, ...LOGISTICS_NAV].find((g) => g.items.some((i) => i.route === entry.nav))?.group ?? '';
-  setCrumb(sh, r.name === 'product' ? `${group} · Products · ${r.params.productId}` : r.name === 'model' ? `${group} · Catalogue · Lookbook` : `${group} · ${entry.title}`);
-  setTitle(r.name === 'product' ? r.params.productId : entry.title);
+  };
+  const entry = r.name === 'not-found' ? undefined : VIEWS[r.name];
+  if (!entry) return notFound();
+  const name = () => {
+    markNav(entry.nav);
+    const group = [...NAV, ...LOGISTICS_NAV].find((g) => g.items.some((i) => i.route === entry.nav))?.group ?? '';
+    setCrumb(sh, r.name === 'product' ? `${group} · Products · ${r.params.productId}` : r.name === 'model' ? `${group} · Catalogue · Lookbook` : `${group} · ${entry.title}`);
+    setTitle(r.name === 'product' ? r.params.productId : entry.title);
+  };
+  if (entry.hidden) {
+    markNav(null);
+    setCrumb(sh, '');
+  } else name();
   if (!opts.keepScroll) mount(sh.view, loading());
 
   try {
     const el = await entry.view(makeContext(r, s));
     if (seq !== renderSeq) return; // a newer navigation won
+    if (entry.hidden) name();
     mount(sh.view, el);
     if (opts.keepScroll) window.scrollTo(0, scrollY);
     else {
@@ -793,6 +805,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     }
   } catch (e) {
     if (seq !== renderSeq) return;
+    if (e instanceof NotFoundPage) return notFound();
     if (e instanceof ApiError && e.status === 401) return; // onUnauthorized already showed the login
     if (e instanceof ApiError && e.code === 'MFA_REQUIRED') {
       s.mfaPassed = false;

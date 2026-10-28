@@ -116,9 +116,17 @@ export function lastResetLine(r: LastPlatformReset): string {
     .join('');
 }
 
-/** A post-check line as the page shows it: its label, OK or FAILING, and what was found (the failing one in the danger tone). */
-export function postCheckRow(l: ResetPostCheckLine): { label: string; mark: 'OK' | 'FAILING'; tone: Tone; value: string; failing: boolean } {
-  return { label: l.label, mark: l.ok ? 'OK' : 'FAILING', tone: l.ok ? 'solid' : 'critical', value: l.value, failing: !l.ok };
+/** The post-check lines whose value, when OK, is identifiers only (the next piece references, INV-/CN-/P-/PC-, test-0001). */
+const IDENTIFIER_CHECKS: ReadonlySet<ResetPostCheckLine['key']> = new Set(['pieces', 'numbers', 'test']);
+
+/**
+ * A post-check line as the page shows it: its label, OK or FAILING, and what was found (the failing one in the danger
+ * tone). `mono`: the value set in mono, as the page sets every identifier, when it is identifiers only on an OK line
+ * (never a sentence such as the chain's or "No active category.").
+ */
+export function postCheckRow(l: ResetPostCheckLine): { label: string; mark: 'OK' | 'FAILING'; tone: Tone; value: string; failing: boolean; mono: boolean } {
+  const mono = l.ok && IDENTIFIER_CHECKS.has(l.key) && /^[\w-]+(, [\w-]+)*$/.test(l.value);
+  return { label: l.label, mark: l.ok ? 'OK' : 'FAILING', tone: l.ok ? 'solid' : 'critical', value: l.value, failing: !l.ok, mono };
 }
 
 /** The post-check's verdict: every line OK, or how many fail. */

@@ -540,7 +540,12 @@ describe('the runbook of lot PURGE (docs/launch/DEPLOY-PR-PURGE.md)', () => {
     );
     expect(before).toContain('le nombre de comptes **« neither test nor team »** sous `What goes`');
     expect(source('server/services/platform-reset.ts')).toContain('signed up since you opened this page. Reload it and check them.');
-    expect(fenced(before, 'bash')).toEqual([psql(Q.resets)]);
+    // Console only (ANSWERS answer 1, plan D1): a routine reset reads nothing on the server; the page's Last reset line is noted.
+    expect(fenced(before, 'bash')).toEqual([]);
+    expect(before).toContain('**Note la ligne `Last reset`** de la page `Settings` → `Platform reset`');
+    expect(before).toContain(`Avant la première remise, elle lit ${said(PLATFORM_RESET_TEXT.noReset)}.`);
+    expect(view()).toContain("{ label: 'Last reset', value: h('span', { data: { testid: 'reset-last-when' } }");
+    expect(view()).toContain(': T.noReset) }');
     expect(before).toContain('une autre connexion à la base fait refuser la remise (rien ne change)');
     // The press: the dialog's fields and phrase, the restart notice.
     const press = section(runbook, '### 2.2');
@@ -577,7 +582,8 @@ describe('the runbook of lot PURGE (docs/launch/DEPLOY-PR-PURGE.md)', () => {
     expect(items[0]).toContain('(`Keys`)');
     expect(items[4]).toContain('`Team`');
     expect(RESET_CHECKLIST[0]!.after).toContain('ask the host for a backup right after');
-    expect(after).toContain('`resets` a pris un de plus, `last_reset_at` est l\'heure de ton appui (en UTC)');
+    expect(fenced(after, 'bash')).toEqual([]);
+    expect(after).not.toContain('platform_reset_gate');
     // A refusal, exit 1, and the 3-minute row (H8).
     const trouble = section(runbook, '### 2.4');
     const failure = 'message: `The reset of ${parisWhen(row.occurred_at)} was refused: ${failureWords(reason)}. Nothing changed.` }';
@@ -590,7 +596,8 @@ describe('the runbook of lot PURGE (docs/launch/DEPLOY-PR-PURGE.md)', () => {
     expect(readDoc('genome/src/server/platform-reset-shutdown.ts')).toContain('exit');
     const row = trouble.split('\n').find((l) => l.startsWith('| **La console ne revient pas dans les 3 minutes** |'));
     expect(row).toBeDefined();
-    for (const w of ['`docker compose ps`', '`docker compose logs --tail 100 app`', '`select resets, last_reset_at from platform_reset_gate`', '(la commande du §2.1)', 'la remise est **validée**', 'Inchangés : **rien n\'a changé**', "préviens le responsable de l'hôte si le site reste coupé", 'On répare en avant', '**jamais `restore.sh`**']) {
+    expect(row).not.toContain('(la commande du §2.1)');
+    for (const w of ['`docker compose ps`', '`docker compose logs --tail 100 app`', `\`${psql(Q.resets)}\``, '`last_reset_at` (en UTC', 'la remise est **validée**', 'la ligne `Last reset` notée au §2.1 : **rien n\'a changé**', "préviens le responsable de l'hôte si le site reste coupé", 'On répare en avant', '**jamais `restore.sh`**']) {
       expect(row, w).toContain(w);
     }
     expect(Q.resets).toBe('select resets, last_reset_at from platform_reset_gate');

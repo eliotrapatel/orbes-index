@@ -26,6 +26,18 @@ export interface ViewContext {
 
 export type View = (ctx: ViewContext) => Promise<HTMLElement>;
 
+/**
+ * Thrown by a view whose page does not exist for the person who opened it (the Platform reset page for anyone but the
+ * reset holder): main.ts shows the console's not-found state, as for an unknown address (no sidebar mark, the crumb
+ * and the tab's title 'Not found').
+ */
+export class NotFoundPage extends Error {
+  constructor() {
+    super('This page does not exist.');
+    this.name = 'NotFoundPage';
+  }
+}
+
 /** Positive page number from the route query (default 1). */
 export function pageParam(ctx: ViewContext): number {
   const n = Number(ctx.route.query.page);

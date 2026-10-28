@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { can } from '../../src/web/admin/model/permissions.js';
-import { canPurgeAll, ENDED_TESTS_TEXT, PURGE_ALL_PHRASE, PURGE_ALL_WHAT, purgeAllDialogText } from '../../src/web/admin/model/test-purge.js';
+import { canPurgeAll, ENDED_TESTS_TEXT, keepReading, PURGE_ALL_PHRASE, PURGE_ALL_WHAT, purgeAllDialogText } from '../../src/web/admin/model/test-purge.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
 import type { EndedTestRun, TestPurgeAllPreview } from '../../src/web/admin/types.js';
 
@@ -56,6 +56,18 @@ describe('the Ended tests page', () => {
       empty: 'No ended test.',
       unread: 'The tests could not be read just now: they are asked again every 2 seconds.',
     });
+  });
+
+  it('reads again every 2 s after a read that failed, even right after a PURGE while the list still shows ENDED; a good read then decides', () => {
+    const paused = (reason: string) => ({ state: 'PAUSED' as const, reason, message: 'Paused.', requestedAt: null, requestedBy: null, purgedAt: null, all: false, deleted: null, kept: null, progress: null });
+    // Right after the press, the list read before it: nothing under way in it. The read after the press fails.
+    expect(keepReading([run(A)], true)).toBe(true);
+    expect(keepReading([], true)).toBe(true);
+    // The next good read: under way, read on; nothing under way (or a pause for good), stopped.
+    expect(keepReading([run(A, { purge: { ...paused('PURGE_WINDOW'), state: 'PURGING', reason: null } })], false)).toBe(true);
+    expect(keepReading([run(A, { purge: paused('PURGE_WINDOW') })], false)).toBe(true);
+    expect(keepReading([run(A, { purge: paused('SQLSTATE_23503') })], false)).toBe(false);
+    expect(keepReading([run(A)], false)).toBe(false);
   });
 
   it('offers PURGE ALL ENDED TESTS to an ADMIN while one ended test at least can be purged (a paused one too)', () => {

@@ -20,6 +20,9 @@
  *    over its tombstones; then takePool's SELECT ... FOR UPDATE OF t (the statement itself, read from
  *    services/test-entrants.ts) in a second session against a step-10 batch on the same test_entrants rows: the batch
  *    waits, re-checks, and deletes none of the accounts the new test took;
+ *  - PURGE ALL beside an open LIVE room: an ended test of a LIVE release whose room is open is skipped before any lock,
+ *    so while PURGE ALL's transaction is held open (at its step-up), the room's engine pass and a collector's ENTER on
+ *    another connection, which take the release's row FOR NO KEY UPDATE, do not wait for it;
  *  - the console-only residual risk (D3, M8, F12, F19), stated as a proven fact: code running as orbes_app forges the
  *    step-up transaction's rows (the admin's row updated, admin.step_up, platform.reset.requested, the authorization)
  *    and resets the platform with the holder's id; with any other id, without an authorization, with a stale or a used
@@ -63,12 +66,14 @@ import { RESET_PLAN } from '../../src/server/db/reset-plan.js';
 import { INVOICE_KINDS, jsonText, PARTNER_INVOICE_KINDS } from '../../src/server/db/schema.js';
 import { AUDIT_GENESIS_HASH, AuditService } from '../../src/server/services/audit.js';
 import { serialLockKey } from '../../src/server/services/issuance.js';
+import { parisClock } from '../../src/server/services/maintenance-window.js';
 import { PlatformResetService, type PlatformResetServiceDeps, type ResetResult } from '../../src/server/services/platform-reset.js';
 import { testPhrase, type TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
+import { PURGE_ALL_PHRASE, TestPurgeService, type TestPurgeServiceDeps } from '../../src/server/services/test-purge.js';
 import type { Actor } from '../../src/server/types.js';
 import { createHarness, PASSWORD, type Harness } from '../api/support.js';
 import { giveSizes, poolDraw } from '../support/draws.js';
-import { createAccount, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
 const APP = `orbes_t13_${randomBytes(4).toString('hex')}`;
@@ -886,6 +891,75 @@ describe.skipIf(!pgUrl)('TEST PURGE and PLATFORM RESET through the app\'s role, 
     expect(await count(main, `accounts WHERE id = ANY ('{${taken.join(',')}}'::uuid[])`)).toBe(2);
     await x.end();
   }, 240_000);
+
+  it('PURGE ALL with an ended test on a LIVE release whose room is open: skipped before any lock, so the room\'s engine pass and a collector\'s ENTER on another connection do not wait for the PURGE ALL transaction', async () => {
+    const live = h!.ctx.services.live;
+    const t0 = new Date(h!.clock.now().getTime() + HOUR);
+    const release = await createLiveRelease(f, { opensAt: t0, sizes: [{ label: '52', stock: 2 }], perAccount: 1 });
+    h!.clock.set(new Date(t0.getTime() - 4 * MINUTE));
+    const run = await tests.start(release.id, { ...press(release.id, { titane: 1 }), choices: { size: '52', quantity: 1, addOnsPct: 0 } }, f.admin);
+    await live.advance(release.id);
+    await drive();
+    expect((await tests.end(run.id, testPhrase(release.id, true), f.admin)).status).toBe('ENDED');
+    const first = await createAccount(owner!);
+    await live.enter(first.id, release.id, { sizeId: release.sizes[0]!.id }, first.actor);
+    h!.clock.set(t0);
+    await live.advance(release.id);
+    expect(await one(owner!, `SELECT ended_at, cancelled_at FROM drops WHERE id = '${release.id}'`)).toEqual({ ended_at: null, cancelled_at: null });
+
+    // PURGE ALL through the app's role, its step-up forged (no code here) and held open at the step-up, every lock it
+    // takes before it already taken. Its clock at 10:00 Paris, out of every window whatever the hour CI runs at.
+    const reached = deferred();
+    const go = deferred();
+    const auth = {
+      async verifyAdminStepUp(input: { adminId: string; purpose: string }) {
+        return { adminId: input.adminId, purpose: input.purpose };
+      },
+      async consumeAdminStepUp(v: { adminId: string; purpose: string }, tx: Db) {
+        reached.resolve();
+        await go.promise;
+        await forgedAuth.consumeAdminStepUp(v as never, tx, {});
+      },
+    } as unknown as TestPurgeServiceDeps['auth'];
+    let ten = Math.ceil(Date.now() / MINUTE) * MINUTE;
+    while (parisClock(new Date(ten)) !== '10:00') ten += MINUTE;
+    const purge = new TestPurgeService({
+      db: main,
+      audit: new AuditService({ db: main }),
+      auth,
+      clock: () => new Date(ten),
+      testEntrantAccounts: { invalidate: () => undefined },
+      tracking: h!.ctx.services.tracking,
+      liveFrames: live.frames,
+    });
+    const pressed = purge.requestAll({ phrase: PURGE_ALL_PHRASE, totp: '000000' }, { actor: holderActor, token: 'not checked' }).then(
+      (v) => ({ ok: v }),
+      (e: unknown) => ({ error: e }),
+    );
+    const early = await Promise.race([reached.promise.then(() => null), pressed]);
+    if (early) throw new Error(`PURGE ALL answered before its step-up: ${JSON.stringify(early)}`);
+    const within = (p: Promise<unknown>, ms = 5000) =>
+      Promise.race([p.then(() => 'went' as const), new Promise<'waited'>((r) => setTimeout(() => r('waited'), ms).unref?.())]);
+    let engine: string;
+    let entered: string;
+    try {
+      // The PURGE ALL transaction open on the app's role, idle at its step-up.
+      await waitFor('PURGE ALL idle in its transaction', async () => (await backends()).find((b) => b.who === APP && b.state === 'idle in transaction'));
+      engine = await within(live.advance(release.id));
+      const second = await createAccount(owner!);
+      entered = await within(live.enter(second.id, release.id, { sizeId: release.sizes[0]!.id }, second.actor));
+    } finally {
+      go.resolve();
+    }
+    const out = await pressed;
+    expect({ engine, entered }).toEqual({ engine: 'went', entered: 'went' });
+    if ('error' in out) throw out.error;
+    expect(out.ok.runs).toEqual([]);
+    expect(out.ok.skipped).toContainEqual(expect.objectContaining({ runId: run.id, reason: 'PURGE_RELEASE_NOT_OVER' }));
+    expect(await count(main, `test_runs WHERE id = '${run.id}' AND purge_state IS NULL`)).toBe(1);
+    // The release ended, so no LIVE room stays open for the resets below.
+    await live.end(release.id, f.admin);
+  }, 120_000);
 
   it('the console-only residual risk (D3, M8, F12, F19): with the authorization only code running as orbes_app can forge, the holder\'s id passes the start; with any other id, without one, with a stale one, with a test running, it is refused, nothing changed', async () => {
     // From here only the app: the superuser's app and connection closed.

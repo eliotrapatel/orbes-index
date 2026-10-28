@@ -675,13 +675,7 @@ Rien de cette partie ne se fait au déploiement. Le jour où tu décides de reme
 - **Aucune salle de LIVE RELEASE ouverte** (entre l'ouverture de sa salle et sa fin), **aucun test en cours** : la console refuse sinon (« A LIVE room is open until … », « A test is running. Reset once it has ended. »).
 - **Aucun `deploy.sh` depuis l'appui jusqu'à ce que tu sois reconnecté** (la règle 3 du 9 octobre), et aucune commande `psql` sur le serveur pendant ce temps : une autre connexion à la base fait refuser la remise (rien ne change).
 - **Ton équipe** (LOGISTICS, ORBES Client Services) : préviens-la qu'elle sera déconnectée et devra se reconnecter.
-- **Sur le serveur, la porte, en lecture seule** : note les deux valeurs (le nombre de remises, la dernière en UTC) :
-
-  ```bash
-  docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select resets, last_reset_at from platform_reset_gate"'
-  ```
-
-  Sortie attendue : `0|` avant la première remise ; ensuite `<nombre>|<date et heure UTC>`.
+- **Note la ligne `Last reset`** de la page `Settings` → `Platform reset` (son jour et son heure à Paris) : c'est la valeur d'avant. Avant la première remise, elle lit « No reset since this page exists. ».
 - **La ligne au responsable de l'hôte, à envoyer juste avant d'appuyer** : « ORBES : remise à zéro de la plateforme lancée à <heure> Paris (<heure> UTC) depuis la console ; l'application est coupée environ 30 à 60 secondes, puis redémarre seule ; rien ne change sur l'hôte. »
 - **Lis la page** `Settings` → `Platform reset` : le nombre de comptes **« neither test nor team »** sous `What goes` (ce sont de vrais comptes : ils partent aussi), leurs inscriptions les plus récentes, les sorties ouvertes ou annoncées, et les listes (`What stays that a test may have made`, `Segments that go`, `Signing keys`). Si une inscription arrive après ta lecture, l'appui est refusé : relis la page.
 
@@ -712,13 +706,7 @@ Rien de cette partie ne se fait au déploiement. Le jour où tu décides de reme
    - désactive dans `Team` chaque connexion à la console faite pour un test ;
    - range dans la console ce qu'un test a pu laisser : les listes sous `What a test may have left`, notées avant l'effacement ;
    - écris la date de la remise à côté de chaque ancre d'audit gardée : le journal repart de l'entrée 1.
-5. **Sur le serveur, en lecture seule**, la porte : `resets` a pris un de plus, `last_reset_at` est l'heure de ton appui (en UTC).
-
-   ```bash
-   docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select resets, last_reset_at from platform_reset_gate"'
-   ```
-
-6. **Préviens le responsable de l'hôte** : « ORBES : remise à zéro faite à <heure> Paris (<heure> UTC), app healthy, rien n'a changé sur l'hôte. Les prochaines sauvegardes de nuit d'ORBES seront plus petites. »
+5. **Préviens le responsable de l'hôte** : « ORBES : remise à zéro faite à <heure> Paris (<heure> UTC), app healthy, rien n'a changé sur l'hôte. Les prochaines sauvegardes de nuit d'ORBES seront plus petites. »
 
 ### 2.4 Si la remise est refusée, ou si elle échoue
 
@@ -726,7 +714,7 @@ Rien de cette partie ne se fait au déploiement. Le jour où tu décides de reme
 |---|---|---|
 | Une erreur **dans la boîte**, la boîte encore ouverte | La remise est refusée avant de commencer : **rien n'a changé**, tu es toujours connecté. | Lis la raison. Une heure interdite (à l'heure de Paris) : attends l'heure dite. Une salle LIVE ouverte : attends sa fin. Un test en cours : END TEST. « … accounts signed up since you opened this page. Reload it and check them. » : ferme la boîte, recharge la page et relis-la. Le code (« This code was just used. Wait for the next code. », « The code is not valid. … ») : attends le code suivant. « Too many wrong codes today. Try again after … » ou « … changed less than 24 hours ago. Try again after … » : attends l'heure dite. |
 | Après l'avis de redémarrage, la console revient **sans** te déconnecter, et la page lit `Refused reset` : « The reset of <jour> at <heure> Paris was refused: <raison>. Nothing changed. » | La remise a démarré, puis s'est arrêtée seule et a tout annulé (le processus est sorti en code 1, `platform.reset.failed` est dans le journal d'audit) : **rien n'a changé**. | Lis la raison. Une autre connexion à la base, une heure interdite, une inscription, un test : attends, relis la page, appuie de nouveau plus tard. « a check before the commit failed (…) » ou une autre raison : n'appuie plus, colle la ligne à Claude. |
-| **La console ne revient pas dans les 3 minutes** | La remise a été validée ou non : la porte le dit. | Sur le serveur : `docker compose ps`, puis `docker compose logs --tail 100 app` (cherche `platform reset done: entry 1 of the new audit chain written; restarting` ou `platform reset refused or failed: nothing changed; restarting`), puis, en lecture seule, `select resets, last_reset_at from platform_reset_gate` (la commande du §2.1). `resets` a pris un de plus et `last_reset_at` est l'heure de ton appui : la remise est **validée**. Inchangés : **rien n'a changé**. Colle les sorties à Claude ; préviens le responsable de l'hôte si le site reste coupé. On répare en avant ; **jamais `restore.sh`**. |
+| **La console ne revient pas dans les 3 minutes** | La remise a été validée ou non : la porte le dit. | Sur le serveur : `docker compose ps`, puis `docker compose logs --tail 100 app` (cherche `platform reset done: entry 1 of the new audit chain written; restarting` ou `platform reset refused or failed: nothing changed; restarting`), puis, en lecture seule, `docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select resets, last_reset_at from platform_reset_gate"'`. `last_reset_at` (en UTC : Paris moins 1 h en hiver, moins 2 h en été) est l'heure de ton appui : la remise est **validée**. Vide, ou toujours le moment de la ligne `Last reset` notée au §2.1 : **rien n'a changé**. Colle les sorties à Claude ; préviens le responsable de l'hôte si le site reste coupé. On répare en avant ; **jamais `restore.sh`**. |
 
 ### 2.5 Le jour du lancement : LOCK RESET
 

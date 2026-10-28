@@ -54,21 +54,19 @@ import { parisDateTime } from '../model/links.js';
 import { purgeCodeField } from '../model/test-purge.js';
 import { href } from '../router.js';
 import type { PlatformResetPage, PlatformResetPreview } from '../types.js';
-import { button, defList, failure, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { startRefresh } from '../ui/refresh.js';
 import { notify } from '../ui/toast.js';
-import type { ViewContext } from './context.js';
+import { NotFoundPage, type ViewContext } from './context.js';
 
 type HolderPage = Extract<PlatformResetPage, { holder: true }>;
 
-/** The console's not-found state (main.ts), for anyone but the holder. */
-const notFound = () => failure('This page does not exist.');
-
 export async function platformResetView(ctx: ViewContext): Promise<HTMLElement> {
-  if (!mayAskHolder(ctx.session.admin.role)) return notFound();
+  // The console's not-found state (main.ts) for anyone but the holder: the page never names itself to them.
+  if (!mayAskHolder(ctx.session.admin.role)) throw new NotFoundPage();
   const page = await ctx.api.platformReset();
-  if (!page.holder) return notFound();
+  if (!page.holder) throw new NotFoundPage();
 
   const root = h('div', { class: 'view view--platform-reset' });
   const buttons = resetButtons(page);
@@ -223,7 +221,16 @@ function lastResetSection(r: NonNullable<HolderPage['lastReset']>): HTMLElement 
           [
             { label: 'Check', cell: (x: (typeof rows)[number]) => h('span', { data: { testid: 'reset-check', check: x.key, ok: x.failing ? 'no' : 'yes' } }, x.label) },
             { label: 'Result', cell: (x: (typeof rows)[number]) => statusMark(x.mark, x.tone), kind: ['nowrap'] },
-            { label: 'Found', cell: (x: (typeof rows)[number]) => h('span', { class: [x.failing ? 'critical-text' : null], data: { testid: 'reset-check-value' } }, x.value), kind: ['wide'] },
+            {
+              label: 'Found',
+              cell: (x: (typeof rows)[number]) =>
+                h(
+                  'span',
+                  { class: [x.failing ? 'critical-text' : null, x.mono ? 'reset__ids' : null], data: { testid: 'reset-check-value' } },
+                  ...(x.mono ? x.value.split(', ').flatMap((id, i): Child[] => (i === 0 ? [mono(id)] : [', ', mono(id)])) : [x.value]),
+                ),
+              kind: ['wide'],
+            },
           ],
           rows,
           { caption: 'After the reset' },
