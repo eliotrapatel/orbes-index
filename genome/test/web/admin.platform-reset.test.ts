@@ -290,6 +290,8 @@ describe('the Platform reset page', () => {
     expect(rows.at(-1)!.value[0]!.strong).toBe(true);
     expect(goesRows(preview({ collectors: { count: 1, signUps: [] }, testEntrants: 1 }))[0]!.value.map((v) => v.text).join('')).toBe('14 accounts: 1 neither test nor team, 1 test entrant.');
     expect(signUpLines(preview())).toEqual(['27 OCT 2026 · 15:05 Paris', '14 JUL 2026 · 12:00 Paris']);
+    // The server's own words for the moment (schedule.ts) never reach the page: the console's lists write it.
+    expect(signUpLines(preview({ collectors: { count: 1, signUps: [{ at: '2026-10-29T15:17:00.000Z', paris: '2026-10-29 16:17 Paris' }] } }))).toEqual(['29 OCT 2026 · 16:17 Paris']);
     expect(JSON.stringify(signUpLines(preview()))).not.toContain('@');
     expect(releaseLines(preview())).toEqual(['MONOLITHE — release II — DRAW · opens 29 OCT 2026 · 19:00 Paris · closes 30 OCT 2026 · 19:00 Paris']);
   });

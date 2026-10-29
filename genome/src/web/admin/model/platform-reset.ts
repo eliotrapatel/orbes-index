@@ -224,9 +224,12 @@ export function goesRows(p: PlatformResetPreview): CountRow[] {
   return rows;
 }
 
-/** The newest sign-ups of the accounts neither test nor team, Paris time (never an email). */
+/**
+ * The newest sign-ups of the accounts neither test nor team, Paris time (never an email), written as the console's lists
+ * write a moment (`27 OCT 2026 · 15:05 Paris`) from each one's instant, whatever words the server sent with it.
+ */
 export function signUpLines(p: PlatformResetPreview): string[] {
-  return p.collectors.signUps.map((s) => s.paris);
+  return p.collectors.signUps.map((s) => parisDateTime(s.at));
 }
 
 /** The releases open or announced that go, as the console names a release: `TITLE — DRAW · opens … · closes …`. */
