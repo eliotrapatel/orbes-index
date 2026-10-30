@@ -14,13 +14,27 @@
  *    by a 401, by its page leaving the screen, and by a navigation;
  *  - the client's paths and bodies, a timer's read never ending the session;
  *  - the statuses and modes as the server's schema has them, and (at compile time) a test, a release's tests, the test
- *    running and the server's status read as the server's services shape them.
+ *    running and the server's status read as the server's services shape them;
+ *  - TEST PURGE under PAST TESTS (lot PURGE, step PURGE.7, model/test-purge.ts): PURGE only when the server says it can
+ *    be pressed and only for an ADMIN (RESUME PURGE on a paused one), its phrase as the server's, the dialog's code
+ *    field (one-time-code, numeric, mono, the hint to wait for the next code) and what blocks it, the drawn draw's line,
+ *    the orders kept, a window's words, the muted line of a drawn draw holding real collectors' entries (G1) and of a
+ *    release not over, PURGING / PAUSED (its reason in Paris words) / PURGED ("Purged <Paris> by <email>"), the tones,
+ *    the refresh while a purge is under way, a refusal said inside the dialog (a code field emptied), the client's
+ *    paths and bodies, and the previews and ended tests read as the server shapes them.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as serverSchema from '../../src/server/db/schema.js';
 import type { SystemStatusView as ServerSystemStatus } from '../../src/server/services/system-status.js';
-import type { ActiveTestRun as ServerActiveTestRun, TestRunSummary as ServerTestRunSummary, TestRunView as ServerTestRunView } from '../../src/server/services/test-entrants.js';
+import type { ActiveTestRun as ServerActiveTestRun, EndedTestRun as ServerEndedTestRun, TestRunSummary as ServerTestRunSummary, TestRunView as ServerTestRunView } from '../../src/server/services/test-entrants.js';
+import {
+  PURGE_ALL_PHRASE as SERVER_PURGE_ALL_PHRASE,
+  purgePhrase as serverPurgePhrase,
+  type TestPurgeAllPreview as ServerTestPurgeAllPreview,
+  type TestPurgePreview as ServerTestPurgePreview,
+} from '../../src/server/services/test-purge.js';
 import { AdminApi, ApiError, type FetchLike } from '../../src/web/admin/api.js';
+import { formatCount } from '../../src/web/admin/format.js';
 import { can } from '../../src/web/admin/model/permissions.js';
 import {
   errorsState,
@@ -58,10 +72,27 @@ import {
   testSettingsLine,
   tierRows,
 } from '../../src/web/admin/model/test-entrants.js';
+import {
+  blockingLine,
+  codeProblem,
+  PURGE_ALL_PHRASE,
+  PURGE_DRAWN_LINE,
+  PURGE_WHAT,
+  purgeAction,
+  purgeCodeField,
+  purgeDialogText,
+  purgedLine,
+  purgePhrase,
+  purgeStatus,
+  purgeUnderWay,
+  reasonLine,
+  typedCode,
+} from '../../src/web/admin/model/test-purge.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import * as web from '../../src/web/admin/types.js';
 import type { SystemSample, SystemStatus, TestRunSettings, TestRunTier } from '../../src/web/admin/types.js';
 import type { VisibilitySource } from '../../src/web/admin/ui/attention.js';
+import { CODE_HINT, CODE_INPUT } from '../../src/web/admin/ui/dialog.js';
 import { startRefresh, stopRefreshes } from '../../src/web/admin/ui/refresh.js';
 import { testFields } from '../../src/web/admin/views/test-entrants.js';
 
@@ -579,10 +610,184 @@ describe('AdminApi: test entrants and the server’s status', () => {
   });
 });
 
+describe('TEST PURGE under PAST TESTS (lot PURGE)', () => {
+  const RUN = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
+  const purge = (p: Partial<web.TestRunPurge>): web.TestRunPurge => ({
+    state: 'PURGING',
+    reason: null,
+    message: null,
+    requestedAt: '2026-10-28T13:05:00.000Z',
+    requestedBy: 'console@example.com',
+    purgedAt: null,
+    all: false,
+    deleted: null,
+    kept: null,
+    progress: null,
+    ...p,
+  });
+  const row = (p: Partial<web.TestRunSummary>): web.TestRunSummary => ({
+    id: RUN,
+    status: 'ENDED',
+    createdAt: '2026-10-28T10:00:00.000Z',
+    endedAt: '2026-10-28T11:00:00.000Z',
+    createdBy: 'console@example.com',
+    entrants: 12,
+    checksPassed: 5,
+    checksTotal: 5,
+    report: null,
+    purge: null,
+    purgeable: true,
+    ...p,
+  });
+  const NOT_TEST = { reason: 'PURGE_NOT_TEST', message: 'This draw was drawn with real collectors’ entries: its public ranked list stays as drawn, so this test cannot be purged.' };
+
+  it('shows PURGE only when the server says it can be pressed, and only to an ADMIN; RESUME PURGE on a paused purge', () => {
+    expect([can('ADMIN', 'purgeTests'), can('OPERATOR', 'purgeTests'), can('AUDITOR', 'purgeTests'), can('RETAIL', 'purgeTests'), can('LOGISTICS', 'purgeTests')]).toEqual([true, false, false, false, false]);
+    expect(purgeAction(row({}), 'ADMIN')).toBe('purge');
+    for (const role of ['OPERATOR', 'AUDITOR'] as const) expect(purgeAction(row({}), role), role).toBeNull();
+    expect(purgeAction(row({ purgeable: NOT_TEST }), 'ADMIN')).toBeNull();
+    expect(purgeAction(row({ purgeable: { reason: 'PURGE_RELEASE_NOT_OVER', message: 'Purge once the release is over.' } }), 'ADMIN')).toBeNull();
+    expect(purgeAction(row({ purge: purge({ state: 'PURGING' }), purgeable: { reason: 'PURGE_IN_PROGRESS', message: 'This test is being purged.' } }), 'ADMIN')).toBeNull();
+    // A paused purge the server would resume (the database refused a step): the same request, RESUME PURGE.
+    expect(purgeAction(row({ purge: purge({ state: 'PAUSED', reason: 'SQLSTATE_23503' }), purgeable: true }), 'ADMIN')).toBe('resume');
+    // Paused for a window or a running test: it goes on by itself, no button.
+    for (const reason of ['PURGE_WINDOW', 'PURGE_TEST_RUNNING']) expect(purgeAction(row({ purge: purge({ state: 'PAUSED', reason }), purgeable: true }), 'ADMIN'), reason).toBeNull();
+    // A server before the lot sends neither field: no button.
+    expect(purgeAction(row({ purge: undefined, purgeable: undefined }), 'ADMIN')).toBeNull();
+  });
+
+  it('asks to type PURGE TEST with the test’s first 8 and PURGE ALL TESTS, as the server checks them', () => {
+    expect(purgePhrase(RUN)).toBe('PURGE TEST 1A2B3C4D');
+    expect(purgePhrase(RUN)).toBe(serverPurgePhrase(RUN));
+    expect(PURGE_ALL_PHRASE).toBe('PURGE ALL TESTS');
+    expect(PURGE_ALL_PHRASE).toBe(SERVER_PURGE_ALL_PHRASE);
+  });
+
+  it('asks for a fresh authenticator code in a code field: one-time-code, numeric, mono, the hint to wait for the next code; 6 to 8 digits, spaces read away', () => {
+    expect(purgeCodeField()).toEqual({ name: 'totp', label: 'Authenticator code', kind: 'code', required: true });
+    expect(CODE_INPUT).toEqual({ autocomplete: 'one-time-code', inputmode: 'numeric', maxlength: 9, mono: true, placeholder: '000 000' });
+    expect(CODE_HINT).toBe('Six digits from your authenticator app. Just signed in? Wait for the next code.');
+    expect(Object.isFrozen(CODE_INPUT)).toBe(true);
+    for (const ok of ['123456', '123 456', ' 1234 5678 ', '1234567']) expect(codeProblem({ totp: ok }), ok).toBeNull();
+    for (const bad of ['', '12345', '123456789', 'abcdef', '12a456']) expect(codeProblem({ totp: bad }), bad).toBe('Enter the six digits from your authenticator app.');
+    expect(codeProblem({})).not.toBeNull();
+    expect(typedCode({ totp: ' 123 456 ' })).toBe('123456');
+  });
+
+  it('says what goes and stays, a drawn draw’s ranked list, the orders kept and a window now; a resume says why it stopped', () => {
+    const preview = { drawn: false, blockingOrders: 0, hold: null };
+    expect(purgeDialogText(preview, null)).toEqual({ title: 'Purge the test', confirm: 'Purge test', lines: [PURGE_WHAT], hold: null });
+    expect(PURGE_WHAT).toBe(
+      'Deletes this test’s entries, its cancelled orders with their events, its sessions and its audit entries (a trace of each entry stays, so the audit check still proves nothing else was removed). Its report stays here. Test accounts no other test uses are deleted.',
+    );
+    // D15: a drawn draw is purged too, and the confirmation says so.
+    expect(purgeDialogText({ ...preview, drawn: true }, null).lines).toEqual([PURGE_WHAT, 'This draw was drawn: once purged, its public ranked list no longer matches its seed.']);
+    expect(PURGE_DRAWN_LINE).toBe('This draw was drawn: once purged, its public ranked list no longer matches its seed.');
+    expect(purgeDialogText({ ...preview, blockingOrders: 3 }, null).lines.at(-1)).toBe('3 orders stay with their accounts (an invoice, a parcel or a return holds them).');
+    expect(blockingLine(1)).toBe('1 order stays with its account (an invoice, a parcel or a return holds it).');
+    expect(blockingLine(1204)).toBe(`${formatCount(1204)} orders stay with their accounts (an invoice, a parcel or a return holds them).`);
+    expect(blockingLine(0)).toBeNull();
+    const night = 'The platform\'s night maintenance runs from 04:00 to 06:30 Paris (03:00–05:30 UTC). Try again at 06:30.';
+    expect(purgeDialogText({ ...preview, hold: { reason: 'PURGE_WINDOW', message: night } }, null).hold).toBe(night);
+    const stopped = purge({ state: 'PAUSED', reason: 'SQLSTATE_23503', message: 'Stopped: the database refused a step (foreign_key_violation). Nothing more is deleted until it is asked again.' });
+    expect(purgeDialogText(preview, stopped)).toEqual({
+      title: 'Resume the purge',
+      confirm: 'Resume purge',
+      lines: [stopped.message, 'Resuming goes on where it stopped; nothing already deleted comes back.', PURGE_WHAT],
+      hold: null,
+    });
+  });
+
+  it('says why an ended test cannot be purged in a muted line (a drawn draw holding real entries: G1), to an ADMIN only; the status says the rest', () => {
+    expect(purgeStatus(row({ purgeable: NOT_TEST }), 'ADMIN')).toEqual({ tone: 'ENDED', label: 'ENDED', line: NOT_TEST.message, muted: true });
+    expect(NOT_TEST.message).toBe('This draw was drawn with real collectors’ entries: its public ranked list stays as drawn, so this test cannot be purged.');
+    expect(reasonLine(row({ purgeable: { reason: 'PURGE_RELEASE_NOT_OVER', message: 'Purge once the release is over.' } }), 'ADMIN')).toBe('Purge once the release is over.');
+    expect(reasonLine(row({ purgeable: NOT_TEST }), 'AUDITOR')).toBeNull();
+    expect(reasonLine(row({ purgeable: NOT_TEST }), 'OPERATOR')).toBeNull();
+    expect(reasonLine(row({}), 'ADMIN')).toBeNull();
+    for (const reason of ['PURGE_NOT_ENDED', 'PURGE_IN_PROGRESS', 'PURGE_DONE']) expect(reasonLine(row({ status: 'STOPPED', purgeable: { reason, message: 'x' } }), 'ADMIN'), reason).toBeNull();
+    expect(purgeStatus(row({ status: 'STOPPED', purgeable: { reason: 'PURGE_NOT_ENDED', message: 'x' } }), 'ADMIN')).toEqual({ tone: 'STOPPED', label: 'STOPPED', line: null, muted: true });
+  });
+
+  it('reads PURGING with how far, PAUSED with its reason in Paris words, PURGED with when (Paris) and by whom; the tones', () => {
+    expect(purgeStatus(row({ purge: purge({ progress: { phase: 'ENTRIES', rows: 1204 } }) }), 'AUDITOR')).toEqual({
+      tone: 'PURGING',
+      label: 'PURGING',
+      line: `Asked 28 OCT 2026 · 14:05 Paris by console@example.com; ${formatCount(1204)} rows deleted so far.`,
+      muted: false,
+    });
+    expect(purgeStatus(row({ purge: purge({ all: true }) }), 'ADMIN').line).toBe('Asked 28 OCT 2026 · 14:05 Paris by console@example.com with every ended test.');
+    // The night's end computed for the date by the server (07:30 in summer): shown as it says it.
+    const paused = 'Paused for the night maintenance until 06:30 Paris.';
+    expect(purgeStatus(row({ purge: purge({ state: 'PAUSED', reason: 'PURGE_WINDOW', message: paused }) }), 'ADMIN')).toEqual({ tone: 'PAUSED', label: 'PAUSED', line: paused, muted: false });
+    const done = purge({ state: 'DONE', purgedAt: '2026-10-28T14:05:00.000Z', deleted: { drop_entries: 12 } });
+    // 28 Oct 2026 is winter time: 14:05 UTC is 15:05 Paris; a summer date reads two hours on.
+    expect(purgeStatus(row({ purge: done, purgeable: { reason: 'PURGE_DONE', message: 'This test is already purged.' } }), 'AUDITOR')).toEqual({
+      tone: 'PURGED',
+      label: 'PURGED',
+      line: 'Purged 28 OCT 2026 · 15:05 Paris by console@example.com',
+      muted: false,
+    });
+    expect(purgedLine({ purgedAt: '2026-07-14T10:00:00.000Z', requestedBy: 'a@example.com' })).toBe('Purged 14 JUL 2026 · 12:00 Paris by a@example.com');
+    expect([toneOf('testRun', 'PURGING'), toneOf('testRun', 'PAUSED'), toneOf('testRun', 'PURGED')]).toEqual(['outline', 'alert', 'muted']);
+  });
+
+  it('reads the tests again every 2 s while a purge is under way: PURGING, or paused for a window or a running test; not for a purge stopped for good', () => {
+    expect(purgeUnderWay([row({}), row({ purge: purge({}) })])).toBe(true);
+    expect(purgeUnderWay([row({ purge: purge({ state: 'PAUSED', reason: 'PURGE_WINDOW' }) })])).toBe(true);
+    expect(purgeUnderWay([row({ purge: purge({ state: 'PAUSED', reason: 'PURGE_TEST_RUNNING' }) })])).toBe(true);
+    expect(purgeUnderWay([row({ purge: purge({ state: 'PAUSED', reason: 'PURGE_NOT_TEST' }) }), row({ purge: purge({ state: 'DONE' }) }), row({})])).toBe(false);
+    expect(purgeUnderWay([])).toBe(false);
+  });
+
+  it('sends PURGE, PURGE ALL and their previews on their paths with the phrase and the code; a refusal is an ApiError with the server’s words (said inside the dialog), never a sign-out', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const answers: Response[] = [];
+    const fetch: FetchLike = async (url, init = {}) => {
+      calls.push({ url, init });
+      return answers.shift() ?? new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    let unauthorized = 0;
+    const api = new AdminApi({ fetch, onUnauthorized: () => unauthorized++ });
+    api.setCsrf('tok');
+    await api.testRunPurgePreview(RUN);
+    await api.purgeTestRun(RUN, 'PURGE TEST 1A2B3C4D', '123456');
+    await api.testRunPurgeAllPreview();
+    await api.purgeAllTestRuns('PURGE ALL TESTS', '654321');
+    await api.endedTestRuns();
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      `GET /api/admin/test-runs/${RUN}/purge`,
+      `POST /api/admin/test-runs/${RUN}/purge`,
+      'GET /api/admin/test-runs/purge-all',
+      'POST /api/admin/test-runs/purge-all',
+      'GET /api/admin/test-runs/ended',
+    ]);
+    const bodies = calls.map((c) => (typeof c.init.body === 'string' ? JSON.parse(c.init.body) : c.init.body));
+    expect(bodies[1]).toEqual({ phrase: 'PURGE TEST 1A2B3C4D', totp: '123456' });
+    expect(bodies[3]).toEqual({ phrase: 'PURGE ALL TESTS', totp: '654321' });
+    expect(calls.filter((c) => c.init.method === 'POST').every((c) => (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
+
+    const refusal = (status: number, code: string, message: string) => new Response(JSON.stringify({ error: { code, message } }), { status, headers: { 'content-type': 'application/json' } });
+    answers.push(refusal(400, 'STEP_UP_CODE_INVALID', 'The code is not valid. Check the time on your device and try again.'));
+    const wrong = await api.purgeTestRun(RUN, 'PURGE TEST 1A2B3C4D', '000000').catch((e: unknown) => e);
+    expect(wrong).toBeInstanceOf(ApiError);
+    expect(wrong).toMatchObject({ status: 400, code: 'STEP_UP_CODE_INVALID', message: 'The code is not valid. Check the time on your device and try again.' });
+    answers.push(refusal(429, 'STEP_UP_LOCKED', 'Too many wrong codes today. Try again after 29 October at 14:05 Paris.'));
+    await expect(api.purgeAllTestRuns('PURGE ALL TESTS', '000000')).rejects.toMatchObject({ status: 429, code: 'STEP_UP_LOCKED' });
+    answers.push(refusal(409, 'PURGE_WINDOW', 'The hub backup starts at 03:00 Paris; try again at 03:10.'));
+    await expect(api.purgeTestRun(RUN, 'PURGE TEST 1A2B3C4D', '000000')).rejects.toMatchObject({ status: 409, message: 'The hub backup starts at 03:00 Paris; try again at 03:10.' });
+    // The page's read every 2 s answered 401: thrown, the session left to the admin's next action.
+    answers.push(refusal(401, 'UNAUTHORIZED', 'Sign in.'));
+    await expect(api.endedTestRuns({ background: true })).rejects.toMatchObject({ status: 401 });
+    expect(unauthorized).toBe(0);
+  });
+});
+
 describe('the console reads what the server sends', () => {
   it('keeps the statuses and modes of a test as the server does', () => {
     expect([...web.TEST_RUN_STATUSES]).toEqual([...serverSchema.TEST_RUN_STATUSES]);
     expect([...web.TEST_RUN_MODES]).toEqual([...serverSchema.DROP_MODES]);
+    expect([...web.TEST_RUN_PURGE_STATES]).toEqual([...serverSchema.TEST_RUN_PURGE_STATES]);
   });
 });
 
@@ -593,3 +798,7 @@ export const testRunFits = (r: Json<ServerTestRunView>): web.TestRunView => r;
 export const testRunSummaryFits = (r: Json<ServerTestRunSummary>): web.TestRunSummary => r;
 export const activeTestRunFits = (r: Json<ServerActiveTestRun>): web.ActiveTestRun => r;
 export const systemStatusFits = (s: Json<ServerSystemStatus>): web.SystemStatus => s;
+// Lot PURGE: an ended test of any release and the dialogs' previews, as the server sends them.
+export const endedTestRunFits = (r: Json<ServerEndedTestRun>): web.EndedTestRun => r;
+export const purgePreviewFits = (p: Json<ServerTestPurgePreview>): web.TestPurgePreview => p;
+export const purgeAllPreviewFits = (p: Json<ServerTestPurgeAllPreview>): web.TestPurgeAllPreview => p;

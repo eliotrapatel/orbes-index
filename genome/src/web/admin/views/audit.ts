@@ -1,7 +1,9 @@
 /**
  * Audit log: the hash-chained record of every change, newest first, with a
  * full re-computation of the chain on demand (each entry's hash covers the
- * previous hash, so any edit, deletion or reordering breaks the chain).
+ * previous hash, so any edit, deletion or reordering breaks the chain). The
+ * verdict also says how many entries were purged with their tests, when any
+ * were: each left a tombstone whose link the check still verifies.
  * A console user, acting or acted upon, is named by email (read at display
  * time; the log itself keeps ids), customers and the system by type and id.
  */
@@ -23,7 +25,12 @@ export async function auditView(ctx: ViewContext): Promise<HTMLElement> {
       try {
         const r = await ctx.api.verifyAudit();
         const v = chainVerdict(r);
-        mount(verdict, statusMark(v.title.toUpperCase(), v.tone), h('span', { class: 'chain__detail' }, v.detail));
+        mount(
+          verdict,
+          statusMark(v.title.toUpperCase(), v.tone),
+          h('span', { class: 'chain__detail' }, v.detail),
+          v.purged ? h('span', { class: 'chain__detail', data: { testid: 'chain-purged' } }, v.purged) : null,
+        );
         verdict.dataset.ok = String(r.ok);
       } catch (e) {
         notifyError(e, 'The chain could not be verified.');

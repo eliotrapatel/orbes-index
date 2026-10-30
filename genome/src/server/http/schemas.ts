@@ -1225,6 +1225,46 @@ export const testRunBody = body({
 /** POST /api/admin/test-runs/:id/end: END TEST, the typed phrase (`END TEST <8>`). */
 export const testRunEndBody = body({ phrase: testPhrase });
 
+/**
+ * A fresh code of the admin's authenticator app (lot PURGE, plan §A.4): six to eight digits, the spaces the console's
+ * `000 000` placeholder invites taken out. Whether it is right is the step-up's to say (AuthService.verifyAdminStepUp).
+ */
+const stepUpCode = z
+  .string()
+  .max(16, 'Six digits from your authenticator app')
+  .transform((s) => s.replace(/\s+/g, ''))
+  .pipe(z.string().regex(/^\d{6,8}$/, 'Six digits from your authenticator app'));
+
+/** POST /api/admin/test-runs/:id/purge: PURGE (or its resume), the typed phrase (`PURGE TEST <8>`, the service checks it) and a code. */
+export const testRunPurgeBody = body({ phrase: testPhrase, totp: stepUpCode });
+
+/** POST /api/admin/test-runs/purge-all: PURGE ALL ENDED TESTS, the typed phrase (`PURGE ALL TESTS`) and a code. */
+export const testRunPurgeAllBody = body({ phrase: testPhrase, totp: stepUpCode });
+
+/**
+ * POST /api/admin/platform-reset (lot PURGE, plan §B.4): the typed phrase (RESET PLATFORM, the service checks it), the
+ * current password, a fresh code, and what the page showed: the count of accounts neither test nor team and the newest
+ * sign-up among them (ISO-8601 to the microsecond, or null when there was none), both required (D7, G18).
+ */
+export const platformResetBody = body({
+  phrase: testPhrase,
+  password,
+  totp: stepUpCode,
+  collectorsSeen: z.number().int('A whole number').min(0, 'At least 0').max(100_000_000, 'Too large'),
+  collectorsSeenUntil: z
+    .string()
+    .max(40, 'An ISO-8601 time')
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/, 'An ISO-8601 time')
+    .nullable(),
+});
+
+/** POST /api/admin/platform-reset/lock: LOCK RESET, the typed phrase, the current password and a fresh code. */
+export const platformResetLockBody = body({
+  phrase: testPhrase,
+  password,
+  totp: stepUpCode,
+});
+
 // ── Admin: the circle (P-X01) ──────────────────────────────────────────────
 
 export const circlePostParams = z.object({ id: uuid });

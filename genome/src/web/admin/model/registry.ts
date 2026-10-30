@@ -138,19 +138,31 @@ export interface ChainVerdict {
   title: string;
   detail: string;
   tone: Tone;
+  /** How many entries were purged with their tests, when any were (each one's link is still checked). */
+  purged?: string;
+}
+
+/** "37 entries purged with their tests (each one's link kept)", or null when none was. */
+export function chainPurgedLine(n: number | undefined): string | null {
+  if (!n || n < 1) return null;
+  return n === 1 ? '1 entry purged with its test (its link kept)' : `${formatCount(n)} entries purged with their tests (each one's link kept)`;
 }
 
 export function chainVerdict(r: ChainVerification): ChainVerdict {
+  const purged = chainPurgedLine(r.purged);
+  const withPurged = purged ? { purged } : {};
   if (r.ok) {
     return {
       title: 'Chain intact',
       detail: `${formatCount(r.checked)} entries re-hashed${r.head ? ` · head #${r.head.id} ${shortHash(r.head.hash, 12, 6)}` : ''}`,
       tone: 'solid',
+      ...withPurged,
     };
   }
   return {
     title: 'Chain broken',
     detail: `First mismatch at entry #${r.firstBadId ?? '?'} after ${formatCount(r.checked)} verified entries. Preserve the database and escalate.`,
     tone: 'critical',
+    ...withPurged,
   };
 }

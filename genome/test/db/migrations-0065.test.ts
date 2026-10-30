@@ -24,6 +24,10 @@ import { createTestDb, type TestDb } from '../support/db.js';
 
 const BEFORE = '0064_partners';
 const NAME = '0065_ad_conversions';
+/** The migration after it (lot PURGE, step PURGE.2: the test purge), taken down first and applied again with it. */
+const LATER = '0066_test_purge';
+/** Lot PURGE, step PURGE.8: the platform reset, after it, taken down first and applied again with it. */
+const RESET = '0067_platform_reset';
 const TABLES = ['ads_settings', 'ads_channel_platforms', 'ad_consents', 'ad_clicks', 'ad_events'] as const;
 const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -41,7 +45,7 @@ async function snapshotOf(db: Kysely<any>): Promise<string[]> {
   ).rows.map((r) => r.object);
 }
 
-/** Down to 0064 (0065 reverted). */
+/** Down to 0064 (0067, 0066, then 0065, reverted). */
 async function downTo0064(db: Db): Promise<string[]> {
   const rs = await createMigrator(db).migrateTo(BEFORE);
   if (rs.error) throw rs.error;
@@ -65,12 +69,16 @@ function cases(state: { db: () => Db; schemaAt0064: () => Promise<string[] | nul
 
   it('rolls back to the schema of 0064 exactly without rows: what 0065 added (five tables), nothing else; and applies again to the latest, writing no row (no switch row: off)', async () => {
     const latest = await snapshotOf(db());
+    // 0067 and 0066 down first: the schema 0065 left, which this case reads.
+    const rs = await createMigrator(db()).migrateTo(NAME);
+    if (rs.error) throw rs.error;
+    const withIt = await snapshotOf(db());
     expect(await downTo0064(db())).toEqual([NAME]);
     const before = await snapshotOf(db());
     const at0064 = await state.schemaAt0064();
     if (at0064) expect(before).toEqual(at0064);
-    const added = latest.filter((o) => !before.includes(o) && !notNull(o));
-    expect(before.filter((o) => !latest.includes(o) && !notNull(o))).toEqual([]);
+    const added = withIt.filter((o) => !before.includes(o) && !notNull(o));
+    expect(before.filter((o) => !withIt.includes(o) && !notNull(o))).toEqual([]);
     expect(added.filter((o) => !of0065(o))).toEqual([]);
     expect(before.filter(of0065)).toEqual([]);
     expect(added.filter((o) => o.startsWith('table '))).toEqual([
@@ -211,7 +219,7 @@ function cases(state: { db: () => Db; schemaAt0064: () => Promise<string[] | nul
       'trigger ads_settings ads_settings_touch_updated_at',
     ]);
     // Up again: no row written (no switch row: off); each guard holds its columns.
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, RESET]);
     expect(await snapshotOf(db())).toEqual(latest);
     for (const table of TABLES) expect(await count(table), table).toBe(0);
     const args = async (trigger: string) =>
@@ -378,22 +386,22 @@ function cases(state: { db: () => Db; schemaAt0064: () => Promise<string[] | nul
     const refused = (n: readonly number[]) =>
       `migration 0065_ad_conversions cannot be rolled back: ${n[0]} switches on, ${n[1]} advertising choices, ${n[2]} click ids and ${n[3]} ad events exist`;
     await expect(downTo0064(db())).rejects.toThrow(refused(counts));
-    expect(await lastApplied()).toBe(NAME);
+    expect(await lastApplied()).toBe(RESET);
     // Each counts on its own: switched off, the choices, click ids and events still refuse; then the events alone.
     await run(`UPDATE ads_settings SET enabled = false, switched_at = switched_at + interval '1 day'`);
     await expect(downTo0064(db())).rejects.toThrow(refused([0, 3, 3, 3]));
     await run(`DELETE FROM ad_consents`);
     await run(`DELETE FROM ad_clicks`);
     await expect(downTo0064(db())).rejects.toThrow(refused([0, 0, 0, 3]));
-    expect(await lastApplied()).toBe(NAME);
+    expect(await lastApplied()).toBe(RESET);
     await run(`DELETE FROM ad_events`);
     // Without them it goes down, the switch row that is off and the channels mapped with their tables; the channels,
     // devices and conversions of the previous image kept; and up again.
     expect([await count('ads_settings'), await count('ads_channel_platforms')]).toEqual([1, 3]);
     const kept = [await count('link_channels'), await count('tracking_devices'), await count('acquisition_conversions')];
-    expect(await downTo0064(db())).toEqual([NAME]);
+    expect(await downTo0064(db())).toEqual([RESET, LATER, NAME]);
     expect([await count('link_channels'), await count('tracking_devices'), await count('acquisition_conversions')]).toEqual(kept);
-    expect((await migrateToLatest(db())).applied).toEqual([NAME]);
+    expect((await migrateToLatest(db())).applied).toEqual([NAME, LATER, RESET]);
     for (const table of TABLES) expect(await count(table), table).toBe(0);
   });
 }

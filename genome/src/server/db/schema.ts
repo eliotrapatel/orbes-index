@@ -626,6 +626,22 @@ export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
 export const TEST_RUN_STATUSES = ['RUNNING', 'DONE', 'STOPPED', 'INTERRUPTED', 'ENDED'] as const;
 export type TestRunStatus = (typeof TEST_RUN_STATUSES)[number];
 
+/**
+ * An ended test's purge (test_runs.purge_state, migration 0066, lot PURGE): PURGING (its batches under way) ⇄ PAUSED (a
+ * window, a running test, or a refusal, its reason in purge_reason), PURGING → DONE (purged_at, purge_result). One way:
+ * never back to NULL, nothing after DONE.
+ */
+export const TEST_RUN_PURGE_STATES = ['PURGING', 'PAUSED', 'DONE'] as const;
+export type TestRunPurgeState = (typeof TEST_RUN_PURGE_STATES)[number];
+
+/** A table's class in the PLATFORM RESET (platform_reset_plan.kind, migration 0067; db/reset-plan.ts RESET_PLAN). */
+export const PLATFORM_RESET_CLASSES = ['KEEP', 'PARTLY', 'WIPE'] as const;
+export type PlatformResetClass = (typeof PLATFORM_RESET_CLASSES)[number];
+
+/** What the reset gate's single-use authorization is for (platform_reset_gate.authorized_purpose, migration 0067). */
+export const PLATFORM_RESET_PURPOSES = ['platform.reset', 'platform.reset.lock'] as const;
+export type PlatformResetPurpose = (typeof PLATFORM_RESET_PURPOSES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -3919,6 +3935,75 @@ export interface TestRunsTable {
   report: JsonbNullable<JsonObject>;
   /** The test's running maxima while it ran (services/system-status.ts). */
   peaks: JsonbNullable<JsonObject>;
+  /** Its purge (migration 0066): NULL, PURGING, PAUSED or DONE, one way (test_runs_purge_guard). */
+  purge_state: ColumnType<TestRunPurgeState | null, TestRunPurgeState | null | undefined, TestRunPurgeState | null>;
+  /** When and by whom (admin_users.id) the purge was asked, written once with it. */
+  purge_requested_at: TimestampNullable;
+  purge_requested_by: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Exactly when DONE. */
+  purged_at: TimestampNullable;
+  /** The run's view and the planned deletions as the console showed them, written once by the request (`all: true`: PURGE ALL, display only). */
+  purge_summary: JsonbNullable<JsonObject>;
+  /** The request's `admin.step_up` audit row, set by the database at NULL → PURGING whatever is sent: the run's upper chain bound. */
+  purge_step_up_id: ColumnType<number | null, number | null | undefined, number | null>;
+  /** `{fromId, toId, from, to, accounts}`, written once by the purge function at its step 9; never by the app. */
+  purge_windows: JsonbNullable<JsonObject>;
+  /** Why it is PAUSED, exactly while PAUSED: an upper-case code `^[A-Z0-9_]{1,64}$` (`PURGE_WINDOW`, `PURGE_TEST_RUNNING`, `PURGE_STUCK`, …; a database error as `SQLSTATE_<code>`, e.g. `SQLSTATE_55P03`, never its name). */
+  purge_reason: ColumnType<string | null, string | null | undefined, string | null>;
+  /** `{deleted, kept}`, exactly when DONE. */
+  purge_result: JsonbNullable<JsonObject>;
+}
+
+/**
+ * A tombstone of an audit row the purge deleted (migration 0066): its id, prev_hash and hash as they were, so the chain
+ * check steps over the gap and still proves nothing else was removed; the run (NULL: PURGE ALL's sweep of the pool).
+ * Written by the purge only, append-only.
+ */
+export interface AuditPurgeGapsTable {
+  id: number;
+  prev_hash: Uint8Array;               // 32 bytes
+  hash: Uint8Array;                    // 32 bytes
+  run_id: string | null;
+  purged_at: TimestampDefault;
+}
+
+/** Step 10's DELETE-class tables referencing accounts, children first (migration 0066; db/purge-plan.ts PURGE_DELETE_TABLES). */
+export interface PurgeDeleteTablesTable {
+  tbl: string;
+  col: string;
+  ord: number;
+}
+
+/**
+ * The PLATFORM RESET's plan (migration 0067, lot PURGE): every table of the schema with its class; written by the
+ * migrations' superuser only, read by the reset function (db/reset-plan.ts RESET_PLAN, kept equal by test).
+ */
+export interface PlatformResetPlanTable {
+  tbl: string;
+  kind: PlatformResetClass;
+}
+
+/**
+ * The PLATFORM RESET's gate (migration 0067): one row (id 1), written by the reset's database functions only (a
+ * superuser); the app reads it. The holder recorded at the deploy; LOCK RESET one way; the last reset; the single-use
+ * authorization a step-up writes and the reset or LOCK RESET uses within 5 minutes.
+ */
+export interface PlatformResetGateTable {
+  id: number;
+  /** The reset holder: the oldest active ADMIN with two-factor authentication at the deploy; NULL: none (refused). */
+  holder_admin_id: string | null;
+  /** LOCK RESET: set once, never back (with launched_by). */
+  launched_at: TimestampNullable;
+  launched_by: string | null;
+  last_reset_at: TimestampNullable;
+  last_reset_by: string | null;
+  /** How many resets were done; never goes down. */
+  resets: number;
+  /** What the last reset captured before the wipe: the old head, the holder's second factor, the request, recent24h, the lists. */
+  last_reset_details: JsonbNullable<JsonObject>;
+  authorized_by: string | null;
+  authorized_at: TimestampNullable;
+  authorized_purpose: PlatformResetPurpose | null;
 }
 
 /** A bot of a run (migration 0024_z): its network, what it was drawn to do, what it did; a draw's confirmation due. */
@@ -4174,6 +4259,10 @@ export interface Database {
   test_entrants: TestEntrantsTable;
   test_runs: TestRunsTable;
   test_run_entrants: TestRunEntrantsTable;
+  audit_purge_gaps: AuditPurgeGapsTable;
+  purge_delete_tables: PurgeDeleteTablesTable;
+  platform_reset_plan: PlatformResetPlanTable;
+  platform_reset_gate: PlatformResetGateTable;
   claim_code_renewals: ClaimCodeRenewalsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
@@ -4320,6 +4409,7 @@ export type GuaranteeSettingsRow = Selectable<GuaranteeSettingsTable>;
 export type TestEntrantRow = Selectable<TestEntrantsTable>;
 export type TestRunRow = Selectable<TestRunsTable>;
 export type TestRunEntrantRow = Selectable<TestRunEntrantsTable>;
+export type AuditPurgeGapRow = Selectable<AuditPurgeGapsTable>;
 export type SupplierRow = Selectable<SuppliersTable>;
 export type SupplierOrderRow = Selectable<SupplierOrdersTable>;
 export type SupplierOrderLineRow = Selectable<SupplierOrderLinesTable>;

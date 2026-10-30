@@ -13,6 +13,12 @@
  *     halts it; the release's page then says STOPPED; a second test sent, the first one's END TEST under PAST TESTS
  *     still cleans it up, and the second ends from the top.
  *  3. Under 1 100 px the Server panel comes first, folded to its one line, which opens it.
+ *  4. TEST PURGE (lot PURGE, step PURGE.7): a draw's test ended after the draw, PURGE under PAST TESTS for an ADMIN
+ *     signed in with his authenticator code: the danger dialog (the drawn draw's line, the code field), a wrong code
+ *     said inside it (still signed in, the code emptied), the next code: PURGING, then PURGED with when (Paris) and by
+ *     whom; the Ended tests page, from Settings, says the same. The app's forbidden windows are answered open (CI runs
+ *     at any hour: maintenanceWindow mocked to none, the database's window function replaced in this test database);
+ *     the windows themselves are proven in test/api/admin-test-purge.test.ts and test/services/maintenance-window.test.ts.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -20,16 +26,30 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { chromium, type Browser, type Page } from 'playwright-core';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildWeb } from '../../scripts/build-web.js';
 import { buildApp } from '../../src/server/app.js';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
+import { hashSecret } from '../../src/server/crypto/scrypt.js';
+import { seal } from '../../src/server/crypto/secretbox.js';
+import { base32Decode, generateTotpSecret, totp } from '../../src/server/crypto/totp.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
+import { deriveTotpEncryptionKey } from '../../src/server/services/auth.js';
+import { testPhrase } from '../../src/server/services/test-entrants.js';
+import type { PurgePass } from '../../src/server/services/test-purge.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { poolDraw, withDrawSizes } from '../support/draws.js';
+
+// TEST PURGE's forbidden windows answered open in the app (case 4; CI runs at any hour): every other export as it is.
+vi.mock('../../src/server/services/maintenance-window.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/server/services/maintenance-window.js')>()),
+  maintenanceWindow: () => null,
+}));
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -64,7 +84,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
   let admin: Actor;
   const problems: string[] = [];
 
-  async function open(who: { email: string; password: string }, width = 1440): Promise<Page> {
+  async function open(who: { email: string; password: string; code?: () => string }, width = 1440): Promise<Page> {
     const c = await browser.newContext({ viewport: { width, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
     const p = await c.newPage();
     p.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
@@ -82,6 +102,12 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await p.fill('input[name=email]', who.email);
     await p.fill('input[name=password]', who.password);
     await p.click('[data-testid=login-submit]');
+    // A second factor enrolled: the code of the moment, asked once the password is right.
+    if (who.code) {
+      await p.waitForSelector('input[name=totp]', { state: 'visible' });
+      await p.fill('input[name=totp]', who.code());
+      await p.click('[data-testid=login-submit]');
+    }
     await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Dashboard');
     return p;
   }
@@ -328,6 +354,99 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await expect.poll(async () => (await p.locator('[data-testid=test-past-checks]').allTextContents()).filter((x) => /^\d\/6$/.test(x)).length, { timeout: 30_000 }).toBe(2);
     expect(await p.locator('[data-testid=test-status]').count()).toBe(0);
     expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('purges an ended test of a drawn draw from PAST TESTS: a wrong code said inside the dialog, still signed in; the next code: PURGING, then PURGED (Paris) by whom; the Ended tests page says the same', async () => {
+    // The database's own windows answered open in this test database (as the API suite does).
+    await sql.raw(`CREATE OR REPLACE FUNCTION orbes_maintenance_window(p_at timestamptz) RETURNS text LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT NULL::text $$`).execute(ctx.db);
+    // An ADMIN whose second factor was enrolled long ago (no enrolment row of the last 24 h).
+    const id = randomUUID();
+    const purger = { email: `purger.${id.slice(0, 8)}@example.com`, password: 'tests purger passphrase 2026' };
+    const secret = generateTotpSecret();
+    await ctx.db
+      .insertInto('admin_users')
+      .values({
+        id,
+        email: purger.email,
+        email_normalized: purger.email,
+        password_hash: await hashSecret(purger.password),
+        role: 'ADMIN',
+        password_change_required: false,
+        totp_secret_enc: seal(deriveTotpEncryptionKey(ctx.config), JSON.stringify({ v: 1, s: secret, c: 0 }), `orbes/admin-totp/v1|${id}`),
+      })
+      .execute();
+    const key = base32Decode(secret);
+
+    // A draw of test entrants only, drawn, its test ended: its release over.
+    const soon = Date.now() + HOUR;
+    const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId, title: 'MONOLITHE — release to purge', quantity: 2, opensAt: new Date(soon), closesAt: new Date(soon + 2 * HOUR), earlyAccessHours: 0 }, admin);
+    await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - HOUR), closes_at: new Date(Date.now() + 2 * HOUR) }).where('id', '=', drop.id).execute();
+    const started = await app.testEntrants.start(
+      drop.id,
+      { phrase: testPhrase(drop.id), tiers: { none: 0, titane: 3, platine: 0, palladium: 0 }, arrival: { mode: 'all', interestPct: 0 }, behaviour: { confirmPct: 0 } },
+      admin,
+    );
+    await expect.poll(async () => (await app.testEntrants.view(started.id)).status, { timeout: 30_000 }).toBe('DONE');
+    await ctx.db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', drop.id).execute();
+    await ctx.services.drops.draw(drop.id, admin);
+    expect((await app.testEntrants.end(started.id, testPhrase(drop.id, true), admin)).status).toBe('ENDED');
+    const id8 = started.id.slice(0, 8).toUpperCase();
+
+    const p = await open({ ...purger, code: () => totp(key, Date.now()) });
+    await go(p, `#/club/drops/${drop.id}`, 'MONOLITHE — release to purge');
+    const row = p.locator('[data-testid=test-past] tbody tr').first();
+    await expect.poll(() => row.locator('[data-testid=test-purge]').count(), POLL).toBe(1);
+    expect(((await row.locator('[data-testid=test-past-status]').textContent()) ?? '').trim()).toBe('ENDED');
+    await row.locator('[data-testid=test-purge]').click();
+    await p.waitForSelector('dialog.dialog--danger');
+    const dialog = p.locator('dialog.dialog');
+    expect(await dialog.locator('[data-testid=purge-line]').allTextContents()).toEqual([
+      'Deletes this test’s entries, its cancelled orders with their events, its sessions and its audit entries (a trace of each entry stays, so the audit check still proves nothing else was removed). Its report stays here. Test accounts no other test uses are deleted.',
+      'This draw was drawn: once purged, its public ranked list no longer matches its seed.',
+    ]);
+    // The code field: as the sign-in's, its hint to wait for the next code.
+    const code = dialog.locator('input[name=totp]');
+    expect(await code.evaluate((el) => [el.getAttribute('autocomplete'), el.getAttribute('inputmode'), el.getAttribute('placeholder'), el.classList.contains('mono')])).toEqual(['one-time-code', 'numeric', '000 000', true]);
+    expect(await dialog.textContent()).toContain('Six digits from your authenticator app. Just signed in? Wait for the next code.');
+    expect(await p.isDisabled('[data-testid=dialog-confirm]')).toBe(true);
+    await p.fill('[data-testid=dialog-phrase]', `PURGE TEST ${id8}`);
+    // A wrong code: said inside the dialog, which stays open; the code emptied; still signed in.
+    const now = Date.now();
+    const near = [-1, 0, 1].map((d) => totp(key, now + d * 30_000));
+    const wrong = ['000000', '111111', '222222', '333333'].find((c) => !near.includes(c))!;
+    await code.fill(wrong);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(async () => ((await dialog.locator('.dialog__error').textContent()) ?? '').trim(), POLL).toBe('The code is not valid. Check the time on your device and try again.');
+    expect(await code.inputValue()).toBe('');
+    expect(await p.inputValue('[data-testid=dialog-phrase]')).toBe(`PURGE TEST ${id8}`);
+    expect(await p.locator('[data-testid=login-form]').count()).toBe(0);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    // The next code (the sign-in used the code of the moment): 202, PURGING.
+    await code.fill(totp(key, Date.now() + 30_000));
+    await confirmDialog(p);
+    await expect.poll(async () => ((await row.locator('[data-testid=test-past-status]').textContent()) ?? '').trim(), POLL).toBe('PURGING');
+    expect(((await row.locator('[data-testid=test-purge-line]').textContent()) ?? '').trim()).toMatch(new RegExp(`^Asked \\d{2} [A-Z]{3} \\d{4} · \\d{2}:\\d{2} Paris by ${purger.email.replace(/\./g, '\\.')}`));
+    expect(await row.locator('[data-testid=test-purge]').count()).toBe(0);
+    // The loop's steps (its timer is off in tests), then the page's read every 2 s: PURGED, when (Paris) and by whom.
+    for (let i = 0; i < 2000; i++) {
+      const pass: PurgePass = await ctx.services.testPurge.pass();
+      if (pass === 'done') break;
+      if (pass === 'idle' || pass === 'paused') throw new Error(`the purge went ${pass}`);
+    }
+    await expect.poll(async () => ((await row.locator('[data-testid=test-past-status]').textContent()) ?? '').trim(), { timeout: 15_000 }).toBe('PURGED');
+    expect(((await row.locator('[data-testid=test-purge-line]').textContent()) ?? '').trim()).toMatch(new RegExp(`^Purged \\d{2} [A-Z]{3} \\d{4} · \\d{2}:\\d{2} Paris by ${purger.email.replace(/\./g, '\\.')}$`));
+    expect(await row.locator('[data-testid=test-report]').count()).toBe(1);
+
+    // The Ended tests page, from Settings: the test PURGED.
+    await go(p, '#/settings', 'Settings');
+    await p.click('a.cbtn[href="#/settings/tests"]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Ended tests');
+    const listed = p.locator('[data-testid=ended-tests] tbody tr', { hasText: 'MONOLITHE — release to purge' });
+    expect(((await listed.locator('[data-testid=test-past-status]').textContent()) ?? '').trim()).toBe('PURGED');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await csp(p)).toEqual([]);
+    expect((await ctx.audit.verifyChain()).ok).toBe(true);
     await p.context().close();
   }, STEP_TIMEOUT);
 

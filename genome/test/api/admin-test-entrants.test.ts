@@ -97,7 +97,8 @@ describe('admin: test entrants', () => {
     const res = await admin.post(`/api/admin/drops/${dropId}/test-runs`, body(dropId));
     expect(res.statusCode).toBe(201);
     const { run } = safeJson(res) as { run: Record<string, unknown> & { id: string; settings: unknown[]; byTier: unknown[] } };
-    expect(Object.keys(run).sort()).toEqual(['byTier', 'createdAt', 'createdBy', 'dropId', 'endedAt', 'entrants', 'errors', 'id', 'mode', 'peaks', 'release', 'report', 'selected', 'settings', 'status'].sort());
+    // Lot PURGE (PURGE.5): `purge` and `purgeable`, added.
+    expect(Object.keys(run).sort()).toEqual(['byTier', 'createdAt', 'createdBy', 'dropId', 'endedAt', 'entrants', 'errors', 'id', 'mode', 'peaks', 'purge', 'purgeable', 'release', 'report', 'selected', 'settings', 'status'].sort());
     expect(run).toMatchObject({ dropId, mode: 'DRAW', status: 'RUNNING', entrants: 3, endedAt: null, report: null, errors: [] });
     expect(run.byTier).toEqual([
       { tier: 0, label: 'NO TIER', entered: 0, inRoom: 0, selected: 0, confirmed: 0, lapsed: 0, released: 0, missed: 0, left: 0, withdrawn: 0 },
@@ -145,7 +146,8 @@ describe('admin: test entrants', () => {
     expect(safeJson(await auditor.get(`/api/admin/drops/${dropId}/test-runs/current`))).toEqual({ run: null });
     const { runs } = safeJson(await auditor.get(`/api/admin/drops/${dropId}/test-runs`)) as { runs: Record<string, unknown>[] };
     expect(runs).toHaveLength(1);
-    expect(Object.keys(runs[0]!).sort()).toEqual(['checksPassed', 'checksTotal', 'createdAt', 'createdBy', 'endedAt', 'entrants', 'id', 'peaks', 'report', 'status'].sort());
+    // Lot PURGE (PURGE.5): `purge` and `purgeable`, added.
+    expect(Object.keys(runs[0]!).sort()).toEqual(['checksPassed', 'checksTotal', 'createdAt', 'createdBy', 'endedAt', 'entrants', 'id', 'peaks', 'purge', 'purgeable', 'report', 'status'].sort());
     expect(runs[0]).toMatchObject({ id: run.id, status: 'ENDED', entrants: 4, checksPassed: 5, checksTotal: 5 });
     const orders = await h.ctx.db.selectFrom('orders').select('status').where('drop_id', '=', dropId).execute();
     expect(orders.map((o) => o.status)).toEqual(['CANCELLED']);

@@ -2251,6 +2251,8 @@ export interface ChainVerification {
   ok: boolean;
   checked: number;
   firstBadId?: number;
+  /** Entries the test purge deleted, each one's link kept (a tombstone): only when there is at least one. */
+  purged?: number;
   head: { id: number; hash: string } | null;
 }
 
@@ -5161,6 +5163,10 @@ export interface TestRunView {
   errors: { at: Iso; message: string }[];
   report: TestReport | null;
   peaks: TestRunPeaks | null;
+  /** Its purge (lot PURGE) once asked; null before. Absent from a server before the lot. */
+  purge?: TestRunPurge | null;
+  /** Whether PURGE can be pressed on it now: true, or why not. */
+  purgeable?: TestRunPurgeable;
 }
 
 /** GET /api/admin/drops/:id/test-runs: the release's tests, newest first. */
@@ -5175,6 +5181,195 @@ export interface TestRunSummary {
   checksTotal: number | null;
   report: TestReport | null;
   peaks?: TestRunPeaks | null;
+  /** Its purge (lot PURGE) once asked; null before. Absent from a server before the lot. */
+  purge?: TestRunPurge | null;
+  /** Whether PURGE can be pressed on it now: true, or why not. */
+  purgeable?: TestRunPurgeable;
+}
+
+// ── TEST PURGE (lot PURGE: services/test-purge.ts, routes/admin/test-entrants.ts) ──────────────────────────────────
+
+/** Where a test's purge stands: being purged, paused (with its reason), done (PURGED in the console's words). */
+export const TEST_RUN_PURGE_STATES = ['PURGING', 'PAUSED', 'DONE'] as const;
+export type TestRunPurgeState = (typeof TEST_RUN_PURGE_STATES)[number];
+
+/** A test's purge once asked. */
+export interface TestRunPurge {
+  state: TestRunPurgeState;
+  /** Why it is PAUSED (PURGE_WINDOW, PURGE_TEST_RUNNING, PURGE_NOT_TEST, PURGE_STUCK_<SQLSTATE>, ...), else null. */
+  reason: string | null;
+  /** That reason in the console's words, Paris time first (the night's end computed for the date); null unless PAUSED. */
+  message: string | null;
+  requestedAt: Iso | null;
+  /** The ADMIN who asked (email). */
+  requestedBy: string | null;
+  purgedAt: Iso | null;
+  /** Asked by PURGE ALL ENDED TESTS. */
+  all: boolean;
+  /** Once DONE: the rows deleted by table, and what was kept. */
+  deleted: Record<string, number> | null;
+  kept: Record<string, unknown> | null;
+  /** While under way: the phase of the server's last step and the rows deleted so far; null otherwise. */
+  progress: { phase: string | null; rows: number } | null;
+}
+
+/** Whether PURGE can be pressed: true, or why not (its reason and the console's words). */
+export type TestRunPurgeable = true | { reason: string; message: string };
+
+/** GET /api/admin/test-runs/ended: an ended test, whatever its release, with its release's name. */
+export interface EndedTestRun extends TestRunSummary {
+  dropId: string;
+  dropName: string;
+  mode: TestRunMode;
+}
+
+/** A window or a test running that would refuse a purge now, with its words (Paris time first). */
+export interface TestPurgeHold {
+  reason: string;
+  message: string;
+}
+
+/** GET /api/admin/test-runs/:id/purge: what the PURGE dialog says before it is pressed (read only). */
+export interface TestPurgePreview {
+  runId: string;
+  phrase: string;
+  purgeable: TestRunPurgeable;
+  hold: TestPurgeHold | null;
+  /** A draw of the release was drawn: once purged, its public ranked list no longer matches its seed. */
+  drawn: boolean;
+  planned: { accounts: number; entries: number; orders: number };
+  /** The test's orders that keep their accounts (an invoice, a parcel, a return, or not cancelled). */
+  blockingOrders: number;
+  blocking: { orderRef: string; status: string }[];
+}
+
+/** GET /api/admin/test-runs/purge-all: what PURGE ALL ENDED TESTS would do now (read only). */
+export interface TestPurgeAllPreview {
+  runs: string[];
+  resumed: string[];
+  skipped: { runId: string; reason: string; message: string }[];
+  hold: TestPurgeHold | null;
+  /** At most this many of the pool's test accounts deleted by its sweep. */
+  accounts: number;
+  /** How many of its tests (purged or resumed) are of a drawn draw: their public ranked lists no longer match their seeds. */
+  drawn: number;
+}
+
+// ── PLATFORM RESET (lot PURGE: services/platform-reset.ts, routes/admin/platform-reset.ts) ───────────────────────
+
+/**
+ * What a reset captured before the wipe (entry 1's `capture`), and what the preview lists now (its `lists`): what
+ * stays that a test may have made, the segments that go and the signing keys.
+ */
+export interface ResetCapture {
+  skus: {
+    code: string;
+    model: string | null;
+    addon: string | null;
+    size: string;
+    sizeType: string | null;
+    status: string;
+    createdAt: Iso;
+    pieces: number;
+    orders: number;
+    releaseSizes: number;
+    stockMoves: number;
+    /** How it came: 'with the add-on', 'declared', 'with the model', 'before the type' or 'by a flow'. */
+    how: string;
+    /** Made by a flow and still offered: the 9 Oct "check" flag. */
+    check: boolean;
+  }[];
+  logins: { email: string; role: string; totp: boolean; status: string; createdAt: Iso }[];
+  suppliers: { name: string; status: string; createdAt: Iso }[];
+  pointsOfSale: { name: string; city: string | null; country: string | null; status: string; createdAt: Iso }[];
+  carriers: { name: string; status: string; createdAt: Iso }[];
+  stockLocations: { name: string; default: boolean; address: boolean; createdAt: Iso }[];
+  boxes: { name: string; status: string; createdAt: Iso }[];
+  addons: { name: string; kind: string; status: string; createdAt: Iso }[];
+  sets: { name: string; code: string; status: string; createdAt: Iso }[];
+  vaultRewardsGiven: { id: string; kind: string; given: number; quantity: number | null; active: boolean }[];
+  adsEventsFrom: Iso | null;
+  pieceRanges: { year: number; category: string; pieces: number; first: string; last: string }[];
+  segmentsGone: string[];
+  keys: { keyId: number; kid: string; status: string }[];
+}
+
+/** Every number after a reset, computed by the server for the date (numbersAfterReset, H2). */
+export interface ResetNumbers {
+  year: number;
+  pieceReferences: { category: string; name: string; reference: string }[];
+  invoice: string;
+  creditNote: string;
+  partnerInvoice: string;
+  partnerCreditNote: string;
+  test: string;
+}
+
+/** One line of the post-check after a reset: OK or failing, with what was found. */
+export interface ResetPostCheckLine {
+  key: 'chain' | 'key' | 'documents' | 'pieces' | 'numbers' | 'test';
+  label: string;
+  ok: boolean;
+  value: string;
+}
+
+/** The last reset, as entry 1 of the new audit log records it. */
+export interface LastPlatformReset {
+  at: Iso;
+  by: string | null;
+  counts: { wiped: Record<string, number>; kept: Record<string, number>; partly: Record<string, { before: number; after: number }>; collectors: number } | null;
+  rowsDeleted: number | null;
+  /** Entry 1 of the new log: its hash is the new anchor. */
+  anchor: { id: number; hash: string } | null;
+  /** The old log's last entry, as the reset read it. */
+  oldHead: { id: number; hash: string } | null;
+  capture: ResetCapture | null;
+  postCheck: ResetPostCheckLine[];
+}
+
+/** GET /api/admin/platform-reset: what a reset would delete and keep now (the holder only; read only). */
+export interface PlatformResetPreview {
+  at: Iso;
+  numbers: ResetNumbers;
+  tables: { table: string; kind: 'KEEP' | 'PARTLY' | 'WIPE'; rows: number; goes: number; stays: number }[];
+  rowsToGo: number;
+  /** The accounts neither test nor team: how many, and their newest sign-ups (Paris; never an email). */
+  collectors: { count: number; signUps: { at: Iso; paris: string }[] };
+  /** What the press sends back (D7, G18). */
+  collectorsSeen: number;
+  collectorsSeenUntil: string | null;
+  testEntrants: number;
+  foundingList: number;
+  links: { kept: number; wiped: number };
+  acquisitionSources: { kept: number };
+  partners: { partners: number; experiences: number; invoices: number };
+  releases: { id: string; title: string; mode: string; opensAt: Iso; closesAt: Iso }[];
+  liveOpen: { until: Iso; message: string } | null;
+  lists: ResetCapture;
+}
+
+/** GET /api/admin/platform-reset: `{ holder: false }` for anyone but the reset holder (nothing else). */
+export type PlatformResetPage =
+  | { holder: false }
+  | {
+      holder: true;
+      email: string;
+      launched: { at: Iso; by: string | null } | null;
+      lastReset: LastPlatformReset | null;
+      lastFailure: { at: Iso; reason: string; message: string } | null;
+      /** Why a reset would be refused now (its code and words, Paris time first), or null. */
+      refusal: { code: string; message: string } | null;
+      /** Null once LOCK RESET was pressed. */
+      preview: PlatformResetPreview | null;
+    };
+
+/** POST /api/admin/platform-reset: RESET PLATFORM, with what the page showed. */
+export interface PlatformResetPress {
+  phrase: string;
+  password: string;
+  totp: string;
+  collectorsSeen: number;
+  collectorsSeenUntil: string | null;
 }
 
 /** GET /api/admin/test-runs/active: the RUNNING test, whatever its release (the Drops tab). */

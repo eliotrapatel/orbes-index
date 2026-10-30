@@ -15,7 +15,7 @@
  * (P-R02: its place and address, its story and specifications previewed as
  * the client reads them, its gallery added, ordered, described and trimmed,
  * then read by the public API) → key rotation → audit chain
- * verification → a batch of 120 products from a CSV (preview, requests of
+ * verification (and its count of entries purged with their tests) → a batch of 120 products from a CSV (preview, requests of
  * 50, results piece by piece, the page held until the claim codes are saved,
  * certificate cards) and a quantity → sign out. Also: a customer's report
  * followed from the Cases queue to its scan, anomaly and piece, then closed;
@@ -1416,7 +1416,30 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.click('[data-testid=audit-verify]');
     await page.waitForSelector('[data-testid=chain-result][data-ok=true]');
     expect(await page.locator('[data-testid=chain-result]').textContent()).toMatch(/CHAIN INTACT.*entries re-hashed/);
+    expect(await page.locator('[data-testid=chain-purged]').count()).toBe(0);
     await shot(page, 'audit');
+  }, STEP_TIMEOUT);
+
+  it('says how many entries were purged with their tests, the chain still intact (plan PURGE §A.5)', async () => {
+    // Two entries purged as the purge's batch function does (migration 0066: deleted under its guard bypass, each one's
+    // tombstone written in the same statement), with a live entry after them: the chain's tail is never purged.
+    const sample: number[] = [];
+    for (let i = 0; i < 2; i++) sample.push((await ctx.audit.record({ actor: { type: 'system' }, action: 'e2e.purge.sample', details: { i } })).id);
+    await ctx.audit.record({ actor: { type: 'system' }, action: 'e2e.purge.after' });
+    await t.pglite.transaction(async (tx) => {
+      await tx.query(`SET LOCAL orbes.guard_bypass = 'purge'`);
+      await tx.query(
+        `WITH d AS (DELETE FROM audit_logs WHERE id = ANY (ARRAY[${sample.map((id) => String(Math.trunc(id))).join(',')}]::bigint[]) RETURNING id, prev_hash, hash)
+         INSERT INTO audit_purge_gaps (id, prev_hash, hash) SELECT id, prev_hash, hash FROM d`,
+      );
+    });
+    await go(page, '#/audit', 'Audit log');
+    await page.click('[data-testid=audit-verify]');
+    await page.waitForSelector('[data-testid=chain-result][data-ok=true]');
+    expect(await page.locator('[data-testid=chain-result]').textContent()).toMatch(/CHAIN INTACT.*entries re-hashed/);
+    expect((await page.locator('[data-testid=chain-purged]').textContent())?.trim()).toBe("2 entries purged with their tests (each one's link kept)");
+    expect(await cspViolations(page)).toEqual([]);
+    await shot(page, 'audit-purged');
   }, STEP_TIMEOUT);
 
   it('reads the staff documents in the console: the playbook with its contents and tables, the kit with its card', async () => {

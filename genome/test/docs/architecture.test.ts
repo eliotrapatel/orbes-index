@@ -55,8 +55,29 @@
  *  - docs/BRAND-DESIGN-SYSTEM.md's lot M4 (WITH <BRAND>, SHARE MY NAME, the consent banner and where it never shows,
  *    ADVERTISING MEASUREMENT) in copy.ts's words, the matrix's partner and ads states, COMPLIANCE §13's M4 paragraph
  *    with the legal version the code has.
+ *
+ * And the documents of lot PURGE (step PURGE.14; plan §A, §B, §S, §W, §Shop; decisions D3, D12, D14, D18, R7, R8, R10):
+ *
+ *  - docs/ARCHITECTURE.md B.23, TEST PURGE, PLATFORM RESET and LOCK RESET, carries the Shopify fit in its seven lines,
+ *    S1 to S7, and names the code it describes by the names the code has (the step-up, the windows, the two services,
+ *    the shutdown path, the database's functions);
+ *  - docs/API.md §16.54 and §16.55: every route as the routes register it, with its role and its rate group, the
+ *    phrases, the resume of a PAUSED purge; §17.14, the step-up's refusals in the code's order; §17.6's `purged`; the
+ *    error codes (STEP_UP_LOCKED, RELEASE_BEING_PURGED, RESET_COLLECTORS_CHANGED, LIVE_OPEN, PURGE_IN_PROGRESS,
+ *    RESET_OTHER_CONNECTIONS and the others) in the code's own words, Paris times computed by the code's own helpers;
+ *  - docs/DATABASE.md: 0066 and 0067 among the code's migrations, §5.159 to §5.162 and the test runs' purge columns
+ *    within the code's bounds, the reset's plan by its counts, the locks, the SQLSTATEs, the down steps in the
+ *    migrations' own words, the auditor's export with the tombstones and the link through entry 1's old head;
+ *  - docs/SECURITY-MODEL.md §3.7 and docs/THREAT-MODEL.md rows AS and AT: the step-up and its daily limit, the
+ *    guards' way through, the gate, the single-use authorization, the console-only residual risk named plainly and
+ *    accepted by the owner, and the purge's bounded residual that this acceptance does not cover;
+ *  - docs/DEPLOYMENT.md: the auditor's export and the read-only check of `platform_reset_gate.launched_at` before a
+ *    restored app starts; COMPLIANCE §13's PURGE paragraph, no legal page changed (no pin on LEGAL_VERSION: the build
+ *    and the review check `git diff --stat ecbb448c -- genome/src/web/legal docs/legal` is empty);
+ *  - and no file of docs/ or genome/ holds the owner's email domain (R10; the pattern is built from parts here, so this
+ *    file does not hold it either).
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
@@ -95,6 +116,14 @@ import { ADS_TEXT_VERSION, CLICK_PARAMS } from '../../src/server/services/ads.js
 import { partnerInvoiceNumber } from '../../src/server/services/partners.js';
 import { LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { CONSENT_NEVER_ON } from '../../src/web/verify/consent.js';
+import { INVOICE_KINDS, PARTNER_INVOICE_KINDS, TEST_RUN_PURGE_STATES } from '../../src/server/db/schema.js';
+import { PURGE_DELETE_TABLES, PURGE_GUARDED_TABLES } from '../../src/server/db/purge-plan.js';
+import { RESET_AUTHORIZATION_MS, RESET_PARTLY_RULES, RESET_PLAN } from '../../src/server/db/reset-plan.js';
+import { PG_ERROR } from '../../src/server/db/pg-errors.js';
+import { MAINTENANCE_MARGIN_MS, parisWhen, windowWords } from '../../src/server/services/maintenance-window.js';
+import { STEP_UP_DAILY_FAILURES, STEP_UP_RECENT_MS } from '../../src/server/services/auth.js';
+import { PURGE_ALL_PHRASE, PURGE_BATCH_ROWS, PURGE_STATEMENT_TIMEOUT, pauseWords, purgePhrase } from '../../src/server/services/test-purge.js';
+import { failureWords, LOCK_PHRASE, numbersAfterReset, PREVIEW_SIGN_UPS, RESET_PHRASE, RESET_RESTARTS_IN, RESET_STATEMENT_TIMEOUT } from '../../src/server/services/platform-reset.js';
 import { REPO, readDoc, section } from './lexicon.js';
 
 const architecture = readDoc('docs/ARCHITECTURE.md');
@@ -679,7 +708,10 @@ describe('ARCHITECTURE B.22: lot M4 and its Shopify fit (plan §4, §5)', () => 
       expect(M4).toContain(`\`${name}\``);
       expect(Object.keys(MIGRATIONS)).toContain(name);
     }
-    expect(Object.keys(MIGRATIONS).slice(-3)).toEqual(['0063_margin', '0064_partners', '0065_ad_conversions']);
+    // Lot M4's three, in a row, after Q3's 0062 (lot PURGE's 0066 follows them).
+    const names = Object.keys(MIGRATIONS);
+    expect(names.slice(names.indexOf('0063_margin'), names.indexOf('0065_ad_conversions') + 1)).toEqual(['0063_margin', '0064_partners', '0065_ad_conversions']);
+    expect(names[names.indexOf('0063_margin') - 1]).toBe('0062_vault_rewards');
     for (const file of ['server/routes/admin/margin.ts', 'server/routes/admin/partners.ts', 'server/routes/admin/ads.ts', 'server/routes/consent.ts', 'server/ads/http.ts', 'server/ads/event.ts', 'web/verify/views/consent-banner.ts', 'web/legal/content/privacy-ads.ts', 'web/admin/views/partners.ts', 'web/admin/views/ad-platforms.ts', 'web/admin/views/margin-settings.ts']) {
       expect(existsSync(join(REPO, 'genome/src', file)), file).toBe(true);
     }
@@ -937,5 +969,446 @@ describe('the other documents of lot M4 (plan §5)', () => {
     expect(compliance).toContain(`(\`ADS_TEXT_VERSION\` \`${ADS_TEXT_VERSION}\`)`);
     expect(compliance).toContain('**Les conversions restent éteintes au déploiement**');
     expect(compliance).toContain('(launch/DEPLOY-M4B-M4.md)');
+  });
+});
+
+// ── Lot PURGE (step PURGE.14) ───────────────────────────────────────────────
+
+const B23 = section(architecture, '### B.23');
+
+describe('ARCHITECTURE B.23: TEST PURGE, PLATFORM RESET and LOCK RESET, and its Shopify fit (R8)', () => {
+  it('states the seven lines of the Shopify fit, S1 to S7, under the scope’s rule', () => {
+    expect(B23).toContain('**The Shopify fit** (macro scope S1 to S7, "No design may assume the platform is the only place people pay")');
+    for (let n = 1; n <= 7; n++) expect(B23, `S${n}`).toMatch(new RegExp(`^  - \\*\\*S${n}\\*\\* \\(`, 'm'));
+    expect(B23).toContain('the purge deletes only CANCELLED orders of test accounts in test releases');
+    expect(B23).toContain('the reset keeps the stock locations (with `shopify_location_id`) and the SKUs (with `shopify_product_id` and `shopify_variant_id`)');
+    expect(B23).toContain('the reset wipes every account, `shopify_customer_id` with it');
+    for (const column of ['shopify_location_id', 'shopify_product_id', 'shopify_variant_id', 'shopify_customer_id']) {
+      expect(source('server/db/migrations/0022_orders_stock.ts'), column).toContain(column);
+    }
+    // The catalogue and the settings the Shopify lines name are KEEP in the reset's plan; stock movements and accounts WIPE.
+    for (const table of ['stock_locations', 'skus', 'addon_items', 'sets', 'club_tiers', 'club_program_settings']) expect(RESET_PLAN[table], table).toBe('KEEP');
+    for (const table of ['stock_movements', 'accounts']) expect(RESET_PLAN[table], table).toBe('WIPE');
+  });
+
+  it('names the step-up, the windows, the services, the shutdown and the database’s functions by the names the code has', () => {
+    const auth = source('server/services/auth.ts');
+    for (const name of ['verifyAdminStepUp', 'consumeAdminStepUp']) {
+      expect(B23, name).toContain(`\`${name}\``);
+      expect(auth, name).toMatch(new RegExp(`\\n  async ${name}\\(`));
+    }
+    const named: [string, string[]][] = [
+      ['server/services/maintenance-window.ts', ['maintenanceWindow', 'windowWords']],
+      ['server/services/platform-reset.ts', ['numbersAfterReset']],
+      ['server/platform-reset-shutdown.ts', ['platformResetShutdown']],
+    ];
+    for (const [file, names] of named) {
+      for (const name of names) {
+        expect(B23, name).toContain(`\`${name}\``);
+        expect(source(file), `${file} ${name}`).toMatch(new RegExp(`export (async )?function ${name}\\b`));
+      }
+    }
+    for (const [file, name] of [['server/services/test-purge.ts', 'TestPurgeService'], ['server/services/platform-reset.ts', 'PlatformResetService']] as const) {
+      expect(B23, name).toContain(`\`${name}\``);
+      expect(source(file), name).toMatch(new RegExp(`export class ${name}\\b`));
+    }
+    const sql: [string, string[]][] = [
+      ['0066_test_purge', ['orbes_purge_test_run_batch', 'orbes_maintenance_window', 'orbes_maintenance_window_within']],
+      ['0067_platform_reset', ['orbes_platform_reset_precheck', 'orbes_platform_reset_authorize', 'orbes_platform_reset']],
+    ];
+    for (const [migration, names] of sql) {
+      for (const name of names) {
+        expect(B23, name).toContain(`\`${name}\``);
+        expect(source(`server/db/migrations/${migration}.ts`), name).toContain(`CREATE FUNCTION ${name}(`);
+      }
+    }
+    for (const name of ['test_runs_purge_guard', 'platform_reset_gate', 'platform_reset_plan', 'audit_purge_gaps']) expect(B23, name).toContain(`\`${name}\``);
+    // The loop's figures, the code's.
+    expect(PURGE_BATCH_ROWS).toBe(500);
+    expect(PURGE_STATEMENT_TIMEOUT).toBe('20s');
+    expect(B23).toContain('(500 rows or 50 accounts, a 20 s statement timeout, 300 ms between calls)');
+    expect(source('server/services/test-purge.ts')).toContain('export const PURGE_PAUSE_MS = 300;');
+    // The two migrations, in a row after M4's 0065.
+    const names = Object.keys(MIGRATIONS);
+    for (const name of ['0066_test_purge', '0067_platform_reset']) expect(B23, name).toContain(`\`${name}\``);
+    expect(names.slice(names.indexOf('0065_ad_conversions'), names.indexOf('0067_platform_reset') + 1)).toEqual(['0065_ad_conversions', '0066_test_purge', '0067_platform_reset']);
+    expect(B23).toContain('no change to the host (`deploy/vps` unchanged, no `.env` line)');
+    for (const file of ['web/admin/views/ended-tests.ts', 'web/admin/views/platform-reset.ts', 'web/admin/model/test-purge.ts', 'web/admin/model/platform-reset.ts', 'server/routes/admin/platform-reset.ts']) {
+      expect(existsSync(join(REPO, 'genome/src', file)), file).toBe(true);
+    }
+  });
+});
+
+describe('the API of lot PURGE (§16.54, §16.55, §17.14)', () => {
+  const api = readDoc('docs/API.md');
+  const purge = section(api, '### 16.54');
+  const reset = section(api, '### 16.55');
+  const stepUp = section(api, '### 17.14');
+  /** The routes a file registers, `METHOD /path`, a registration on one line or several. */
+  const registered = (file: string) => [...source(file).matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`);
+
+  it('every route of TEST PURGE and PLATFORM RESET as the routes register them, with their role and rate group', () => {
+    const groups: [string, string, [string, string, string, 'auth' | 'admin'][]][] = [
+      ['server/routes/admin/test-entrants.ts', '16.54', [
+        ['POST', '/api/admin/test-runs/:id/purge', '**ADMIN**', 'auth'],
+        ['POST', '/api/admin/test-runs/purge-all', '**ADMIN**', 'auth'],
+        ['GET', '/api/admin/test-runs/ended', 'AUDITOR', 'admin'],
+        ['GET', '/api/admin/test-runs/:id/purge', '**ADMIN**', 'admin'],
+        ['GET', '/api/admin/test-runs/purge-all', '**ADMIN**', 'admin'],
+      ]],
+      ['server/routes/admin/platform-reset.ts', '16.55', [
+        ['GET', '/api/admin/platform-reset', '**ADMIN**', 'admin'],
+        ['POST', '/api/admin/platform-reset', '**ADMIN**, the holder', 'auth'],
+        ['POST', '/api/admin/platform-reset/lock', '**ADMIN**, the holder', 'auth'],
+      ]],
+    ];
+    for (const [file, n, paths] of groups) {
+      const routes = source(file);
+      const mine = registered(file).filter((r) => file.endsWith('platform-reset.ts') || /purge|ended/.test(r));
+      expect(mine.sort(), file).toEqual(paths.map(([m, p]) => `${m} ${p}`).sort());
+      // The presses draw on the auth budget and need an ADMIN, as the routes declare them.
+      expect(routes, file).toContain("const STEP_UP = { guard: { minRole: 'ADMIN' as const }, rateGroup: 'auth' as const };");
+      const body = section(api, `### ${n}`);
+      for (const [method, path, role, group] of paths) {
+        expect(body, path).toContain(`| ${method} | \`${path}\` | ${role} |`);
+        const indexRole = role === '**ADMIN**, the holder' ? '**ADMIN** (the reset holder)' : role;
+        expect(api, `index ${method} ${path}`).toContain(`| ${method} | \`${path}\` | ${indexRole} | ${method === 'GET' ? '—' : 'yes'} | ${group} | ${n} |`);
+        if (group === 'auth') {
+          expect(section(api, '## 3.'), path).toContain(`\`POST ${path}\``);
+          expect(routes, path).toMatch(new RegExp(`app\\.post\\(\\s*'${path.replace(/[/:]/g, (c) => `\\${c}`)}',\\s*\\{\\s*(config: STEP_UP|\\n\\s*config: STEP_UP)`));
+        }
+      }
+    }
+    // The ended list is an AUDITOR's (the default rule for a GET), the dialogs' previews an ADMIN's.
+    expect(source('server/routes/admin/test-entrants.ts')).toContain("app.get('/api/admin/test-runs/ended', async () =>");
+    expect(source('server/routes/admin/test-entrants.ts')).toContain("app.get('/api/admin/test-runs/:id/purge', { config: ADMIN }");
+    expect(source('server/routes/admin/platform-reset.ts')).toContain("(request.query as Record<string, unknown> | undefined)?.part === 'holder'");
+    expect(reset).toContain('`?part=holder` answers `{ "holder": true \\| false }`');
+    for (const heading of ['### 16.54 TEST PURGE: a test\'s purge and PURGE ALL ENDED TESTS', '### 16.55 PLATFORM RESET and LOCK RESET: the reset holder\'s page', '### 17.14 The admin step-up']) {
+      expect(api, heading).toContain(heading);
+    }
+  });
+
+  it('the phrases, the answers and the resume of a PAUSED purge, as the services take them', () => {
+    expect(purgePhrase('1a2b3c4d-0000-4000-8000-000000000000')).toBe('PURGE TEST 1A2B3C4D');
+    expect(purge).toContain('`{ "phrase": "PURGE TEST 1A2B3C4D", "totp": "123 456" }` → **202** `{ "run": TestRunView }`');
+    expect(PURGE_ALL_PHRASE).toBe('PURGE ALL TESTS');
+    expect(purge).toContain(`"phrase": "${PURGE_ALL_PHRASE}"`);
+    expect(purge).toContain('**202** `{ "runs": [ids], "resumed": [ids], "skipped": [ { "runId", "reason", "message" } ] }`');
+    expect(source('server/services/test-purge.ts')).toContain('return { runs: started, resumed, skipped };');
+    expect(purge).toContain('« Type PURGE TEST 1A2B3C4D to confirm. »');
+    expect(source('server/services/test-purge.ts')).toContain('throw validationError(`Type ${wanted} to confirm.`)');
+    // The resume: the same press on a PAUSED purge, the write-once values untouched.
+    expect(purge).toContain('**The resume of a PAUSED purge.**');
+    expect(purge).toContain('PAUSED → PURGING, its reason cleared, audited `test_run.purge.resume`');
+    expect(source('server/services/test-purge.ts')).toContain("action: 'test_run.purge.resume'");
+    expect(source('server/db/migrations/0066_test_purge.ts')).toContain("'the request and its summary are written once'");
+    // The pauses, in pauseWords' own words.
+    expect(purge).toContain(`*${pauseWords('PURGE_NOT_TEST', new Date('2026-11-03T12:00:00Z'))}*`);
+    expect(pauseWords('SQLSTATE_23503', new Date('2026-11-03T12:00:00Z'))).toBe('Stopped: the database refused a step (foreign_key_violation). Nothing more is deleted until it is asked again.');
+    expect(purge).toContain('*Stopped: the database refused a step (…). Nothing more is deleted until it is asked again.*');
+    // The reset's phrases and answer.
+    expect([RESET_PHRASE, LOCK_PHRASE, RESET_RESTARTS_IN]).toEqual(['RESET PLATFORM', 'LOCK RESET', 'about a minute']);
+    expect(reset).toContain('`{ "phrase": "RESET PLATFORM", "password", "totp", "collectorsSeen": 0–100 000 000, "collectorsSeenUntil": ISO-8601 time \\| null }`');
+    expect(source('server/http/schemas.ts')).toContain("collectorsSeen: z.number().int('A whole number').min(0, 'At least 0').max(100_000_000, 'Too large'),");
+    expect(reset).toContain('**202** `{ "restartsIn": "about a minute" }`');
+    expect(reset).toContain('`{ "phrase": "LOCK RESET", "password", "totp" }` → **200** `{ "launched": { "at", "by" } }`');
+    expect(RESET_STATEMENT_TIMEOUT).toBe('120s');
+    expect(reset).toContain("`SET LOCAL statement_timeout = '120s'`");
+    expect(PREVIEW_SIGN_UPS).toBe(20);
+    expect(reset).toContain('the dates of their 20 newest sign-ups in Paris time (never an email)');
+    // The numbers after a reset, computed for the date by the code's own helper.
+    const n2026 = numbersAfterReset(new Date('2026-11-03T12:00:00Z'), [{ code: 'J', index: 1, name: 'JEWELRY' } as never]);
+    expect(n2026.invoice).toBe('INV-2026-000001');
+    expect(n2026.pieceReferences[0]?.reference).toBe('O26-J-00001');
+    for (const value of [n2026.invoice, n2026.creditNote, n2026.partnerInvoice, n2026.partnerCreditNote, n2026.test, n2026.pieceReferences[0]!.reference]) expect(reset, value).toContain(`"${value}"`);
+    expect(numbersAfterReset(new Date('2027-01-01T00:30:00Z'), []).invoice).toBe('INV-2027-000001');
+    expect(reset).toContain('(a press on 1 January 2027 reads INV-2027-000001)');
+  });
+
+  it('the error codes of lot PURGE in the code’s own words', () => {
+    const words: [string, number, string, string][] = [
+      ['INSUFFICIENT_ROLE', 403, 'server/services/auth.ts', 'Your role does not allow this action.'],
+      ['STEP_UP_TOTP_NOT_ENABLED', 403, 'server/services/auth.ts', 'Turn on two-factor authentication on the Security page first.'],
+      ['STEP_UP_SESSION_WITHOUT_CODE', 403, 'server/services/auth.ts', 'Sign out, then sign in again with your authenticator code.'],
+      ['STEP_UP_PASSWORD_INVALID', 400, 'server/services/auth.ts', 'The password is not correct.'],
+      ['STEP_UP_CODE_INVALID', 400, 'server/services/auth.ts', 'The code is not valid. Check the time on your device and try again.'],
+      ['STEP_UP_CODE_USED', 400, 'server/services/auth.ts', 'This code was just used. Wait for the next code.'],
+      ['STEP_UP_PASSWORD_CHANGED', 400, 'server/services/auth.ts', 'Your password changed. Sign in again.'],
+      ['PURGE_NOT_ENDED', 409, 'server/services/test-purge.ts', 'Only an ended test can be purged: END TEST first.'],
+      ['PURGE_IN_PROGRESS', 409, 'server/services/test-purge.ts', 'This test is being purged.'],
+      ['PURGE_DONE', 409, 'server/services/test-purge.ts', 'This test is already purged.'],
+      ['PURGE_TEST_RUNNING', 409, 'server/services/test-purge.ts', 'A test is running. Purge once it has ended.'],
+      ['PURGE_RELEASE_NOT_OVER', 409, 'server/services/test-purge.ts', 'Purge once the release is over.'],
+      ['PURGE_RUNS_NOT_ENDED', 409, 'server/services/test-purge.ts', 'Another test of this release has not ended. END TEST on it first.'],
+      ['PURGE_NOT_TEST', 409, 'server/services/test-purge.ts', 'This draw was drawn with real collectors’ entries: its public ranked list stays as drawn, so this test cannot be purged.'],
+      ['RELEASE_BEING_PURGED', 409, 'server/services/drops.ts', 'A test of this release is being purged. Try again once it is done.'],
+      ['RESET_NOT_HOLDER', 403, 'server/services/platform-reset.ts', 'Only the reset holder can do this.'],
+      ['RESET_NO_HOLDER', 409, 'server/services/platform-reset.ts', 'There is no reset holder: the reset needs an active ADMIN with two-factor authentication.'],
+      ['RESET_TEST_RUNNING', 409, 'server/services/platform-reset.ts', 'A test is running. Reset once it has ended.'],
+      ['RESET_NOT_AUTHORIZED', 409, 'server/services/platform-reset.ts', 'The confirmation is no longer valid. Confirm again.'],
+    ];
+    for (const [code, status, file, sentence] of words) {
+      expect(api, code).toMatch(new RegExp(`^\\| \`${code}\` \\| ${status} \\|`, 'm'));
+      expect(api, code).toContain(sentence);
+      expect(source(file), code).toContain(sentence);
+      expect(source(file), code).toMatch(new RegExp(`\\b${code}\\b`));
+    }
+    // The words with a Paris time, from the code's own helpers.
+    expect(parisWhen(new Date('2026-10-29T13:05:00Z'))).toBe('29 October at 14:05 Paris');
+    expect(api).toMatch(/^\| `STEP_UP_LOCKED` \| 429 \|.*\*Too many wrong codes today\. Try again after 29 October at 14:05 Paris\.\*/m);
+    expect(source('server/services/auth.ts')).toContain('`Too many wrong codes today. Try again after ${parisWhen(');
+    expect(api).toMatch(/^\| `STEP_UP_TOO_SOON` \| 403 \|.*\*Two-factor authentication or the role of this account changed less than 24 hours ago\. Try again after 29 October at 14:05 Paris\.\*/m);
+    expect(source('server/services/auth.ts')).toContain('`Two-factor authentication or the role of this account changed less than 24 hours ago. Try again after ${parisWhen(');
+    expect(parisWhen(new Date('2026-12-01T09:00:00Z'))).toBe('1 December at 10:00 Paris');
+    expect(api).toMatch(/^\| `RESET_LOCKED` \| 409 \|.*\*LOCK RESET was pressed on 1 December at 10:00 Paris: the reset is refused for good\.\*/m);
+    expect(source('server/services/platform-reset.ts')).toContain('`LOCK RESET was pressed on ${parisWhen(g.launched_at)}: the reset is refused for good.`');
+    expect(parisWhen(new Date('2026-10-29T20:00:00Z'))).toBe('29 October at 21:00 Paris');
+    expect(api).toMatch(/^\| `LIVE_OPEN` \| 409 \|.*\*A LIVE room is open until 29 October at 21:00 Paris\.\*/m);
+    expect(source('server/services/platform-reset.ts')).toContain('`A LIVE room is open until ${parisWhen(until)}.`');
+    expect(source('server/services/platform-reset.ts')).toContain("conflict('LIVE_OPEN',");
+    expect(api).toMatch(/^\| `RESET_COLLECTORS_CHANGED` \| 409 \|.*\*2 accounts signed up since you opened this page\. Reload it and check them\.\*/m);
+    expect(reset).toContain('*1 account signed up since you opened this page. Reload it and check them.*');
+    expect(source('server/services/platform-reset.ts')).toContain("`${plural(n, 'account', 'accounts')} signed up since you opened this page. Reload it and check them.`");
+    // The windows, as windowWords says them for the date: winter night, a backup, a backup's margin, summer night.
+    const winterNight = windowWords(new Date('2026-11-03T03:30:00Z'), MAINTENANCE_MARGIN_MS.purgeBatch)!;
+    expect(winterNight).toBe("The platform's night maintenance runs from 04:00 to 06:30 Paris (03:00–05:30 UTC). Try again at 06:30.");
+    const backup = windowWords(new Date('2026-11-03T02:05:00Z'), MAINTENANCE_MARGIN_MS.purgeBatch)!;
+    const margin = windowWords(new Date('2026-11-03T01:59:30Z'), MAINTENANCE_MARGIN_MS.purgeBatch)!;
+    for (const words of [winterNight, backup, margin]) expect(api, words).toMatch(new RegExp(`^\\| \`PURGE_WINDOW\` \\| 409 \\|.*\\*${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*`, 'm'));
+    expect(windowWords(new Date('2027-06-02T03:30:00Z'))).toContain('from 04:00 to 07:30 Paris (02:00–05:30 UTC)');
+    expect(api).toContain('in summer the night reads *from 04:00 to 07:30 Paris (02:00–05:30 UTC)*');
+    expect(MAINTENANCE_MARGIN_MS).toEqual({ reset: 5 * 60_000, purgeBatch: 60_000 });
+    expect(api).toMatch(/^\| `RESET_WINDOW` \| 409 \|.*within the reset's 5 minutes/m);
+    // RESET_OTHER_CONNECTIONS: the database's reason, never an HTTP answer, shown in the page's words.
+    expect(api).toMatch(/^\| `RESET_OTHER_CONNECTIONS` \| — \|/m);
+    expect(source('server/db/migrations/0067_platform_reset.ts')).toContain("'RESET_OTHER_CONNECTIONS'");
+    expect(failureWords('RESET_OTHER_CONNECTIONS')).toBe('another connection to the database was open');
+    expect(api).toContain('*The reset of … was refused: another connection to the database was open. Nothing changed.*');
+    expect(source('server/services/platform-reset.ts')).toContain('`The reset of ${parisWhen(row.occurred_at)} was refused: ${failureWords(reason)}. Nothing changed.`');
+    // Each code of this lot in its section's list of errors.
+    for (const code of ['PURGE_IN_PROGRESS', 'PURGE_NOT_TEST', 'PURGE_WINDOW']) expect(purge, code).toContain(`\`409 ${code}\``);
+    expect(purge).toContain('`409 RELEASE_BEING_PURGED`');
+    for (const code of ['RESET_NOT_HOLDER', 'RESET_COLLECTORS_CHANGED', 'LIVE_OPEN', 'RESET_NOT_AUTHORIZED']) expect(reset, code).toMatch(new RegExp(`\`40[39] ${code}\``));
+    expect(reset).toContain('`RESET_OTHER_CONNECTIONS`');
+  });
+
+  it('§17.14: the step-up’s refusals in the code’s order, its daily limit and its purposes; §17.6’s purged', () => {
+    const auth = source('server/services/auth.ts');
+    const verify = auth.slice(auth.indexOf('\n  async verifyAdminStepUp('), auth.indexOf('\n  async consumeAdminStepUp('));
+    const order = ['STEP_UP_TOTP_NOT_ENABLED', 'STEP_UP_SESSION_WITHOUT_CODE', 'STEP_UP_LOCKED', 'STEP_UP_TOO_SOON', 'STEP_UP_PASSWORD_INVALID'];
+    const at = (text: string) => order.map((code) => text.indexOf(code));
+    for (const [name, text] of [['auth.ts', verify], ['API §17.14', stepUp]] as const) {
+      const positions = at(text);
+      expect(positions.every((p) => p >= 0), name).toBe(true);
+      expect([...positions].sort((a, b) => a - b), name).toEqual(positions);
+    }
+    expect(stepUp.indexOf('`429 ACCOUNT_LOCKED`')).toBeLessThan(stepUp.indexOf('`429 STEP_UP_LOCKED`'));
+    expect(STEP_UP_DAILY_FAILURES).toBe(10);
+    expect(STEP_UP_RECENT_MS).toBe(24 * 3_600_000);
+    expect(stepUp).toContain('**the step-up\'s daily limit**: 10 wrong step-up codes or passwords of this admin within 24 hours, counted from the audit log (`admin.login_failed` with `via: "step_up"`), so an unlock from the Team page (§17.11) does not clear it');
+    expect(auth).toContain("via: 'step_up'");
+    expect(stepUp).toContain('**whatever `ADMIN_REQUIRE_MFA` says**');
+    expect(stepUp).toContain('`recent24h` of the `platform.reset` entry at id 1');
+    for (const purpose of ['test_run.purge:<run id>', 'test_run.purge_all', 'platform.reset', 'platform.reset.lock']) expect(stepUp, purpose).toContain(`\`${purpose}\``);
+    expect(auth).toContain('const STEP_UP_PURPOSE_RE = /^(?:test_run\\.purge:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|test_run\\.purge_all|platform\\.reset|platform\\.reset\\.lock)$/;');
+    expect(stepUp).toContain('**Never a `401`** for a wrong secret');
+    // §17.6: the merged walk and its additive count.
+    const verifyDoc = section(api, '### 17.6');
+    expect(verifyDoc).toContain('the answer gains **`purged`**, their count');
+    expect(verifyDoc).toContain('a chain without tombstones answers exactly as before');
+    expect(source('server/services/audit.ts')).toContain('purged?: number;');
+    expect(source('server/services/audit.ts')).toContain('...(purged > 0 ? { purged } : {}),');
+  });
+});
+
+describe('the DATABASE of lot PURGE', () => {
+  const db = readDoc('docs/DATABASE.md');
+  const m66 = source('server/db/migrations/0066_test_purge.ts');
+  const m67 = source('server/db/migrations/0067_platform_reset.ts');
+
+  it('0066 and 0067 among the code’s migrations, their four tables and the test runs’ purge columns within the code’s bounds', () => {
+    expect(db).toMatch(/The application now runs on `0001` to `00(6[7-9]|[7-9]\d)`/);
+    expect(db).toContain('`0066_test_purge` (lot PURGE, the owner\'s answers of 27 October 2026, answer 4:');
+    expect(db).toContain('`0067_platform_reset` (lot PURGE, answers 1 to 3:');
+    expect(db).toContain('and of lot PURGE of 2026-10-27 (0066 and 0067, its own deployment, after M4;');
+    const tables: [string, string, string][] = [
+      ['5.159', 'audit_purge_gaps', m66], ['5.160', 'platform_reset_gate', m67], ['5.161', 'platform_reset_plan', m67], ['5.162', 'purge_delete_tables', m66],
+    ];
+    for (const [n, table, migration] of tables) {
+      expect(db, table).toContain(`### ${n} \`${table}\``);
+      expect(migration, table).toContain(`CREATE TABLE ${table} (`);
+    }
+    // The tombstones' one rule, as the chain check walks it.
+    expect(section(db, '### 5.159')).toContain('a tombstone\'s `prev_hash` must equal the running hash and its `hash` becomes the running hash');
+    expect(source('server/services/audit.ts')).toContain("plain export is therefore `audit_logs` plus `audit_purge_gaps` (id, prev_hash,");
+    expect(m66).toContain("orbes_require_superuser('audit_purge_gaps is written by the purge only')");
+    expect(section(db, '### 5.159')).toContain('"audit_purge_gaps is written by the purge only"');
+    // The test runs' nine purge columns, each named and added by 0066.
+    const testRuns = section(db, '### 5.74');
+    for (const column of ['purge_state', 'purge_requested_at', 'purge_requested_by', 'purged_at', 'purge_summary', 'purge_step_up_id', 'purge_windows', 'purge_reason', 'purge_result']) {
+      expect(testRuns, column).toContain(`\`${column}\``);
+      expect(m66, column).toContain(`ALTER TABLE test_runs ADD COLUMN ${column} `);
+    }
+    expect([...TEST_RUN_PURGE_STATES]).toEqual(['PURGING', 'PAUSED', 'DONE']);
+    expect(testRuns).toContain('`purge_state` (`PURGING`, `PAUSED` or `DONE`, `test_runs_purge_state_check`, `TEST_RUN_PURGE_STATES`)');
+    for (const reason of ['PURGE_NOT_AUTHORIZED', 'PURGE_STATE_ONE_WAY', 'PURGE_WRITE_ONCE', 'PURGE_STEP_UP_LOCKED', 'PURGE_WINDOWS_LOCKED', 'PURGE_RUN_LOCKED']) {
+      expect(testRuns, reason).toContain(`\`${reason}\``);
+      expect(m66, reason).toContain(`'${reason}'`);
+    }
+    expect(m66).toContain("CONSTRAINT test_runs_purge_reason_check CHECK (purge_reason ~ '^[A-Z0-9_]{1,64}$')");
+    expect(testRuns).toContain('`purge_reason` (`^[A-Z0-9_]{1,64}$`');
+    // The accounts step's list, in its order, and the guarded tables.
+    expect(section(db, '### 5.162')).toContain(PURGE_DELETE_TABLES.map((t) => `\`${t.table}\``).join(', '));
+    expect(db).toContain(`(${PURGE_GUARDED_TABLES.map((t) => `\`${t}\``).join(', ')})`);
+  });
+
+  it('the reset’s plan by its counts and rules, the gate’s rules, the authorization’s 5 minutes', () => {
+    const counts = { KEEP: 0, PARTLY: 0, WIPE: 0 };
+    for (const kind of Object.values(RESET_PLAN)) counts[kind]++;
+    expect(counts).toEqual({ KEEP: 40, PARTLY: 8, WIPE: 116 });
+    const plan = section(db, '### 5.161');
+    expect(plan).toContain(`**KEEP ${counts.KEEP}**`);
+    expect(plan).toContain(`**PARTLY ${counts.PARTLY}**`);
+    expect(plan).toContain(`**WIPE ${counts.WIPE}**`);
+    expect(plan).toContain(`${counts.KEEP + counts.PARTLY + counts.WIPE} tables`);
+    for (const table of Object.keys(RESET_PARTLY_RULES)) expect(plan, table).toContain(`\`${table}\``);
+    expect(m67).toContain("orbes_require_superuser('the reset''s plan is written by the migrations only')");
+    const gate = section(db, '### 5.160');
+    for (const words of ['written by the reset functions only', 'the gate is one row, kept for good', 'LOCK RESET is one way: the lock and the holder never change once it is pressed']) {
+      expect(gate, words).toContain(`"${words}"`);
+      expect(m67, words).toContain(words);
+    }
+    expect(RESET_AUTHORIZATION_MS).toBe(5 * 60_000);
+    expect(gate).toContain('within 5 minutes and newer than the last reset (`RESET_AUTHORIZATION_MS`)');
+    expect(m67).toContain("ORDER BY a.created_at, a.id LIMIT 1");
+    expect(gate).toContain('the oldest active ADMIN with two-factor authentication when the migration ran at the deployment');
+    // The SQLSTATEs and the trigger functions.
+    for (const [code, key] of [['OR010', 'PURGE_REFUSED'], ['OR011', 'RESET_REFUSED'], ['OR020', 'RESET_PROOF_FAILED']] as const) {
+      expect(PG_ERROR[key]).toBe(code);
+      expect(section(db, '### 2.4'), code).toContain(`| **\`${code}\`** |`);
+    }
+    for (const [fn, migration] of [['orbes_require_superuser', m66], ['orbes_test_runs_purge_guard', m66], ['orbes_platform_reset_gate_guard', m67]] as const) {
+      expect(section(db, '### 3.1'), fn).toContain(`| \`${fn}(`);
+      expect(migration, fn).toContain(`CREATE FUNCTION ${fn}()`);
+    }
+  });
+
+  it('the locks, the down steps in the migrations’ own words, the auditor’s export and entry 1’s old head', () => {
+    // 2 one-key locks, the invoices' and the partners' kinds and the 32 serial categories, for two years: the function's own list.
+    expect(2 + (INVOICE_KINDS.length + PARTNER_INVOICE_KINDS.length) * 2 + 32 * 2).toBe(74);
+    expect(m67).toContain('CREATE FUNCTION orbes_platform_reset_numbering_locks(p_year int)');
+    expect(m67).toContain('pg_try_advisory_xact_lock(${LOCK.LIVE_ENGINE}::bigint)');
+    expect(section(db, '### 8.3')).toContain('(`orbes_platform_reset_numbering_locks`): 74 locks, 75 with the engine\'s');
+    const rows = section(db, '### 8.2');
+    expect(rows).toContain('| `test_runs … FOR UPDATE`, then `drops … FOR UPDATE` (the release and its after-room) |');
+    expect(rows).toContain('| `test_entrants … FOR UPDATE` (the purge\'s accounts) |');
+    expect(rows).toContain('`IN SHARE ROW EXCLUSIVE MODE` and every WIPE table `IN ACCESS EXCLUSIVE MODE`');
+    expect(m67).toContain("EXECUTE format('LOCK TABLE public.%I IN %s MODE', r.tbl, CASE WHEN r.kind = 'WIPE' THEN 'ACCESS EXCLUSIVE' ELSE 'SHARE ROW EXCLUSIVE' END);");
+    // The down steps.
+    expect(m66).toContain("RAISE EXCEPTION 'migration 0066_test_purge cannot be rolled back: % audit tombstones and % test purges exist'");
+    expect(db).toContain('("cannot be rolled back: % audit tombstones and % test purges exist"');
+    expect(m67).toContain("RAISE EXCEPTION 'migration 0067_platform_reset cannot be rolled back: % platform resets done and LOCK RESET %'");
+    expect(db).toContain('("cannot be rolled back: % platform resets done and LOCK RESET %")');
+    // The auditor's export with the tombstones, and the link through entry 1's old head.
+    const backup = section(db, '## 11.');
+    expect(backup).toContain('**The auditor\'s export since lot PURGE.**');
+    expect(backup).toContain('  FROM audit_purge_gaps\n ORDER BY id;');
+    expect(backup).toContain('**Across a platform reset: linking the old log to the new one through entry 1\'s old head.**');
+    expect(backup).toContain('entry 1\'s own hash covers its `details.oldHead` `{ id, hash }`');
+    expect(backup).toContain('`stepUpId` and `requestId`');
+    const reset = source('server/services/platform-reset.ts');
+    for (const field of ['oldHead: result.oldHead,', 'requestId: result.requestId,', 'stepUpId: result.stepUpId,', 'recent24h: result.recent24h,']) expect(reset, field).toContain(field);
+    expect(reset).toContain("action: 'platform.reset',");
+    expect(reset).toContain("if (entry.id !== 1 || entry.prevHash !== toHex(AUDIT_GENESIS_HASH)) throw new ResetEntryError('RESET_ENTRY_NOT_FIRST');");
+    expect(backup).toContain('`SELECT launched_at FROM platform_reset_gate`');
+  });
+});
+
+describe('SECURITY-MODEL §3.7 and THREAT-MODEL rows AS and AT (D3, M8, G11)', () => {
+  const suite = 'test/db/postgres-purge-reset.test.ts';
+
+  it('SECURITY-MODEL: the step-up and its daily limit, the way through, the gate, the authorization, the console-only residual risk accepted', () => {
+    const security = section(readDoc('docs/SECURITY-MODEL.md'), '### 3.7');
+    expect(security).toContain('**Lot PURGE: the step-up, the guards\' way through, the reset\'s gate and its single-use authorization**');
+    for (const words of ['**The admin step-up.**', '**the step-up\'s daily limit**', '`STEP_UP_LOCKED`', '**The guards\' way through is the database owner\'s alone.**', '**The purge\'s scope is the database\'s.**', '**The reset\'s gate.**', '**The single-use authorization.**', '**under 5 minutes old, newer than the last reset, used once**']) {
+      expect(security, words).toContain(words);
+    }
+    expect(security).toContain('**The residual risk of the console only, accepted by the owner (27 October 2026, answer 1');
+    expect(security).toContain('**code running as `orbes_app`** (a compromised app, a leaked `DATABASE_URL`, an SQL injection that runs several statements) **can call `orbes_platform_reset` with the holder\'s id, which it can read from the gate, after forging the in-transaction rows**');
+    expect(security).toContain('**LOCK RESET as soon as the platform launches closes it**');
+    expect(security).toContain(`\`${suite}\` proves it as a fact on PostgreSQL in CI`);
+    expect(existsSync(join(REPO, 'genome', suite))).toBe(true);
+    expect(readDoc(join('genome', suite))).toContain('TEST PURGE and PLATFORM RESET through the app\\\'s role, two real connections (PostgreSQL)');
+  });
+
+  it('THREAT-MODEL: AT names the residual risk plainly, accepted by the owner, 27 Oct, console only; AS states the purge’s bounded residual, not covered', () => {
+    const threat = readDoc('docs/THREAT-MODEL.md');
+    const row = (letter: string) => threat.split('\n').find((l) => l.startsWith(`| **${letter}. `)) ?? '';
+    const as = row('AS');
+    const at = row('AT');
+    expect(as).toContain('| **AS. TEST PURGE turned against real data or the audit log**');
+    expect(at).toContain('| **AT. PLATFORM RESET pressed by someone else, at the wrong moment, or by code running as the app**');
+    expect(at).toContain('**The residual risk of the console only, accepted by the owner, 27 Oct, console only: code running as `orbes_app` can call `orbes_platform_reset` with the holder\'s id and forge the in-transaction rows the authorization looks for**');
+    for (const [name, r] of [['AS', as], ['AT', at]] as const) {
+      expect(r, name).toContain('`STEP_UP_LOCKED`');
+      expect(r, name).toMatch(/daily limit|10 wrong (codes|tries)/);
+    }
+    expect(as).toContain('**and can then erase only audit entries written after the start of a test run it forged or reused, for accounts with no `account.register` entry**');
+    expect(as).toContain('**This is not covered by the owner\'s acceptance of 27 October, which concerns the reset** (row AT)');
+    expect(threat).toContain('| The platform\'s data before the launch, and the audit log\'s completeness (lot PURGE) |');
+  });
+});
+
+describe('DEPLOYMENT and COMPLIANCE of lot PURGE', () => {
+  it('DEPLOYMENT: the auditor’s export with the tombstones, and the gate read before a restored app starts', () => {
+    const deployment = readDoc('docs/DEPLOYMENT.md');
+    const s10 = section(deployment, '## 10.');
+    expect(s10).toContain('an auditor\'s plain export takes `audit_logs` **and** `audit_purge_gaps`');
+    const check = `-Atc "select launched_at from platform_reset_gate"'`;
+    // §10's shell block holds `# …` comment lines, which section() reads as headings: the whole document here.
+    const restore = deployment.slice(deployment.indexOf('## 10. Backups and point-in-time recovery'), deployment.indexOf('## 11. Scaling'));
+    expect(restore).toContain(`docker compose exec -T db sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" ${check}\ndocker compose up -d app`);
+    expect(restore).toContain('**The reset\'s gate before the app starts**');
+    const s159 = section(deployment, '### 15.9');
+    expect(s159).toContain(`docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" ${check}`);
+    expect(s159).toContain('An empty line means PLATFORM RESET is open again');
+    // The stack's own scripts are untouched by the lot (D18): the check is the operator's, read only.
+    expect(readDoc('deploy/vps/scripts/restore.sh')).not.toContain('platform_reset_gate');
+  });
+
+  it('COMPLIANCE §13: the PURGE deployment, its two migrations, no legal page changed, the accepted residual risk', () => {
+    const compliance = section(readDoc('docs/COMPLIANCE.md'), '## 13.');
+    expect(compliance).toContain('**Le déploiement PURGE**');
+    expect(compliance).toContain('`0066_test_purge` et `0067_platform_reset`');
+    expect(compliance).toContain('**Aucune page légale ne change**');
+    expect(compliance).toContain('`git diff --stat` vide sur `genome/src/web/legal` et `docs/legal`');
+    expect(compliance).toContain('**Le risque résiduel de la console seule, accepté par le propriétaire le 27 octobre**');
+    expect(compliance).toContain('**LOCK RESET dès le lancement le ferme**');
+    expect(compliance).toContain('`deploy/vps` est inchangé et aucune ligne n\'est ajoutée au `.env`');
+  });
+});
+
+describe('no file of docs/ or genome/ holds the owner’s email domain (R10, D12)', () => {
+  // Built from parts, so this file does not hold it either.
+  const domain = ['@', 'es', 'sec'].join('');
+  /** What git never holds under genome/ (genome/.gitignore): dependencies, build outputs, local state. */
+  const SKIP = new Set(['node_modules', 'dist', 'out', 'coverage', 'test-results', 'playwright-report', '.vitest', '.data', '.secrets', 'keys', '.keys', '.git']);
+  const walk = (dir: string, out: string[]): string[] => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP.has(entry.name)) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path, out);
+      else if (entry.isFile()) out.push(path);
+    }
+    return out;
+  };
+
+  it('finds it in no file, the binary ones included', () => {
+    const files = [...walk(join(REPO, 'docs'), []), ...walk(join(REPO, 'genome'), [])];
+    expect(files.length).toBeGreaterThan(500);
+    expect(files.some((f) => f.endsWith(join('test', 'docs', 'architecture.test.ts')))).toBe(true);
+    const holding = files.filter((f) => readFileSync(f).toString('latin1').toLowerCase().includes(domain)).map((f) => f.slice(REPO.length + 1));
+    expect(holding).toEqual([]);
   });
 });

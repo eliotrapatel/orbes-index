@@ -11,11 +11,17 @@
  *    TEST (a phrase, danger) until it has ended.
  *  - PAST TESTS: when, by whom, how many, the checks of its report passed; the report itself (its checks, each passed or
  *    failed in one line, and its peaks); END TEST for an earlier test not ended (a newer one sent since).
+ *  - TEST PURGE (lot PURGE, plan §A.6; model/test-purge.ts): an ended test's status follows its purge (PURGING, PAUSED
+ *    with its reason in Paris words, PURGED with when and by whom), read again every 2 s while one is under way; PURGE
+ *    (ADMIN; RESUME PURGE on a paused one) reads what the purge plans, then a danger dialog with the phrase PURGE TEST
+ *    <8> and a fresh authenticator code, a refusal said inside it; an ended test that cannot be purged says why in a
+ *    muted line. The Ended tests page (views/ended-tests.ts) uses the same dialog.
  * An AUDITOR and an OPERATOR read everything, without a button.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import { tierName } from '../model/club.js';
+import { parisDateTime } from '../model/links.js';
 import { can } from '../model/permissions.js';
 import {
   arrivalOptions,
@@ -44,9 +50,10 @@ import {
   type TestStart,
 } from '../model/test-entrants.js';
 import { STATUS_REFRESH_MS } from '../model/system-status.js';
+import { codeProblem, purgeAction, purgeCodeField, purgeDialogText, purgeStatus, purgeUnderWay, typedCode } from '../model/test-purge.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import type { TestReport, TestRunMode, TestRunSelected, TestRunSettings, TestRunSummary, TestRunView } from '../types.js';
+import type { AdminRole, TestPurgePreview, TestReport, TestRunMode, TestRunSelected, TestRunSettings, TestRunSummary, TestRunView } from '../types.js';
 import { button, defList, kpi, section, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { startRefresh } from '../ui/refresh.js';
@@ -172,6 +179,65 @@ export function reportBody(report: TestReport | null, peaks: Record<string, unkn
   ].flat();
 }
 
+/**
+ * A test's status cell under PAST TESTS and on the Ended tests page: its mark, then the purge's line (who asked and how
+ * far, the pause's reason, when it was purged and by whom) or, for someone who may purge, why it cannot be (muted).
+ */
+export function testRunStatusCell(x: Pick<TestRunSummary, 'status' | 'purge' | 'purgeable'>, role: AdminRole | null | undefined): HTMLElement {
+  const st = purgeStatus(x, role);
+  return h(
+    'span',
+    { class: 'tests__status' },
+    h('span', { data: { testid: 'test-past-status' } }, statusMark(st.label, toneOf('testRun', st.tone))),
+    st.line ? h('span', { class: ['cell-details', 'tests__purge-line'], data: { testid: st.muted ? 'test-purge-reason' : 'test-purge-line' } }, st.line) : null,
+  );
+}
+
+/**
+ * PURGE an ended test, or RESUME PURGE on a paused one (ADMIN): what the purge plans is read first (a drawn draw, the
+ * orders kept, a window or a running test now), then the danger dialog, the phrase PURGE TEST <8> and a fresh code; a
+ * refusal (a wrong code, a window, the test's state) is said inside it, which stays open. True once asked.
+ */
+export async function purgeTest(ctx: ViewContext, x: Pick<TestRunSummary, 'id' | 'purge'>, eyebrow: string, btn?: HTMLButtonElement): Promise<boolean> {
+  if (btn) btn.disabled = true;
+  let preview: TestPurgePreview;
+  try {
+    preview = (await ctx.api.testRunPurgePreview(x.id)).preview;
+  } catch (e) {
+    notifyError(e);
+    return false;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+  // The test changed since the list was read: why it cannot be purged now (the list is read again by the caller).
+  if (preview.purgeable !== true) {
+    notify(preview.purgeable.message, 'error');
+    return false;
+  }
+  const phrase = preview.phrase;
+  const text = purgeDialogText(preview, x.purge?.state === 'PAUSED' ? x.purge : null);
+  const asked = await openDialog({
+    title: text.title,
+    eyebrow,
+    danger: true,
+    body: [
+      ...text.lines.map((line) => h('p', { class: ['dialog__text', 'tests__purge-text'], data: { testid: 'purge-line' } }, line)),
+      text.hold ? h('p', { class: ['dialog__text', 'tests__purge-text', 'critical-text'], data: { testid: 'purge-hold' } }, text.hold) : null,
+    ],
+    fields: [purgeCodeField()],
+    validate: codeProblem,
+    phrase,
+    confirmLabel: text.confirm,
+    working: 'Purging…',
+    submit: async (v) => {
+      await ctx.api.purgeTestRun(x.id, phrase, typedCode(v));
+    },
+  });
+  if (!asked) return false;
+  notify(x.purge?.state === 'PAUSED' ? 'Purge resumed: it goes on where it stopped.' : 'Purge under way: the test’s rows are deleted in small steps.');
+  return true;
+}
+
 /** The section; `reads`: what the page read with its own. */
 export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: TestReads): HTMLElement {
   const role = ctx.session.admin.role;
@@ -188,10 +254,31 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
   // Not read yet: the page's read failed (the section says so until a read answers).
   let unread = reads.current === null;
 
+  // A purge under way (lot PURGE): the release's tests read again every 2 s until none is.
+  let purgeWatch: ReturnType<typeof startRefresh> | null = null;
+  const watchPurges = () => {
+    if (!purgeUnderWay(runs)) {
+      purgeWatch?.stop();
+      purgeWatch = null;
+      return;
+    }
+    purgeWatch ??= startRefresh({
+      load: () => ctx.api.testRuns(t.dropId, { background: true }),
+      apply: (x) => {
+        runs = x.runs;
+        drawPast();
+        watchPurges();
+      },
+      everyMs: STATUS_REFRESH_MS,
+      immediate: false,
+      owner: root,
+    });
+  };
   const refreshPast = async () => {
     try {
       runs = (await ctx.api.testRuns(t.dropId, { background: true })).runs;
       drawPast();
+      watchPurges();
     } catch {
       // The next change of the test reads them again.
     }
@@ -419,6 +506,16 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
   };
 
   // ── PAST TESTS ───────────────────────────────────────────────────────────
+  // PURGE (lot PURGE): when the server says it can be pressed; RESUME PURGE on a paused one.
+  const purgeButton = (x: TestRunSummary) => {
+    const action = purgeAction(x, role);
+    if (!action) return null;
+    const b = button(action === 'resume' ? 'Resume purge' : 'Purge', { kind: 'danger', testId: 'test-purge' });
+    b.addEventListener('click', () => {
+      void purgeTest(ctx, x, `${t.eyebrow} · ${parisDateTime(x.createdAt)}`, b).then(() => refreshPast());
+    });
+    return b;
+  };
   const drawPast = () => {
     const past = runs.filter((x) => x.id !== run?.id);
     const k = JSON.stringify(past);
@@ -432,7 +529,7 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
           { label: 'Date', cell: (x: TestRunSummary) => formatDateTime(x.createdAt), kind: ['nowrap'] },
           { label: 'By', cell: (x: TestRunSummary) => x.createdBy, kind: ['wide'] },
           { label: 'Entrants', cell: (x: TestRunSummary) => formatCount(x.entrants), kind: ['num'] },
-          { label: 'Status', cell: (x: TestRunSummary) => statusMark(humanize(x.status), toneOf('testRun', x.status)), kind: ['nowrap'] },
+          { label: 'Status', cell: (x: TestRunSummary) => testRunStatusCell(x, role), kind: ['nowrap'] },
           {
             label: 'Checks',
             cell: (x: TestRunSummary) => {
@@ -451,8 +548,10 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
                 { class: 'row-actions' },
                 x.report ? button('Report', { kind: 'ghost', testId: 'test-report', onClick: () => showReport(x) }) : null,
                 x.status !== 'ENDED' && can(role, 'runTestEntrants') ? button('End test', { kind: 'danger', testId: 'test-past-end', onClick: () => end(x) }) : null,
+                purgeButton(x),
               ),
-            kind: ['actions'],
+            // Lot PURGE: a third button (PURGE, RESUME PURGE) goes to a second line rather than past the table's width.
+            kind: ['actions', 'wrap'],
           },
         ],
         past,
@@ -475,6 +574,7 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
   runKey = JSON.stringify(run);
   drawRun();
   drawPast();
+  watchPurges();
   const current = startRefresh({
     load: () => ctx.api.currentTestRun(t.dropId, { background: true }),
     apply: (x) => apply(x.run),

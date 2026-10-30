@@ -11,6 +11,13 @@
  *      memory, close the database, exit.
  *      An unhandled error triggers the same shutdown with exit code 1 so the
  *      orchestrator restarts a clean process.
+ *   5. PLATFORM RESET (lot PURGE, plan §B.4): its own shutdown path
+ *      (platform-reset-shutdown.ts), installed as `ctx.lifecycle` once the
+ *      server listens, and scheduled by the reset's route after its 202: the
+ *      app closed (503), every engine and sender stopped, the views written,
+ *      the main pool closed, the reset run on one dedicated connection, exit 0
+ *      or 1; Docker restarts the app. Not installed in the demo, nor on a
+ *      database in memory (a new connection to it would be another, empty one).
  *
  * Migrations run automatically outside production. In production they run
  * only with `--migrate` or MIGRATE_ON_START=true (otherwise the server
@@ -29,7 +36,10 @@ import { ConfigError, configWarnings, loadConfig, redactConfig, type AppConfig }
 import { createContext, startHousekeeping, startLiveEngine, type AppContext, type Housekeeping } from './context.js';
 import type { LiveEngine } from './services/live-engine.js';
 import { demoBanner, demoRefusal, startDemo, type DemoStart } from './demo.js';
+import { closeDb, createDb } from './db/connection.js';
+import { parseDatabaseUrl } from './db/url.js';
 import { createForwardingLogger, loggerOptions } from './http/logging.js';
+import { platformResetLifecycle } from './platform-reset-shutdown.js';
 import { APP_VERSION } from './routes/public.js';
 
 const SHUTDOWN_GRACE_MS = 25_000;
@@ -109,6 +119,26 @@ async function main(): Promise<void> {
     housekeeping = startHousekeeping(ctx);
     liveEngine = startLiveEngine(ctx);
     await app.listen({ host: config.host, port: config.port });
+    const target = parseDatabaseUrl(config.databaseUrl);
+    if (!demoMode && !(target.kind === 'pglite' && target.dataDir === null)) {
+      const running = ctx;
+      running.lifecycle = platformResetLifecycle({
+        app: () => app,
+        ctx: running,
+        liveEngine: () => liveEngine,
+        housekeeping: () => housekeeping,
+        log,
+        claim: () => {
+          if (shuttingDown) return false;
+          shuttingDown = true;
+          return true;
+        },
+        closeMainPool: () => closeDb(running.db),
+        openConnection: () => createDb(config.databaseUrl, { log, poolMax: 1 }),
+        closeConnection: (conn) => closeDb(conn),
+        exit: (code) => process.exit(code),
+      });
+    }
     log.info({ version: APP_VERSION, demo: demoMode, config: redactConfig(config) }, 'ORBES GENOME server started');
     if (demo) process.stdout.write(demoBanner(demo, config.publicOrigin));
   } catch (e) {

@@ -11,14 +11,29 @@
  *   GET  /api/admin/drops/:id/test-runs/current                  AUDITOR  the release's newest test not ended, or null
  *   GET  /api/admin/drops/:id/test-runs                          AUDITOR  the release's tests, newest first
  *   GET  /api/admin/test-runs/active                             AUDITOR  the RUNNING test anywhere, or null
+ *   POST /api/admin/test-runs/:id/purge                          ADMIN    PURGE (phrase PURGE TEST <8> + code): 202
+ *   POST /api/admin/test-runs/purge-all                          ADMIN    PURGE ALL ENDED TESTS (PURGE ALL TESTS + code): 202
+ *   GET  /api/admin/test-runs/ended                              AUDITOR  every ended test of every release, newest first
+ *   GET  /api/admin/test-runs/:id/purge                          ADMIN    what the PURGE dialog says first (read only)
+ *   GET  /api/admin/test-runs/purge-all                          ADMIN    what the PURGE ALL dialog says first (read only)
  *
  * Each change answers `{ run }`, the test as the current one reads it. An AUDITOR reads the test entrants' emails
  * masked, as every customer's (serialize.ts `clientEmail`). The service validates, locks and audits.
+ *
+ * TEST PURGE (lot PURGE, services/test-purge.ts; the owner's answers of 27 Oct 2026): the two purge routes draw on the
+ * `auth` budget, as sign-in does (a code is guessed there), and carry the typed phrase and a fresh code of the
+ * admin's authenticator app; no step-up token exists. TestPurgeService checks the phrase on the server, verifies the
+ * step-up BEFORE its transaction (a wrong code is counted in its own commit) and consumes it INSIDE it, so a code is
+ * used only by a request that commits. A PURGE on a PAUSED test resumes it; on one being purged it answers 409
+ * PURGE_IN_PROGRESS. The answers are 202 (the purge goes on in the background, in bounded batches), or 400, 403, 404,
+ * 409 and 429 with the console's words, Paris time first; never 401 for a wrong code (the console signs out on a
+ * 401): only a session that ended answers 401.
  */
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
-import { dropParams, emptyBody, parse, testRunBody, testRunEndBody, testRunEntrantParams, testRunParams } from '../../http/schemas.js';
-import { adminActor } from '../../http/sessions.js';
+import { userAgentOf } from '../../http/client.js';
+import { dropParams, emptyBody, parse, testRunBody, testRunEndBody, testRunEntrantParams, testRunParams, testRunPurgeAllBody, testRunPurgeBody } from '../../http/schemas.js';
+import { adminActor, requireAdmin } from '../../http/sessions.js';
 import type { TestEntrantService, TestRunSettingsInput, TestRunView } from '../../services/test-entrants.js';
 import type { AdminRouteDeps } from './index.js';
 import { clientEmail, readsClientEmails } from './serialize.js';
@@ -46,9 +61,15 @@ function pressOf(b: z.infer<typeof testRunBody>): TestRunSettingsInput & { phras
   };
 }
 
-export const adminTestEntrantRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app) => {
+export const adminTestEntrantRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const ADMIN = { guard: { minRole: 'ADMIN' as const } };
+  const STEP_UP = { guard: { minRole: 'ADMIN' as const }, rateGroup: 'auth' as const };
   const tests = () => app.testEntrants;
+  /** Who asks a purge: the ADMIN and the session the step-up checks; the hashed address for its audit rows (never the token). */
+  const asking = (request: FastifyRequest) => ({
+    asker: { actor: adminActor(request), token: requireAdmin(request).token },
+    meta: { ipHash: request.orbes.ipHash, userAgent: userAgentOf(request) },
+  });
 
   app.post('/api/admin/drops/:id/test-runs', { config: ADMIN }, async (request, reply) => {
     const { id } = parse(dropParams, request.params);
@@ -100,4 +121,31 @@ export const adminTestEntrantRoutes: FastifyPluginAsync<AdminRouteDeps> = async 
   });
 
   app.get('/api/admin/test-runs/active', async () => ({ run: await tests().active() }));
+
+  app.post('/api/admin/test-runs/:id/purge', { config: STEP_UP }, async (request, reply) => {
+    const { id } = parse(testRunParams, request.params);
+    const { phrase, totp } = parse(testRunPurgeBody, request.body);
+    const { asker, meta } = asking(request);
+    const { runId } = await ctx.services.testPurge.request(id, { phrase, totp }, asker, meta);
+    reply.code(202);
+    return { run: runJson(await tests().view(runId), readsClientEmails(request)) };
+  });
+
+  app.post('/api/admin/test-runs/purge-all', { config: STEP_UP }, async (request, reply) => {
+    const { phrase, totp } = parse(testRunPurgeAllBody, request.body);
+    const { asker, meta } = asking(request);
+    const out = await ctx.services.testPurge.requestAll({ phrase, totp }, asker, meta);
+    reply.code(202);
+    return out;
+  });
+
+  app.get('/api/admin/test-runs/ended', async () => ({ runs: await tests().ended() }));
+
+  // What the console's dialogs say before PURGE is pressed (lot PURGE, step PURGE.7): read only, nothing stored.
+  app.get('/api/admin/test-runs/:id/purge', { config: ADMIN }, async (request) => {
+    const { id } = parse(testRunParams, request.params);
+    return { preview: await ctx.services.testPurge.preview(id) };
+  });
+
+  app.get('/api/admin/test-runs/purge-all', { config: ADMIN }, async () => ({ preview: await ctx.services.testPurge.previewAll() }));
 };
