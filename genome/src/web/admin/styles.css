@@ -3853,6 +3853,11 @@ fieldset.cfield--checks > .cfield__label {
   margin-top: 8px;
 }
 
+/* What holds a purge now, inside its dialog: in the danger tone (.dialog__text, later in the file, would mute it). */
+.tests__purge-text.critical-text {
+  color: var(--critical);
+}
+
 /* The Ended tests page: when a test ended, on two lines rather than past a laptop's width. */
 .tests__when {
   display: inline-block;
@@ -3887,6 +3892,11 @@ fieldset.cfield--checks > .cfield__label {
 
 /* What holds a reset now, inside its dialog: in the danger tone. */
 .reset__text.critical-text {
+  color: var(--critical);
+}
+
+/* A LIVE room open under What goes, and a failing post-check's verdict: in the danger tone (.notice would mute it). */
+.notice.critical-text {
   color: var(--critical);
 }
 
