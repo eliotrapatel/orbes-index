@@ -136,7 +136,7 @@ describe('MarginSettingsService (lot M4 plan §1.2)', () => {
       .execute();
     await db
       .insertInto('tier_grants')
-      .values({ account_id: friend.id, kind: 'VAULT', vault_id: vault.id, usable_while_no_piece: true, amount_minor: 3000, currency: 'SEK', expires_at: new Date('2026-11-02T10:00:00.000Z') })
+      .values({ account_id: friend.id, kind: 'VAULT', vault_id: vault.id, usable_while_no_piece: true, amount_minor: 3000, currency: 'SEK', granted_at: new Date('2026-10-02T10:00:00.000Z'), expires_at: new Date('2026-11-02T10:00:00.000Z') })
       .execute();
     expect((await settings().read()).currenciesWithoutRate).toEqual(['CHF', 'DKK', 'NOK', 'SEK']);
     await settings().setRate('SEK', '0.087', admin);

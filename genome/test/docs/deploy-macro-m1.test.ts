@@ -230,7 +230,14 @@ describe('the runbook of lot MACRO M1 (docs/launch/DEPLOY-MACRO-M1.md)', () => {
     // Lot M2 changes the Caddyfile after M1 (its WORN upload, MACRO M2.8), told by its own runbook; M1's elements are these two.
     if (stack !== null) expect(stack.trim().split('\n').filter((l) => l !== 'M\tdeploy/vps/Caddyfile')).toEqual(['M\tdeploy/vps/.env.example', 'M\tdeploy/vps/compose.yaml']);
     const composeDiff = git(['diff', PROD_COMMIT, '--', 'deploy/vps/compose.yaml']);
-    if (composeDiff !== null) expect(composeDiff.split('\n').filter((l) => /^[-+][^-+]/.test(l))).toEqual(gained);
+    // Lot EXPORT SMART MODEL passes two more variables after M1, told by its own runbook (DEPLOY-SM-EXPORT.md): its four lines.
+    const smartModelExport = [
+      "+      # ORBES Smart Model's export (lot EXPORT SMART MODEL): empty = closed (404). The token's SHA-256 and",
+      "+      # the fingerprints' key go in .env on the server, never in chat (genome/.env.example).",
+      '+      SMART_MODEL_EXPORT_TOKEN_SHA256: ${SMART_MODEL_EXPORT_TOKEN_SHA256:-}',
+      '+      SMART_MODEL_EXPORT_KEY: ${SMART_MODEL_EXPORT_KEY:-}',
+    ];
+    if (composeDiff !== null) expect(composeDiff.split('\n').filter((l) => /^[-+][^-+]/.test(l) && !smartModelExport.includes(l))).toEqual(gained);
     // The server's .env keeps none of them: checked, never filled now.
     const prepare = section(runbook, '### 1.2');
     expect(fenced(prepare, 'bash')).toContain("grep -cE '^(EMAIL_|SMTP_)' .env");

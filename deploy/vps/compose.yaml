@@ -134,6 +134,10 @@ services:
       SMTP_SECURITY: ${SMTP_SECURITY:-}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # ORBES Smart Model's export (lot EXPORT SMART MODEL): empty = closed (404). The token's SHA-256 and
+      # the fingerprints' key go in .env on the server, never in chat (genome/.env.example).
+      SMART_MODEL_EXPORT_TOKEN_SHA256: ${SMART_MODEL_EXPORT_TOKEN_SHA256:-}
+      SMART_MODEL_EXPORT_KEY: ${SMART_MODEL_EXPORT_KEY:-}
       # Optional tunables (genome/.env.example); unset = the app's defaults.
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ADMIN_REQUIRE_MFA: ${ADMIN_REQUIRE_MFA:-}
