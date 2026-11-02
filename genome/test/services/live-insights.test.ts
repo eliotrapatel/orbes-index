@@ -770,6 +770,8 @@ describe('LiveInsightsService on a database', () => {
     const crowd = [await createAccount(t.db), await createAccount(t.db), await createAccount(t.db)];
     f.clock.set(new Date(opensAt.getTime() - MINUTE));
     await created(crowd[0]!.id, new Date(now().getTime() - 3 * HOUR));
+    // The other two are old accounts on the test's clock, whatever the real date (an insert writes the database's now()).
+    for (const a of crowd.slice(1)) await created(a.id, new Date('2026-01-01T09:00:00.000Z'));
     for (const [i, a] of crowd.entries()) await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor, { networkHash: liveNetworkHash(pepper, `203.0.113.${10 + i}`) });
     await f.live.enter(titane.id, r.id, { sizeId: r.sizes[0]!.id }, titane.actor, { networkHash: liveNetworkHash(pepper, '198.51.100.7') });
     const radar = await insights.bots(r.id);

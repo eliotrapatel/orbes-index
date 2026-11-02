@@ -97,6 +97,13 @@ export interface AppConfig {
    * never their values (redactConfig). Nothing is sent while the console's switch is off.
    */
   ads: AdsConfig;
+  /**
+   * ORBES Smart Model's export (lot EXPORT SMART MODEL; routes/export.ts): SMART_MODEL_EXPORT_TOKEN_SHA256, the SHA-256 of
+   * the token Smart Model sends (64 lower-case hex; the token itself is never on the server), and SMART_MODEL_EXPORT_KEY,
+   * the key of the customers' and orders' fingerprints (64 hex, made once, never changed). Both or neither: null (the
+   * default) closes GET /api/export/v1/smart-model (404). The log says whether they are set, never their values.
+   */
+  smartModelExport: { tokenSha256: string; key: string } | null;
 }
 
 /** Who the emails come from (EMAIL_FROM): an address, with the name the inbox shows when one is given. */
@@ -532,6 +539,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // The ad platforms' keys (K27 A5): a platform's keys go together; none leaves it not ready.
   const ads = parseAdsConfig(e, field, issues);
 
+  // ORBES Smart Model's export: the token's SHA-256 (64 lower-case hex) and the fingerprints' key (64 hex) go together;
+  // neither keeps it closed.
+  const zHex64 = (rule: 'lower-case hex' | 'hex') => z.string().regex(rule === 'hex' ? /^[0-9a-fA-F]{64}$/ : /^[0-9a-f]{64}$/, `must be 64 ${rule} characters`);
+  let smartModelExport: AppConfig['smartModelExport'] = null;
+  const smTokenSha256 = field('SMART_MODEL_EXPORT_TOKEN_SHA256', zHex64('lower-case hex'), e.SMART_MODEL_EXPORT_TOKEN_SHA256);
+  const smKey = field('SMART_MODEL_EXPORT_KEY', zHex64('hex'), e.SMART_MODEL_EXPORT_KEY);
+  if ((e.SMART_MODEL_EXPORT_TOKEN_SHA256 === undefined) !== (e.SMART_MODEL_EXPORT_KEY === undefined)) {
+    issues.push('SMART_MODEL_EXPORT_TOKEN_SHA256 / SMART_MODEL_EXPORT_KEY: set both or neither');
+  } else if (smTokenSha256 !== undefined && smKey !== undefined) {
+    smartModelExport = { tokenSha256: smTokenSha256, key: smKey.toLowerCase() };
+  }
+
   if (issues.length > 0) throw new ConfigError(issues);
 
   const config: AppConfig = {
@@ -558,6 +577,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     transferAcceptRequireProduct,
     email: email!,
     ads: ads!,
+    smartModelExport,
   };
 
   if (prod) {
@@ -713,6 +733,7 @@ export function redactConfig(c: AppConfig): Record<string, unknown> {
       tiktok: c.ads.tiktok ? '[set]' : undefined,
       google: c.ads.google ? '[set]' : undefined,
     },
+    smartModelExport: c.smartModelExport ? '[set]' : undefined,
   };
 }
 
