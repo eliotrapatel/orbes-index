@@ -41,6 +41,8 @@ import { consentRoutes } from './routes/consent.js';
 import { acquisitionRoutes } from './routes/acquisition.js';
 import { emailRoutes } from './routes/email.js';
 import { foundingRoutes } from './routes/founding.js';
+import { exportRoutes } from './routes/export.js';
+import { SmartModelExport } from './services/smart-model-export.js';
 import { SystemStatus } from './services/system-status.js';
 import { TestEntrantService } from './services/test-entrants.js';
 
@@ -71,6 +73,8 @@ declare module 'fastify' {
   interface FastifyInstance {
     /** The LIVE RELEASES' streams of this app (http/live-stream.ts). */
     liveHub: LiveHub;
+    /** ORBES Smart Model's export (routes/export.ts): null while its two variables are not set. */
+    smartModelExport: SmartModelExport | null;
   }
 }
 
@@ -189,6 +193,10 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   await app.register(clubRoutes, deps);
   await app.register(liveRoutes, { ...deps, hub: liveHub });
   await app.register(adminRoutes, { ...deps, requireMfa: requireAdminMfa });
+  // ORBES Smart Model's export (lot EXPORT SMART MODEL): read only, server to server, closed without its variables.
+  const smartModelExport = config.smartModelExport ? new SmartModelExport({ db: ctx.db, clock: ctx.clock, hmacKey: config.smartModelExport.key }) : null;
+  app.decorate('smartModelExport', smartModelExport);
+  await app.register(exportRoutes, { ...deps, exporter: smartModelExport });
 
   if (opts.serveStatic ?? true) await registerStatic(app, opts.staticDir ?? DEFAULT_STATIC_DIR);
 
